@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[lib]
+# criterion owns the bench flags; the auto libtest harness rejects them
+bench = false
+
 [dependencies]
 cereyan-core = { path = "../core" }
 rusqlite = { workspace = true }

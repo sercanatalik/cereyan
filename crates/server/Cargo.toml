@@ -6,6 +6,10 @@ license.workspace = true
 publish = false
 build = "build.rs"
 
+[lib]
+# criterion owns the bench flags; the auto libtest harness rejects them
+bench = false
+
 [dependencies]
 cereyan-core = { path = "../core", features = ["openapi"] }
 cereyan-store = { path = "../store", features = ["openapi"] }

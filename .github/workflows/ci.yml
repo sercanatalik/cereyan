@@ -185,7 +185,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Criterion benchmarks
-        run: cargo bench --workspace -- --noplot --warm-up-time 1 --measurement-time 3
+        run: cargo bench --workspace -- --warm-up-time 1 --measurement-time 3
       - name: Build release extension
         run: |
           uv sync

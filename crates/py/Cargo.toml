@@ -6,6 +6,8 @@ license.workspace = true
 publish = false
 
 [lib]
+# criterion owns the bench flags; the auto libtest harness rejects them
+bench = false
 name = "_core"
 crate-type = ["cdylib"]
 

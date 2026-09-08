@@ -62,7 +62,7 @@ docs-serve:
 
 # Run the criterion benchmarks and the end-to-end benchmark against the baseline
 bench:
-    cargo bench --workspace -- --noplot
+    cargo bench --workspace
     cargo test --workspace -- --ignored
     uv run pytest -q -m performance
     uv run python benches/e2e.py
