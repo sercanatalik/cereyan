@@ -251,18 +251,22 @@ def test_clock_armed_rule_fires_only_when_window_is_empty(pro):
     assert row["at"]["cron"] == "*/2 * * * * *" and row["within"] == 3
     # Keep `quick` completing inside every 3 s window for a while: no lapse.
     t0 = time.time()
-    last, widest_gap = t0, 0.0
     while time.time() - t0 < 4.5:
         pro.wait_run(start(pro, "quick")["id"])
-        now = time.time()
-        widest_gap, last = max(widest_gap, now - last), now
         time.sleep(0.5)
-    # Only assert what the loop actually established. Starting a run and waiting
-    # for it can outlast `within` on a loaded machine, and once the window has
-    # emptied the rule is right to fire — asserting it did not would be asserting
-    # that the machine kept up, which is not what this test is about.
-    if widest_gap < row["within"]:
-        assert "heartbeat" not in lines(pro), f"fired despite a {widest_gap:.1f}s widest gap"
+    # Only assert what actually held, judged by the clock the rule uses. `wait_run`
+    # returning says the run reached a terminal state; the rule reads `run.completed`
+    # events, written and processed after that. And the window starts empty: it is
+    # open from the moment the server armed the rule until the first completion, so
+    # a slow startup can empty it before the loop is even relevant. Take every
+    # interval the rule saw, that one included.
+    done = sorted(e["occurred"] for e in pro.client.events(kind="run.completed", limit=500))
+    marks = [pro.info["started_at"], *done]
+    widest_gap = max((b - a for a, b in zip(marks, marks[1:])), default=0) / 1_000_000
+    if done and widest_gap < row["within"]:
+        assert "heartbeat" not in lines(pro), (
+            f"fired despite no interval wider than {widest_gap:.1f}s, within={row['within']}s"
+        )
     # Then stop producing: the next tick after the window empties fires.
     wait_for(lambda: "heartbeat" in lines(pro), timeout=8)
 
