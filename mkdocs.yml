@@ -3,7 +3,7 @@ site_description: Minimal, local-first orchestrator for Python data pipelines
 site_url: https://sercanatalik.github.io/cereyan/
 repo_url: https://github.com/sercanatalik/cereyan
 repo_name: sercanatalik/cereyan
-edit_uri: edit/master/docs/
+edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
 strict: true

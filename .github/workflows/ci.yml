@@ -73,12 +73,8 @@ jobs:
     name: Docs
     needs: ui
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: ui-dist
@@ -101,12 +97,26 @@ jobs:
           uv run python scripts/gen_http_reference.py --check
           uv run python scripts/gen_mcp_reference.py --check
           uv run python scripts/gen_examples.py --check
-      - name: Publish to GitHub Pages
+      - name: Upload the site as a Pages artifact
         if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          uv run --group docs mkdocs gh-deploy --force --no-history
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy-docs:
+    name: Deploy the documentation site
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: docs
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write      # publish to the Pages site
+      id-token: write   # the deployment's OIDC verification
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
 
   wheels:
     name: Wheel (${{ matrix.platform.target }} on ${{ matrix.platform.os }})
@@ -238,7 +248,7 @@ jobs:
   publish:
     name: Publish to PyPI
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [test, smoke, sdist]
+    needs: [test, smoke, sdist, deploy-docs]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

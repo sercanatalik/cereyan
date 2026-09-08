@@ -2,7 +2,7 @@
 
 A scheduled daily flow whose reruns and backfills are idempotent through targets.
 
-Source: [`examples/daily_etl.py`](https://github.com/sercanatalik/cereyan/blob/master/examples/daily_etl.py). Run it with `python examples/daily_etl.py` (no server needed).
+Source: [`examples/daily_etl.py`](https://github.com/sercanatalik/cereyan/blob/main/examples/daily_etl.py). Run it with `python examples/daily_etl.py` (no server needed).
 
 A daily flow: extract a day's data, write it to a file, and never do the same day
 twice. The target on `build` makes reruns skip finished days, `bulk_complete` lets a

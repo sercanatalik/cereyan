@@ -2,7 +2,7 @@
 
 Start a failing run through the MCP endpoint and ask the server to explain it, the way an agent would.
 
-Source: [`examples/agent_diagnosis.py`](https://github.com/sercanatalik/cereyan/blob/master/examples/agent_diagnosis.py). Run it with `python examples/agent_diagnosis.py` while `cereyan serve examples/` is running.
+Source: [`examples/agent_diagnosis.py`](https://github.com/sercanatalik/cereyan/blob/main/examples/agent_diagnosis.py). Run it with `python examples/agent_diagnosis.py` while `cereyan serve examples/` is running.
 
 The server's MCP endpoint gives an agent a curated set of tools. This script does
 what an agent host does over Streamable HTTP: initialise a session, start a run

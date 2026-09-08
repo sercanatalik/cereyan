@@ -2,7 +2,7 @@
 
 A custom HTTP route that receives an order and starts a flow for it.
 
-Source: [`examples/webhook_route.py`](https://github.com/sercanatalik/cereyan/blob/master/examples/webhook_route.py). Run it with `python examples/webhook_route.py` while `cereyan serve examples/` is running.
+Source: [`examples/webhook_route.py`](https://github.com/sercanatalik/cereyan/blob/main/examples/webhook_route.py). Run it with `python examples/webhook_route.py` while `cereyan serve examples/` is running.
 
 Custom routes are plain functions registered on an App and served next to the
 API. Path and query parameters bind by name and are coerced through the type

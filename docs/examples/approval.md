@@ -2,7 +2,7 @@
 
 A flow that pauses for a human decision and resumes with the answer.
 
-Source: [`examples/approval.py`](https://github.com/sercanatalik/cereyan/blob/master/examples/approval.py). Run it with `python examples/approval.py` while `cereyan serve examples/` is running.
+Source: [`examples/approval.py`](https://github.com/sercanatalik/cereyan/blob/main/examples/approval.py). Run it with `python examples/approval.py` while `cereyan serve examples/` is running.
 
 `wait_for_input` parks the run in `Paused` with a question. The engine is released
 while the run waits; answering through the UI, the API, the client, or the MCP

@@ -1,5 +1,10 @@
 # Cereyan
 
+[![PyPI](https://img.shields.io/pypi/v/cereyan.svg)](https://pypi.org/project/cereyan/)
+[![CI](https://github.com/sercanatalik/cereyan/actions/workflows/ci.yml/badge.svg)](https://github.com/sercanatalik/cereyan/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/pypi/pyversions/cereyan.svg)](https://pypi.org/project/cereyan/)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sercanatalik/cereyan/blob/main/LICENSE)
+
 Cereyan is a minimal, local-first orchestrator for Python data pipelines. A Rust core (SQLite store, state machine, scheduler, HTTP server) sits behind a thin layer of Python decorators, and the whole thing ships as one wheel with no runtime dependencies. Decorate functions as flows and tasks, run them as plain scripts, and every run is recorded locally; `cereyan serve` adds live monitoring, schedules, retries, backfills, rules, and a built-in MCP server for agents on top of the same store.
 
 ```bash

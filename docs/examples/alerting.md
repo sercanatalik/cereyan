@@ -2,7 +2,7 @@
 
 A custom event, a code rule that reacts to it, and a proactive rule for a run that overruns.
 
-Source: [`examples/alerting.py`](https://github.com/sercanatalik/cereyan/blob/master/examples/alerting.py). Run it with `python examples/alerting.py` while `cereyan serve examples/` is running.
+Source: [`examples/alerting.py`](https://github.com/sercanatalik/cereyan/blob/main/examples/alerting.py). Run it with `python examples/alerting.py` while `cereyan serve examples/` is running.
 
 Rules turn events into actions. This module declares a flow that emits a custom
 event when a table looks empty, a code rule that reacts to that event, and a

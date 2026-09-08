@@ -23,7 +23,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXAMPLES = os.path.join(ROOT, "examples")
 OUT_DIR = os.path.join(ROOT, "docs", "examples")
-REPO = "https://github.com/sercanatalik/cereyan/blob/master/examples/"
+REPO = "https://github.com/sercanatalik/cereyan/blob/main/examples/"
 
 
 def parse(path: str) -> tuple[dict[str, str], list[tuple[str, str]]]:

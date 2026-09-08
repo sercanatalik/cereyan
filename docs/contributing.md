@@ -68,12 +68,36 @@ just docs
 
 1. `just lint` and `just test` are green on the release commit.
 2. `just bench` shows no target regressing more than 20 percent against `benches/baseline.<platform>.json` (`just bench-baseline` writes it for the current platform); update the baseline in the same change when a regression is intentional.
-3. Bump the version in `pyproject.toml`, `Cargo.toml` (workspace), `python/cereyan/__init__.py`, and `ui/package.json`; add a `CHANGELOG.md` entry. `test_the_four_version_strings_agree` fails when one of them is missed.
-4. CI builds the UI, then wheels for macOS arm64 and x86_64, Linux x86_64 and aarch64 (manylinux 2.28), and Windows x86_64, plus the sdist.
-5. The smoke stage installs each wheel into a fresh virtual environment on its platform and runs `scripts/smoke.sh`: import, offline run, `cereyan runs ls`.
-6. Tag the release. The `publish` job uploads the wheels and the sdist to PyPI, and the docs job deploys this site to GitHub Pages from the tag.
+3. Bump the version in `pyproject.toml`, `Cargo.toml` (workspace), `python/cereyan/__init__.py`, and `ui/package.json`, and regenerate `Cargo.lock`. One version, four files: `test_the_four_version_strings_agree` fails when one of them is missed. The version is also in the OpenAPI document's `info` block, so refresh the snapshot and the reference page it feeds:
 
-Publishing uses [trusted publishing](https://docs.pypi.org/trusted-publishers/): PyPI holds a publisher for this repository, workflow `ci.yml`, environment `pypi`, and CI mints a short-lived token for it, so no API token is stored in the repository. Set the publisher up on PyPI once before the first tagged release, and create the `pypi` environment in the repository settings. Nothing else in CI needs credentials.
+    ```bash
+    CEREYAN_UPDATE_SNAPSHOTS=1 uv run pytest tests/test_server_api.py -k openapi
+    just service-sync
+    just docs
+    ```
+4. Move the `CHANGELOG.md` entries under a heading for the new version. Every change to the Python API, the HTTP API, the CLI, the MCP surface, the UI, or the behaviour of a running server needs an entry, and an entry that removes or reverses documented behaviour says what a reader relying on it must do.
+5. CI builds the UI, then wheels for macOS arm64 and x86_64, Linux x86_64 and aarch64 (manylinux 2.28), and Windows x86_64, plus the sdist.
+6. The smoke stage installs each wheel into a fresh virtual environment on its platform and runs `scripts/smoke.sh`: import, offline run, `cereyan runs ls`.
+7. Tag the release as `v<version>`. The `docs` job uploads the built site as a Pages artifact, `deploy-docs` publishes it, and only then does `publish` upload the wheels and the sdist to PyPI — so the package page never goes live linking to a site that does not yet exist.
+
+### One-time setup
+
+Two things live in GitHub rather than in the repository, and a fork or a restored repository needs both before its first tagged release.
+
+**GitHub Pages.** The site is deployed from a build artifact, not from a `gh-pages` branch, so Pages must be set to the workflow build type. This works on a repository that has never deployed anything:
+
+```bash
+gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow
+```
+
+The `github-pages` environment GitHub creates alongside it allows deployments only from the default branch, which would reject every tag-triggered deploy. Add a tag policy:
+
+```bash
+gh api -X POST repos/<owner>/<repo>/environments/github-pages/deployment-branch-policies \
+  -f name='v*' -f type=tag
+```
+
+**PyPI.** Publishing uses [trusted publishing](https://docs.pypi.org/trusted-publishers/): PyPI holds a publisher for this repository, workflow `ci.yml`, environment `pypi`, and CI mints a short-lived token for it, so no API token is stored in the repository. Set the publisher up on PyPI and create the `pypi` environment in the repository settings. Nothing else in CI needs credentials.
 
 ## License
 

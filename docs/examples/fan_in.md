@@ -2,7 +2,7 @@
 
 A report that runs once per day after both of its upstream flows finished that day.
 
-Source: [`examples/fan_in.py`](https://github.com/sercanatalik/cereyan/blob/master/examples/fan_in.py). Run it with `python examples/fan_in.py` (no server needed).
+Source: [`examples/fan_in.py`](https://github.com/sercanatalik/cereyan/blob/main/examples/fan_in.py). Run it with `python examples/fan_in.py` (no server needed).
 
 Two independent loads and a report that needs both. With `after=[...]` and
 `batch_key="day"`, the server creates one `report` run per day as soon as the last

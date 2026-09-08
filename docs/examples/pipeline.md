@@ -2,7 +2,7 @@
 
 Three tasks and one flow, run offline as a plain script.
 
-Source: [`examples/pipeline.py`](https://github.com/sercanatalik/cereyan/blob/master/examples/pipeline.py). Run it with `python examples/pipeline.py` (no server needed).
+Source: [`examples/pipeline.py`](https://github.com/sercanatalik/cereyan/blob/main/examples/pipeline.py). Run it with `python examples/pipeline.py` (no server needed).
 
 The smallest useful pipeline. Run it with `python examples/pipeline.py` and a run
 is recorded in the runtime home; run it while `cereyan serve examples/` is up and
