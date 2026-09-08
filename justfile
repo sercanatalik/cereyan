@@ -17,10 +17,10 @@ ui:
 service-sync:
     cd ui && npm run service-sync -- --from openapi.snapshot.json
 
-# Run Rust, Python, documentation, and UI tests
+# Run Rust, Python, documentation, and UI tests (wall-clock ceilings live in `just bench`)
 test:
     cargo test --workspace
-    uv run pytest -q
+    uv run pytest -q -m "not performance"
     just docs-test
     cd ui && npx vitest run
 
@@ -62,6 +62,8 @@ docs-serve:
 # Run the criterion benchmarks and the end-to-end benchmark against the baseline
 bench:
     cargo bench --workspace -- --noplot
+    cargo test --workspace -- --ignored
+    uv run pytest -q -m performance
     uv run python benches/e2e.py
 
 # Refresh benches/baseline.<platform>.json after an intentional performance change

@@ -222,6 +222,13 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--update-baseline", action="store_true")
     ap.add_argument("--quick", action="store_true", help="seed 100k runs instead of 1M")
+    ap.add_argument(
+        "--no-ceilings",
+        action="store_true",
+        help="report absolute target misses without failing; regressions against a "
+        "baseline for this platform still fail. For shared CI runners, whose speed the "
+        "ceilings were never calibrated for",
+    )
     args = ap.parse_args()
     results = bench(args.quick)
     baseline = json.load(open(BASELINE)) if os.path.exists(BASELINE) else {}
@@ -235,12 +242,12 @@ def main() -> int:
         ceiling = FLOORS.get(name) or TARGETS_MS.get(name)
         status = "ok"
         if ceiling is not None and ((higher_better and value < ceiling) or (not higher_better and value > ceiling)):
-            status = "MISSES TARGET"
+            status = "misses target" if args.no_ceilings else "MISSES TARGET"
         if base is not None:
             regressed = (value < base * 0.8) if higher_better else (value > base * 1.2)
             if regressed:
                 status = "REGRESSED >20%"
-        if status != "ok":
+        if status not in ("ok", "misses target"):
             failed.append(name)
         unit = "/s" if higher_better else " ms"
         print(f"{name:28} {value:14.2f}{unit:>0} {base if base is not None else float('nan'):14.2f} {ceiling if ceiling is not None else float('nan'):10.1f}  {status}")

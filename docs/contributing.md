@@ -17,14 +17,14 @@ just dev     # uv sync and maturin develop: builds the extension in place
 
 | Command | Does |
 |---|---|
-| `just test` | Rust tests, Python tests, documentation tests, UI tests |
+| `just test` | Rust tests, Python tests, documentation tests, UI tests. Correctness only: tests that assert a wall-clock ceiling are marked `#[ignore]` or `@pytest.mark.performance` and run in `just bench` instead, because a ceiling calibrated on a developer machine fails on a shared CI runner and says nothing about correctness |
 | `just lint` | rustfmt and clippy, Python compile check, docstring check, generated-page checks, UI lint and client drift check |
 | `just docs` | Regenerate the reference pages and example pages, check docstrings, build the site into `site/` in strict mode, print the tested-block summary |
 | `just docs-serve` | Serve the docs locally with live reload |
 | `just docs-test` | Execute every Python block under `docs/` and every file under `examples/` |
 | `just demo` | Serve `examples/` on a temporary home at http://127.0.0.1:4200 |
 | `just service-sync` | Regenerate the UI's typed client from `ui/openapi.snapshot.json` |
-| `just bench` | Criterion benchmarks and the end-to-end benchmark against the checked-in baseline |
+| `just bench` | Criterion benchmarks, the wall-clock tests `just test` skips, and the end-to-end benchmark against the checked-in baseline |
 | `just soak` | The one-hour overlap soak: fifteen scheduled flows whose runs outlast their interval, checked against the overlap invariants at the end. `just soak --quick` takes twelve minutes; `--keep` leaves the UI up. Not a regression gate and not on the default CI path |
 | `just build` | Build a release wheel into `dist/` |
 
@@ -67,7 +67,7 @@ just docs
 ## Release checklist
 
 1. `just lint` and `just test` are green on the release commit.
-2. `just bench` shows no target regressing more than 20 percent against `benches/baseline.<platform>.json` (`just bench-baseline` writes it for the current platform); update the baseline in the same change when a regression is intentional.
+2. `just bench` shows no target regressing more than 20 percent against `benches/baseline.<platform>.json` (`just bench-baseline` writes it for the current platform); update the baseline in the same change when a regression is intentional. Run this on calibrated hardware: CI's benchmark job passes `--no-ceilings`, because a shared runner has no baseline and cannot meet absolute targets, so it reports rather than gates.
 3. Bump the version in `pyproject.toml`, `Cargo.toml` (workspace), `python/cereyan/__init__.py`, and `ui/package.json`, and regenerate `Cargo.lock`. One version, four files: `test_the_four_version_strings_agree` fails when one of them is missed. The version is also in the OpenAPI document's `info` block, so refresh the snapshot and the reference page it feeds:
 
     ```bash
