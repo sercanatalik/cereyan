@@ -35,6 +35,7 @@ lint:
     uv run python -m compileall -q python tests scripts
     uv run python scripts/check_docstrings.py
     uv run --with pyyaml python scripts/check_workflows.py
+    uv run python scripts/check_test_process_calls.py
     uv run python scripts/gen_cli_reference.py --check
     uv run python scripts/gen_http_reference.py --check
     uv run python scripts/gen_mcp_reference.py --check

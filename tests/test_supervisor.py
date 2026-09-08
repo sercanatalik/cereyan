@@ -1,10 +1,9 @@
 import os
-import signal
 import subprocess
 import sys
 import time
 
-from server_helpers import ServerProcess, free_port
+from server_helpers import ServerProcess, free_port, is_alive, kill
 
 
 def flow_id(server, name):
@@ -24,7 +23,7 @@ def test_cooperative_cancel(server):
     done = server.wait_run(run["id"])
     assert done["state"]["type"] == "Cancelled"
     assert time.time() - t0 < 8
-    os.kill(pid, 0)  # engine is still alive: cancelled cooperatively, no signal sent
+    assert is_alive(pid)  # cancelled cooperatively, no signal sent
     # The engine can take another run afterwards.
     again = start(server, "pid_flow")
     assert server.wait_run(again["id"])["state"]["type"] == "Completed"
@@ -62,12 +61,7 @@ def test_stuck_process_is_terminated_then_killed(isolated_home, project_dir):
         assert done["state"]["type"] == "Cancelled"
         assert done["state"]["message"] == "killed"
         time.sleep(0.5)
-        try:
-            os.kill(pid, 0)
-            alive = True
-        except OSError:
-            alive = False
-        assert not alive
+        assert not is_alive(pid)
     finally:
         srv.stop()
 
@@ -75,7 +69,7 @@ def test_stuck_process_is_terminated_then_killed(isolated_home, project_dir):
 def test_killed_engine_marks_run_crashed(server):
     run = start(server, "sleepy", seconds=30)
     running = server.wait_run(run["id"], until=lambda r: r["state"]["type"] == "Running")
-    os.kill(running["engine_pid"], signal.SIGKILL)
+    kill(running["engine_pid"])
     done = server.wait_run(run["id"], timeout=20)
     assert done["state"]["type"] == "Crashed"
     assert done["state"]["message"] == "engine process exited unexpectedly"
@@ -92,7 +86,7 @@ def test_engine_outlives_server_restart(isolated_home, project_dir):
     running = srv.wait_run(run["id"], until=lambda r: r["state"]["type"] == "Running")
     pid = running["engine_pid"]
     assert srv.stop(kill_engines=False) == 0
-    os.kill(pid, 0)
+    assert is_alive(pid)
     srv2 = ServerProcess(str(isolated_home), str(project_dir), port=port)
     try:
         adopted = srv2.client.get_run(run["id"])
@@ -113,7 +107,7 @@ def test_dead_engine_after_restart_is_crashed(isolated_home, project_dir):
     running = srv.wait_run(run["id"], until=lambda r: r["state"]["type"] == "Running")
     # Stop the server first so it cannot observe the engine dying.
     assert srv.stop(kill_engines=False) == 0
-    os.kill(running["engine_pid"], signal.SIGKILL)
+    kill(running["engine_pid"])
     time.sleep(0.5)
     srv2 = ServerProcess(str(isolated_home), str(project_dir), port=port)
     try:
@@ -255,7 +249,7 @@ def test_engine_inherits_home_from_server_flag(tmp_path, project_dir):
             time.sleep(0.05)
         assert r["state"]["type"] == "Completed", r
         for e in c.server()["engines"]:
-            os.kill(e["pid"], signal.SIGKILL)
+            kill(e["pid"])
     finally:
         proc.terminate()
         proc.wait(timeout=15)

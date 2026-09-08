@@ -3,7 +3,6 @@ dependencies, and the run graph through a real server."""
 
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -12,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from cereyan.client import ApiError
-from server_helpers import ServerProcess, free_port
+from server_helpers import ServerProcess, free_port, kill
 
 SCHED_PIPELINE = '''
 import os, time
@@ -484,7 +483,7 @@ def test_flow_resources_wait_and_release_on_crash(sched):
     waiter = start(sched, "gpu", seconds=0.1)
     w = sched.wait_run(waiter["id"], timeout=10, until=lambda r: r["state"]["name"] == "AwaitingResource")
     assert "gpu" in w["state"]["message"]
-    os.kill(c.get_run(holder["id"])["engine_pid"], signal.SIGKILL)
+    kill(c.get_run(holder["id"])["engine_pid"])
     done = sched.wait_run(waiter["id"], timeout=30)
     assert done["state"]["type"] == "Completed"
     settings = c.settings()

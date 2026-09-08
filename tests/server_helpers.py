@@ -13,6 +13,96 @@ import urllib.request
 
 from cereyan.client import Client
 
+WINDOWS = sys.platform == "win32"
+
+# Process control, in one place, because the platforms differ in ways that bite.
+#
+# On Windows `os.kill` understands only CTRL_C_EVENT and CTRL_BREAK_EVENT; every
+# other value, zero included, terminates the target through TerminateProcess. So
+# the usual `os.kill(pid, 0)` liveness probe does not ask whether a process is
+# alive there, it makes sure it is not. Liveness goes through OpenProcess instead.
+#
+# `Popen.send_signal(SIGTERM)` is the matching trap: on Windows it is a hard kill,
+# so a server stopped that way never runs its shutdown path, and a test asserting
+# graceful shutdown fails on the harness rather than on the code it is testing.
+
+if WINDOWS:  # pragma: no cover - exercised on Windows CI
+    import ctypes
+    from ctypes import wintypes
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    _STILL_ACTIVE = 259
+
+    def is_alive(pid: int) -> bool:
+        """True while the process exists, without touching it."""
+        handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return False
+        try:
+            code = wintypes.DWORD()
+            if not _kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == _STILL_ACTIVE
+        finally:
+            _kernel32.CloseHandle(handle)
+
+    def terminate(pid: int) -> None:
+        """Ask the process to stop; Windows has no SIGTERM, so this is a hard stop."""
+        kill(pid)
+
+    def kill(pid: int) -> None:
+        if not is_alive(pid):
+            return
+        subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, check=False)
+
+else:
+
+    def is_alive(pid: int) -> bool:
+        """True while the process exists, without touching it."""
+        try:
+            os.kill(int(pid), 0)
+        except OSError:
+            return False
+        return True
+
+    def terminate(pid: int) -> None:
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except OSError:
+            pass
+
+    def kill(pid: int) -> None:
+        try:
+            os.kill(int(pid), signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def stop_server(proc: subprocess.Popen, timeout: float = 40.0) -> int:
+    """Ask a serve subprocess to shut down cooperatively, then force it.
+
+    The cooperative step matters: the server removes its discovery file, flushes
+    the store and ends idle engines on the way out, and tests assert all three.
+    On Windows only CTRL_BREAK_EVENT reaches a child cooperatively, and only when
+    it was created in its own process group.
+    """
+    if proc.poll() is not None:
+        return proc.returncode
+    try:
+        if WINDOWS:  # pragma: no cover - exercised on Windows CI
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            proc.send_signal(signal.SIGTERM)
+    except (OSError, ValueError):
+        proc.kill()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    return proc.returncode
+
 PIPELINE = '''
 import logging, os, signal, sys, time
 from datetime import date
@@ -152,6 +242,9 @@ class ServerProcess:
             env=full_env,
             stdout=self.log,
             stderr=subprocess.STDOUT,
+            # Windows: its own group, so CTRL_BREAK_EVENT reaches the server and
+            # stops there instead of travelling back up and interrupting pytest.
+            **({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {}),
         )
         self.info = self._wait_ready()
         self.client = Client(self.info["url"])
@@ -177,9 +270,8 @@ class ServerProcess:
     @staticmethod
     def _alive(info: dict) -> bool:
         try:
-            os.kill(int(info.get("pid", 0)), 0)
-            return True
-        except OSError:
+            return is_alive(int(info.get("pid", 0)))
+        except (OSError, TypeError, ValueError):
             return False
 
     def read_log(self) -> str:
@@ -197,18 +289,9 @@ class ServerProcess:
 
     def stop(self, kill_engines: bool = True, timeout: float = 40.0) -> int:
         pids = self.engine_pids() if kill_engines else []
-        if self.proc.poll() is None:
-            self.proc.send_signal(signal.SIGTERM)
-            try:
-                self.proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-                self.proc.wait()
+        stop_server(self.proc, timeout=timeout)
         for pid in pids:
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
+            kill(pid)
         self.log.close()
         return self.proc.returncode
 
@@ -229,6 +312,6 @@ def kill_engines_of(client: Client) -> None:
     try:
         for e in client.server()["engines"]:
             if e.get("pid"):
-                os.kill(e["pid"], signal.SIGKILL)
+                kill(e["pid"])
     except Exception:
         pass

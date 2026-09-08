@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import time
 
 import pytest
 
-from server_helpers import ServerProcess
+from server_helpers import ServerProcess, is_alive, kill
 
 PIPELINE = '''
 from cereyan import App, task
@@ -25,22 +24,15 @@ def work():
 '''
 
 
-def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
-
 
 def _gone(pids: list[int], timeout: float = 5.0) -> list[int]:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        left = [p for p in pids if _alive(p)]
+        left = [p for p in pids if is_alive(p)]
         if not left:
             return []
         time.sleep(0.1)
-    return [p for p in pids if _alive(p)]
+    return [p for p in pids if is_alive(p)]
 
 
 @pytest.fixture
@@ -58,10 +50,7 @@ def served(isolated_home, tmp_path):
     yield srv
     # The test stops the server itself; clean up anything it left behind.
     for pid in srv.engine_pids() if srv.proc.poll() is None else []:
-        try:
-            os.kill(pid, 9)
-        except OSError:
-            pass
+        kill(pid)
     if srv.proc.poll() is None:
         srv.stop()
 

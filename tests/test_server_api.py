@@ -1,12 +1,11 @@
 import json
 import os
-import signal
 import time
 
 import pytest
 
 from cereyan.client import ApiError
-from server_helpers import ServerProcess, free_port
+from server_helpers import ServerProcess, free_port, is_alive, kill
 
 
 def flow_id(server, name="etl"):
@@ -197,19 +196,11 @@ def test_clean_shutdown_ends_idle_engines_and_keeps_busy_ones(server):
     assert not os.path.exists(os.path.join(server.home, "server.json"))
 
     deadline = time.time() + 5
-    while time.time() < deadline and _pid_alive(idle_pid):
+    while time.time() < deadline and is_alive(idle_pid):
         time.sleep(0.1)
-    assert not _pid_alive(idle_pid), "an idle engine outlived the server"
-    os.kill(busy_pid, 0)  # executing a run: left alone so a restart can adopt it
-    os.kill(busy_pid, signal.SIGKILL)
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
+    assert not is_alive(idle_pid), "an idle engine outlived the server"
+    assert is_alive(busy_pid), "an engine executing a run was signalled"  # restart adoption needs it
+    kill(busy_pid)
 
 
 def test_host_port_precedence(isolated_home, project_dir):
