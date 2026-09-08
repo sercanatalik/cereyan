@@ -289,6 +289,10 @@ impl Server {
                         shutdown_rx.clone(),
                     ));
                     let mut rx = shutdown_rx.clone();
+                    // Unix only: `bind_unix_socket` refuses on other platforms, so
+                    // `socket_listener` is always None there and this serve path would
+                    // not typecheck against its `()` placeholder listener.
+                    #[cfg(unix)]
                     let socket_task = socket_listener.map(|unix| {
                         let trusted = router
                             .clone()
@@ -304,6 +308,11 @@ impl Server {
                             }
                         })
                     });
+                    #[cfg(not(unix))]
+                    let socket_task: Option<tokio::task::JoinHandle<()>> = {
+                        let _ = &socket_listener;
+                        None
+                    };
                     let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
                         let _ = rx.wait_for(|v| *v).await;
                     });

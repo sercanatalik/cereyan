@@ -223,8 +223,8 @@ impl Schedule {
                     }
                     let elapsed_days =
                         (after_local.date_naive() - local_anchor.date_naive()).num_days();
-                    let mut steps = (elapsed_days / days).max(0);
-                    for _ in 0..4 {
+                    let first = (elapsed_days / days).max(0);
+                    for steps in (first..).take(4) {
                         let date = local_anchor.date_naive() + Duration::days(steps * days);
                         let naive = date.and_time(local_anchor.time());
                         candidate = tz
@@ -234,7 +234,6 @@ impl Schedule {
                         if candidate > after_local {
                             return Ok(Some(candidate.with_timezone(&Utc)));
                         }
-                        steps += 1;
                     }
                     Ok(Some(candidate.with_timezone(&Utc)))
                 }

@@ -2,8 +2,8 @@
 
 ## 1.4.0 (2026-09-08)
 
+- Windows: `cereyan-server` now compiles. The Unix socket listener's serve path was never excluded on platforms without Unix sockets, so the crate failed to build and the Windows wheel and test job have been broken since the socket landed in 1.1. Windows had no working wheel for 1.1, 1.2, or 1.3 despite being listed as a supported platform.
 - Engines now end with the server. A graceful stop answers every waiting engine with an instruction to exit and signals any that were idle between requests, so `cereyan serve` leaves no engine child behind; an engine executing a run is deliberately left alone, so a restarted server still adopts its run. An engine that loses its server without being told to stop — a kill, a crash — exits by itself after thirty seconds of failing to reach it. **This reverses a documented guarantee:** the server previously exited without terminating any engine process, so anything that relied on the warm pool outliving a graceful stop or restart now sees a cold pool instead.
-
 - Removed `exit_code` from runs. The field was in the `Run` model, the OpenAPI and MCP surfaces, and the run page, but nothing ever wrote it, so it was always null; the store's `set_run_exit` write path had no callers. Clients reading `run.exit_code` should drop it. The SQLite column stays, unread, because migrations are append-only.
 - Packaging: the wheel and sdist now carry `LICENSE` and `NOTICE`, project URLs, keywords, an author, and a fuller classifier set, so the PyPI page renders its links, licence, and images. Tagging a release now publishes to PyPI from CI through trusted publishing, which the release checklist already promised.
 
