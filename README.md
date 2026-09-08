@@ -61,6 +61,16 @@ The site is at https://sercanatalik.github.io/cereyan/ (built from `docs/` with 
 
 Rust stable, Python 3.11 or newer with uv, Node 22, and just. `just ui` builds the UI, `just dev` builds the extension in place, `just test` and `just lint` run everything, `just demo` serves the examples. Details, the repository layout, and the release checklist are in the [contributing guide](https://sercanatalik.github.io/cereyan/contributing/). Design decisions and the phased roadmap live in `roadmap.md`.
 
+## Credits
+
+Cereyan owes its shape to two projects that came first.
+
+[**Luigi**](https://github.com/spotify/luigi) contributed the idea the data-pipeline semantics rest on: a task declares the target it produces, and work is skipped when that target already exists. `Target` and `LocalTarget` keep Luigi's names because they are Luigi's concept, and idempotent reruns and backfills follow from it.
+
+[**Prefect**](https://github.com/PrefectHQ/prefect) contributed the authoring model — flows and tasks as decorated functions, runs carrying explicit states, a server watching them — and the look of the UI. Six UI components were adapted from Prefect's, rewritten in React from the Vue originals; they are marked in `ui/src/components/ported/` and listed in `NOTICE`, and remain under the Apache License 2.0 of their origin.
+
+Neither is a dependency, and cereyan deliberately does far less than either: one machine, one process, one wheel, no remote workers and no database to run. If you need what they do, use them. [Migrating from Prefect or Luigi](https://sercanatalik.github.io/cereyan/guides/migrate/) says what carries over and what does not.
+
 ## License
 
-MIT, see `LICENSE`. The UI components adapted from Prefect are listed in `NOTICE` and remain under the Apache License 2.0 of their origin.
+MIT, see `LICENSE`.
