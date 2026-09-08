@@ -567,6 +567,15 @@ impl Supervisor {
             // hit by a terminal Ctrl-C aimed at the server.
             cmd.process_group(0);
         }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // The same intent on Windows, where a console control event otherwise
+            // reaches every process sharing the server's group — including the
+            // engine executing a run, which Restart adoption needs to outlive it.
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        }
         cmd.spawn()
     }
 
