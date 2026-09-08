@@ -194,7 +194,7 @@ jobs:
         run: |
           cargo test --workspace -- --ignored --skip at_1m
           uv run pytest -q -m performance
-      - name: End-to-end targets (advisory here: no checked-in baseline for a shared runner)
+      - name: "End-to-end targets (advisory here; no checked-in baseline for a shared runner)"
         run: uv run python benches/e2e.py --quick --no-ceilings
 
   soak:
