@@ -111,7 +111,10 @@ def test_default_home_under_user_home(run_cli, write_module, tmp_path):
     fake_user_home = tmp_path / "user"
     fake_user_home.mkdir()
     env = dict(os.environ)
+    # `dirs::home_dir()` reads HOME on Unix and USERPROFILE on Windows, so faking
+    # the user's home needs whichever the platform actually consults.
     env["HOME"] = str(fake_user_home)
+    env["USERPROFILE"] = str(fake_user_home)
     env.pop("CEREYAN_HOME", None)
     import subprocess, sys
 
