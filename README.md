@@ -48,11 +48,28 @@ cereyan run pipeline.py:etl --param day=2026-01-02    # same, with parameters an
 cereyan serve .                                       # API, UI, scheduler, engines at http://127.0.0.1:4200
 ```
 
-![Run detail with live logs](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/run-detail.png)
+[![The cereyan dashboard: counts by state, a Needs attention list, Running now with task progress, and the live event feed](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/dashboard.png)](https://sercanatalik.github.io/cereyan/get-started/tour/#dashboard)
+
+<p align="center"><sub>The dashboard after <code>cereyan serve</code> &mdash; <a href="https://sercanatalik.github.io/cereyan/get-started/tour/">take the full tour</a></sub></p>
 
 - **Offline first.** A script records runs into a local SQLite file; nothing else needs to run.
 - **One process to serve.** The API, the web UI, the scheduler, a warm pool of engine processes, rules, and MCP, in one `cereyan serve`.
 - **Data-pipeline semantics.** Targets make reruns idempotent, backfills cover date ranges, resources are named semaphores, flows chain and fan in by key, and rules react to events or to their absence.
+
+## Screenshots
+
+Every page below is described in the [tour](https://sercanatalik.github.io/cereyan/get-started/tour/); click a shot to jump to it.
+
+| | |
+|:--:|:--:|
+| [![Runs list with popover filters and a task-state bar per run](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/runs.png)](https://sercanatalik.github.io/cereyan/get-started/tour/#runs) | [![Run detail: the tasks rail, live logs filtered to one task run, and retry countdowns](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/run-detail.png)](https://sercanatalik.github.io/cereyan/get-started/tour/#run-detail) |
+| **[Runs](https://sercanatalik.github.io/cereyan/get-started/tour/#runs)** &mdash; filter, select and act in bulk | **[Run detail](https://sercanatalik.github.io/cereyan/get-started/tour/#run-detail)** &mdash; logs, tasks and retries |
+| [![Flows grouped by project with schedules in words and a run-history sparkline](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/flows.png)](https://sercanatalik.github.io/cereyan/get-started/tour/#flows) | [![Task timeline: an SVG graph of task runs with dependencies and a selection panel](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/run-timeline.png)](https://sercanatalik.github.io/cereyan/get-started/tour/#run-detail) |
+| **[Flows](https://sercanatalik.github.io/cereyan/get-started/tour/#flows)** &mdash; schedules, dependencies, history | **[Timeline](https://sercanatalik.github.io/cereyan/get-started/tour/#run-detail)** &mdash; the task graph of a run |
+| [![Events page with the live feed and a JSON payload viewer](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/events.png)](https://sercanatalik.github.io/cereyan/get-started/tour/#events) | [![Rules page listing when/do rules and their firing counts](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/rules.png)](https://sercanatalik.github.io/cereyan/get-started/tour/#rules) |
+| **[Events](https://sercanatalik.github.io/cereyan/get-started/tour/#events)** &mdash; what happened, as it happens | **[Rules](https://sercanatalik.github.io/cereyan/get-started/tour/#rules)** &mdash; react to events, or to their absence |
+
+The UI follows your system theme; the documentation shows the [dark variants](https://sercanatalik.github.io/cereyan/get-started/tour/) too.
 
 ## Documentation
 
