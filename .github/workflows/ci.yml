@@ -62,13 +62,10 @@ jobs:
         run: |
           uv sync
           uv run maturin develop --uv
-      # The Python harness assumes Unix: signal.SIGKILL, SIGTERM semantics, process
-      # groups. It has never run on Windows and porting it is its own change. Windows
-      # is still verified here by compilation, clippy and the Rust suite, and beyond
-      # this job by the wheel build and the smoke test that installs it.
       - name: Python tests
-        if: runner.os != 'Windows'
-        run: uv run pytest -q -m "not performance"
+        # A hung test on Windows would otherwise eat the whole job; -rf prints the
+        # failure summary, which is what a first run on a new platform is for.
+        run: uv run pytest -q -m "not performance" --timeout 300 -rf
       - name: Documentation tests
         if: runner.os != 'Windows'
         run: |
