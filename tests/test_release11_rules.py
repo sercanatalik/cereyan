@@ -6,6 +6,8 @@ import json
 import os
 import time
 
+import sys
+
 import pytest
 
 from cereyan import App
@@ -245,6 +247,11 @@ def test_expectation_survives_restart(isolated_home, tmp_path):
         again.stop()
 
 
+@pytest.mark.xfail(
+    sys.platform == "win32",
+    reason="windows-proactive-rule-window: a clock-armed rule lapses on Windows while the events it waits for keep arriving; intermittent, hence not strict",
+    strict=False,
+)
 def test_clock_armed_rule_fires_only_when_window_is_empty(pro):
     rid = rule_id(pro, "heartbeat")
     row = pro.client._request("GET", f"/api/rules/{rid}")

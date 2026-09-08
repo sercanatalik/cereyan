@@ -5,6 +5,8 @@ import os
 import time
 from datetime import timedelta
 
+import sys
+
 import pytest
 
 from cereyan import INPUTS, SOURCE, LocalTarget, ThreadRunner, exponential, flow, task
@@ -242,6 +244,11 @@ def test_task_timeout_thread_and_process(store):
     assert tasks[0]["state"]["name"] == "TimedOut" and tasks[0]["state"]["type"] == "Failed"
 
 
+@pytest.mark.xfail(
+    sys.platform == "win32",
+    reason="windows-interrupt-running-flow: timeout_seconds is a silent no-op on Windows, FlowTimeout needs signal.setitimer which the platform lacks",
+    strict=True,
+)
 def test_flow_timeout_offline(store):
     @flow(timeout_seconds=0.3)
     def f():

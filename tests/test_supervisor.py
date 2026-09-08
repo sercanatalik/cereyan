@@ -16,6 +16,11 @@ def start(server, name, **params):
     return server.client._request("POST", f"/api/flows/{flow_id(server, name)}/runs", body={"parameters": params})
 
 
+@pytest.mark.xfail(
+    sys.platform == "win32",
+    reason="windows-interrupt-running-flow: _thread.interrupt_main cannot interrupt a blocking call, so a cancel waits for the supervisor to terminate the engine",
+    strict=True,
+)
 def test_cooperative_cancel(server):
     run = start(server, "sleepy", seconds=30)
     server.wait_run(run["id"], until=lambda r: r["state"]["type"] == "Running")
