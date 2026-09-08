@@ -2,6 +2,7 @@
 
 ## 1.4.0 (2026-09-08)
 
+- The Intel macOS wheel is cross-built from the arm64 runner. GitHub retired the `macos-13` label, so that build queued forever and, because the smoke test and the PyPI upload wait for every wheel, no release could complete at all.
 - `cargo bench` runs again. Criterion's flags were being handed to the auto libtest harness of every lib target, which rejects them, so the benchmarks stopped at the first target reached — through `just bench` as much as in CI. Each crate's lib now sets `bench = false`.
 - Wall-clock ceilings moved out of the test suite that gates a release. Two Rust timing tests are `#[ignore]` and the Python `performance` marker is deselected there; both run in `just bench` and in CI's benchmark job, which is where the per-platform baselines live. A ceiling calibrated on a developer machine failing on a shared CI runner said nothing about correctness. `benches/e2e.py --no-ceilings` reports an absolute miss instead of failing, while a regression against a baseline still fails.
 - Windows: `cereyan-server` now compiles. The Unix socket listener's serve path was never excluded on platforms without Unix sockets, so the crate failed to build and the Windows wheel and test job have been broken since the socket landed in 1.1. Windows had no working wheel for 1.1, 1.2, or 1.3 despite being listed as a supported platform.

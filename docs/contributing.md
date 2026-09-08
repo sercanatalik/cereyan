@@ -76,7 +76,7 @@ just docs
     just docs
     ```
 4. Move the `CHANGELOG.md` entries under a heading for the new version. Every change to the Python API, the HTTP API, the CLI, the MCP surface, the UI, or the behaviour of a running server needs an entry, and an entry that removes or reverses documented behaviour says what a reader relying on it must do.
-5. CI builds the UI, then wheels for macOS arm64 and x86_64, Linux x86_64 and aarch64 (manylinux 2.28), and Windows x86_64, plus the sdist.
+5. CI builds the UI, then wheels for macOS arm64 and x86_64 (the Intel one cross-built from the arm64 runner), Linux x86_64 and aarch64 (manylinux 2.28), and Windows x86_64, plus the sdist.
 6. The smoke stage installs each wheel into a fresh virtual environment on its platform and runs `scripts/smoke.sh`: import, offline run, `cereyan runs ls`.
 7. Tag the release as `v<version>`. The `docs` job uploads the built site as a Pages artifact, `deploy-docs` publishes it, and only then does `publish` upload the wheels and the sdist to PyPI — so the package page never goes live linking to a site that does not yet exist.
 
