@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `server.json` records a URL clients can actually use. It carried the address the listener bound, so starting the server on every interface wrote `http://0.0.0.0:<port>` — a bind address, not a destination. Linux and macOS route that to loopback, so it worked by accident; Windows refuses it, and nothing that reads the discovery file could find the server there. `url` now names loopback when the bind address is unspecified, and `host` still records what was bound.
 - **Windows: `cereyan serve` can be stopped gracefully.** It handled `SIGTERM`, which Windows never delivers, so anything stopping the server other than an interactive Ctrl-C — a service manager, a script, a supervisor — ended the process before it could shut down: the discovery file was left behind, pending writes were not flushed, the WAL was not checkpointed, and engine processes were orphaned. A console control event arrives as `SIGBREAK` on Windows and is now handled the same way `SIGTERM` is on Unix. Unix behaviour is unchanged. Found by running the Python test suite on Windows for the first time.
 
 ## 1.4.0 (2026-09-08)

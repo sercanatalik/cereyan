@@ -98,6 +98,12 @@ def test_environment_beats_config_and_no_warning_with_token(isolated_home, proje
     (project_dir / "cereyan.toml").write_text('[server]\ntoken = "from-file"\nhost = "0.0.0.0"\n')
     srv = ServerProcess(str(isolated_home), str(project_dir), env={"CEREYAN_TOKEN": "from-env"})
     try:
+        # Bound to every interface, but the discovery file has to name somewhere a
+        # client can dial. 0.0.0.0 is a bind address: Linux and macOS route it to
+        # loopback, Windows refuses it, so recording it would leave every consumer
+        # of server.json unable to find the server on Windows.
+        assert srv.info["host"] == "0.0.0.0"
+        assert srv.info["url"] in (f"http://127.0.0.1:{srv.info['port']}", f"http://[::1]:{srv.info['port']}")
         assert raw_get(srv.info["url"] + "/api/runs", {"authorization": "Bearer from-env"})[0] == 200
         assert "unauthenticated" not in srv.read_log()
     finally:

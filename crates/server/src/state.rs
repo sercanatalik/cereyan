@@ -104,10 +104,24 @@ impl AppState {
     }
 
     pub fn write_discovery_file(&self) -> Result<(), ServerError> {
+        // `host` records what was bound; `url` has to be dialable. A listener on an
+        // unspecified address answers on loopback, and 0.0.0.0 is not somewhere a
+        // client can connect: Linux and macOS route it to loopback, Windows refuses
+        // it outright, so every discovery consumer there fails to find the server.
+        let url = if self.addr.ip().is_unspecified() {
+            let loopback = if self.addr.is_ipv6() {
+                "[::1]"
+            } else {
+                "127.0.0.1"
+            };
+            format!("http://{}:{}", loopback, self.addr.port())
+        } else {
+            format!("http://{}", self.addr)
+        };
         let body = json!({
             "host": self.addr.ip().to_string(),
             "port": self.addr.port(),
-            "url": format!("http://{}", self.addr),
+            "url": url,
             "pid": std::process::id(),
             "started_at": self.started_at,
             "version": self.config.version,

@@ -36,7 +36,7 @@ A running server records how to reach it so scripts, the CLI, `cereyan mcp`, and
   "url": "http://127.0.0.1:4200",
   "pid": 12345,
   "started_at": 1788998400000000,
-  "version": "1.3.0",
+  "version": "1.4.0",
   "auth": true,
   "socket": "/tmp/cereyan.sock"
 }
@@ -44,7 +44,8 @@ A running server records how to reach it so scripts, the CLI, `cereyan mcp`, and
 
 | Field | Meaning |
 |---|---|
-| `host`, `port`, `url` | The TCP listener. |
+| `host`, `port` | What the listener bound. `host` is `0.0.0.0` when the server was started on every interface. |
+| `url` | Where to reach it from this machine. When the server bound an unspecified address, this is loopback rather than the bind address, because `0.0.0.0` is not somewhere a client can connect. |
 | `pid` | The server process; clients check it is alive before trusting a stale file. |
 | `started_at` | Microseconds since the Unix epoch. |
 | `version` | The cereyan version. |
