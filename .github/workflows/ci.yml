@@ -192,14 +192,13 @@ jobs:
           python-version: "3.11"
       - name: Criterion benchmarks
         run: cargo bench --workspace -- --warm-up-time 1 --measurement-time 3
+      # The wall-clock ceilings in `just bench` are not run here: this runner is
+      # shared and was never the calibrated hardware they were set on, so they fail
+      # for the same reason they were taken out of the correctness gate.
       - name: Build release extension
         run: |
           uv sync
           uv run maturin develop --uv --release
-      - name: Wall-clock tests skipped by the correctness gate
-        run: |
-          cargo test --workspace -- --ignored --skip at_1m
-          uv run pytest -q -m performance
       - name: "End-to-end targets (advisory here; no checked-in baseline for a shared runner)"
         run: uv run python benches/e2e.py --quick --no-ceilings
 

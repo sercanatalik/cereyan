@@ -62,6 +62,13 @@ if __name__ == "__main__":
     api = client.default_client()
     events = api.events(kind="orders.*", run_id=run["id"])
     assert events and events[0]["name"] == "orders.table_empty"
-    fired = [r for r in api.rules() if r["name"] == "alert_empty"]
+    # Rules fire after the run that emitted the event has finished, not with it,
+    # so wait for the firing rather than reading the count straight away.
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        fired = [r for r in api.rules() if r["name"] == "alert_empty"]
+        if fired and fired[0]["fire_count"] >= 1:
+            break
+        time.sleep(0.1)
     assert fired and fired[0]["fire_count"] >= 1, fired
     print("rule fired", fired[0]["fire_count"], "time(s)")
