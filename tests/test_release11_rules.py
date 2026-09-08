@@ -251,10 +251,18 @@ def test_clock_armed_rule_fires_only_when_window_is_empty(pro):
     assert row["at"]["cron"] == "*/2 * * * * *" and row["within"] == 3
     # Keep `quick` completing inside every 3 s window for a while: no lapse.
     t0 = time.time()
+    last, widest_gap = t0, 0.0
     while time.time() - t0 < 4.5:
         pro.wait_run(start(pro, "quick")["id"])
+        now = time.time()
+        widest_gap, last = max(widest_gap, now - last), now
         time.sleep(0.5)
-    assert "heartbeat" not in lines(pro)
+    # Only assert what the loop actually established. Starting a run and waiting
+    # for it can outlast `within` on a loaded machine, and once the window has
+    # emptied the rule is right to fire — asserting it did not would be asserting
+    # that the machine kept up, which is not what this test is about.
+    if widest_gap < row["within"]:
+        assert "heartbeat" not in lines(pro), f"fired despite a {widest_gap:.1f}s widest gap"
     # Then stop producing: the next tick after the window empties fires.
     wait_for(lambda: "heartbeat" in lines(pro), timeout=8)
 
