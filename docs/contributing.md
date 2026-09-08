@@ -17,7 +17,7 @@ just dev     # uv sync and maturin develop: builds the extension in place
 
 | Command | Does |
 |---|---|
-| `just test` | Rust tests, Python tests, documentation tests, UI tests. Correctness only: tests that assert a wall-clock ceiling are marked `#[ignore]` or `@pytest.mark.performance` and run in `just bench` instead, because a ceiling calibrated on a developer machine fails on a shared CI runner and says nothing about correctness |
+| `just test` | Rust tests, Python tests, documentation tests, UI tests. The Python and documentation suites assume Unix process semantics and do not run on Windows yet; CI covers Windows with compilation, clippy, the Rust suite, a wheel build, and a smoke test of that wheel. Correctness only: tests that assert a wall-clock ceiling are marked `#[ignore]` or `@pytest.mark.performance` and run in `just bench` instead, because a ceiling calibrated on a developer machine fails on a shared CI runner and says nothing about correctness |
 | `just lint` | rustfmt and clippy, Python compile check, docstring check, generated-page checks, UI lint and client drift check |
 | `just docs` | Regenerate the reference pages and example pages, check docstrings, build the site into `site/` in strict mode, print the tested-block summary |
 | `just docs-serve` | Serve the docs locally with live reload |

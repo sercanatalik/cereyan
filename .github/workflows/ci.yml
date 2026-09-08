@@ -62,9 +62,15 @@ jobs:
         run: |
           uv sync
           uv run maturin develop --uv
+      # The Python harness assumes Unix: signal.SIGKILL, SIGTERM semantics, process
+      # groups. It has never run on Windows and porting it is its own change. Windows
+      # is still verified here by compilation, clippy and the Rust suite, and beyond
+      # this job by the wheel build and the smoke test that installs it.
       - name: Python tests
+        if: runner.os != 'Windows'
         run: uv run pytest -q -m "not performance"
       - name: Documentation tests
+        if: runner.os != 'Windows'
         run: |
           uv sync --group docs
           uv run --group docs pytest --markdown-docs --markdown-docs-syntax superfences --ignore=docs/examples --ignore-glob='*/conftest.py' docs tests/docs -q
