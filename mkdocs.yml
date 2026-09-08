@@ -39,6 +39,7 @@ theme:
     - navigation.footer
     - search.suggest
     - search.highlight
+    - content.action.edit
     - content.code.copy
     - content.code.annotate
     - toc.follow
