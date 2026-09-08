@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Windows: `cereyan serve` can be stopped gracefully.** It handled `SIGTERM`, which Windows never delivers, so anything stopping the server other than an interactive Ctrl-C — a service manager, a script, a supervisor — ended the process before it could shut down: the discovery file was left behind, pending writes were not flushed, the WAL was not checkpointed, and engine processes were orphaned. A console control event arrives as `SIGBREAK` on Windows and is now handled the same way `SIGTERM` is on Unix. Unix behaviour is unchanged. Found by running the Python test suite on Windows for the first time.
+
 ## 1.4.0 (2026-09-08)
 
 - The Intel macOS wheel is cross-built from the arm64 runner. GitHub retired the `macos-13` label, so that build queued forever and, because the smoke test and the PyPI upload wait for every wheel, no release could complete at all.

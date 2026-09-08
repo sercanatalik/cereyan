@@ -192,7 +192,16 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     def _terminate(signum, frame):
         raise KeyboardInterrupt
 
-    previous = signal.signal(signal.SIGTERM, _terminate)
+    # SIGTERM is the cooperative stop on Unix. Windows never delivers it, and a
+    # console control event arrives as SIGBREAK, whose default handler ends the
+    # process before any of the cleanup below runs: the discovery file survives,
+    # the store is not flushed, and engines are left behind. Handle whichever the
+    # platform has, so stopping the server means the same thing everywhere.
+    # Interactive Ctrl-C needs nothing extra; it arrives as SIGINT.
+    stop_signals = [signal.SIGTERM]
+    if hasattr(signal, "SIGBREAK"):  # Windows
+        stop_signals.append(signal.SIGBREAK)
+    previous = [(sig, signal.signal(sig, _terminate)) for sig in stop_signals]
     try:
         while not server.wait(0.5):
             pass
@@ -200,7 +209,8 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         if not quiet:
             print("cereyan: shutting down", file=sys.stderr)
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        for sig, handler in previous:
+            signal.signal(sig, handler)
         server.stop()
         engine.close_store()
     return 0
