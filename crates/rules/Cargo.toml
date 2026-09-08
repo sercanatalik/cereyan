@@ -1,0 +1,12 @@
+[package]
+name = "cereyan-rules"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+cereyan-core = { path = "../core" }
+serde_json = { workspace = true }
+minijinja = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,670 @@
+{
+  "handshake": {
+    "capabilities": {
+      "prompts": {},
+      "resources": {},
+      "tools": {}
+    },
+    "instructions": "cereyan runs Python pipelines on this machine. Use list_flows to see what can run, run_flow to start work, get_run and run_logs to follow it, and explain_failure when a run fails. Writes (run_flow, cancel_run, resume_run, backfill, pause_schedule, resume_schedule, set_variable) take effect immediately.",
+    "protocolVersion": "2025-06-18",
+    "serverInfo": {
+      "name": "cereyan"
+    }
+  },
+  "prompt_messages": {
+    "diagnose_run": [
+      {
+        "content": {
+          "text": "Run <run_id> of a cereyan pipeline needs a diagnosis. Call the explain_failure tool with run_id <run_id>, read the failed task runs, the error log lines, and the events, then summarise the root cause in two sentences and suggest one concrete next step (rerun with run_flow, fix the code, or adjust a schedule).",
+          "type": "text"
+        },
+        "role": "user"
+      }
+    ]
+  },
+  "prompts": [
+    {
+      "arguments": [
+        {
+          "description": "The run id",
+          "name": "run_id",
+          "required": true
+        }
+      ],
+      "description": "Explain why a run failed and what to do about it",
+      "name": "diagnose_run"
+    }
+  ],
+  "resource_templates": [
+    {
+      "description": "Log lines of a run as JSON",
+      "mimeType": "application/json",
+      "name": "Run logs",
+      "uriTemplate": "cereyan://runs/{id}/logs"
+    },
+    {
+      "description": "Artifacts of a run as JSON",
+      "mimeType": "application/json",
+      "name": "Run artifacts",
+      "uriTemplate": "cereyan://runs/{id}/artifacts"
+    }
+  ],
+  "resources": [],
+  "response_keys": {
+    "backfill": {
+      "dry run": {
+        "keys": [
+          "dry_run",
+          "first",
+          "flow",
+          "interval_seconds",
+          "last",
+          "note",
+          "parameter",
+          "runs"
+        ]
+      },
+      "dry_run false": {
+        "keys": [
+          "backfill",
+          "dry_run"
+        ]
+      }
+    },
+    "cancel_run": {
+      "default": {
+        "keys": [
+          "run"
+        ]
+      }
+    },
+    "explain_failure": {
+      "default": {
+        "items": {
+          "error_logs": [
+            "id",
+            "level",
+            "logger",
+            "message",
+            "run_id",
+            "task_run_id",
+            "timestamp"
+          ],
+          "events": [
+            "external_id",
+            "flow_id",
+            "id",
+            "name",
+            "occurred",
+            "payload",
+            "related",
+            "resource",
+            "run_id",
+            "seq"
+          ]
+        },
+        "keys": [
+          "error_logs",
+          "events",
+          "failed_task_runs",
+          "run",
+          "verdict"
+        ]
+      }
+    },
+    "get_run": {
+      "default": {
+        "items": {
+          "task_runs": [
+            "crash_count",
+            "created_at",
+            "dynamic_key",
+            "end_time",
+            "external_id",
+            "failure_count",
+            "flow_id",
+            "flow_name",
+            "id",
+            "name",
+            "parents",
+            "project",
+            "run_id",
+            "run_name",
+            "start_time",
+            "state",
+            "task_key",
+            "total_run_time"
+          ]
+        },
+        "keys": [
+          "run",
+          "task_runs"
+        ]
+      }
+    },
+    "list_artifacts": {
+      "default": {
+        "items": {
+          "artifacts": [
+            "created_at",
+            "data",
+            "external_id",
+            "flow_name",
+            "id",
+            "key",
+            "kind",
+            "project",
+            "run_id",
+            "run_name",
+            "task_run_id",
+            "updated_at"
+          ]
+        },
+        "keys": [
+          "artifacts",
+          "next_cursor"
+        ]
+      }
+    },
+    "list_events": {
+      "default": {
+        "items": {
+          "events": [
+            "external_id",
+            "flow_id",
+            "id",
+            "name",
+            "occurred",
+            "payload",
+            "related",
+            "resource",
+            "run_id",
+            "seq"
+          ]
+        },
+        "keys": [
+          "events",
+          "next_cursor"
+        ]
+      }
+    },
+    "list_flows": {
+      "default": {
+        "items": {
+          "flows": [
+            "description",
+            "error",
+            "id",
+            "live",
+            "name",
+            "options",
+            "parameter_schema",
+            "project",
+            "tags"
+          ]
+        },
+        "keys": [
+          "flows"
+        ]
+      }
+    },
+    "list_rules": {
+      "default": {
+        "keys": [
+          "rules"
+        ]
+      }
+    },
+    "list_runs": {
+      "default": {
+        "items": {
+          "runs": [
+            "attempt",
+            "backfill_id",
+            "crash_count",
+            "created_at",
+            "created_by",
+            "end_time",
+            "engine_id",
+            "engine_pid",
+            "external_id",
+            "failure_count",
+            "flow_id",
+            "flow_name",
+            "id",
+            "name",
+            "parameters",
+            "parent_run_id",
+            "priority",
+            "project",
+            "report_seq",
+            "schedule_id",
+            "scheduled_time",
+            "start_time",
+            "state",
+            "tags",
+            "task_counts",
+            "total_run_time"
+          ]
+        },
+        "keys": [
+          "next_cursor",
+          "runs"
+        ]
+      }
+    },
+    "pause_schedule": {
+      "default": {
+        "keys": [
+          "schedule"
+        ]
+      }
+    },
+    "resume_run": {
+      "default": {
+        "keys": [
+          "run"
+        ]
+      }
+    },
+    "resume_schedule": {
+      "default": {
+        "keys": [
+          "schedule"
+        ]
+      }
+    },
+    "run_flow": {
+      "default": {
+        "keys": [
+          "note",
+          "run"
+        ]
+      }
+    },
+    "run_logs": {
+      "default": {
+        "items": {
+          "logs": [
+            "id",
+            "level",
+            "logger",
+            "message",
+            "run_id",
+            "task_run_id",
+            "timestamp"
+          ]
+        },
+        "keys": [
+          "logs",
+          "next_cursor"
+        ]
+      }
+    },
+    "set_variable": {
+      "default": {
+        "keys": [
+          "variable"
+        ]
+      }
+    }
+  },
+  "tools": [
+    {
+      "description": "List the registered flows with their project, parameters schema, tags, and any registration error. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "project": {
+            "description": "Only flows of this project",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_flows"
+    },
+    {
+      "description": "List runs, newest first, with optional filters. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "description": "Exact run name",
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "state_name": {
+            "description": "A named sub-state such as Late or AwaitingRetry",
+            "type": "string"
+          },
+          "state_type": {
+            "description": "Scheduled, Pending, Running, Completed, Failed, Cancelled, Crashed, Paused, Cancelling",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_runs"
+    },
+    {
+      "description": "One run with its state, parameters, timing, and task runs. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "get_run"
+    },
+    {
+      "description": "Log lines of a run, oldest first. Filter by minimum level (10 debug, 20 info, 30 warning, 40 error) or a search string. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 200,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "min_level": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "integer"
+          },
+          "search": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "run_logs"
+    },
+    {
+      "description": "Recent events (run and task transitions, schedule changes, rule firings, custom events), newest first. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "flow_id": {
+            "type": "integer"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "description": "Exact name or a prefix ending in * such as run.*",
+            "type": "string"
+          },
+          "run_id": {
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_events"
+    },
+    {
+      "description": "Artifacts across runs, newest first, with their run, flow, and project. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_artifacts"
+    },
+    {
+      "description": "The rules (reactive and proactive) with their match, actions, guards, and fire counts. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_rules"
+    },
+    {
+      "description": "Everything needed to diagnose a run in one call: the run, its failed or crashed task runs, the last warning-or-above log lines, and the run's events. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "explain_failure"
+    },
+    {
+      "description": "Start a run of a flow now. Creates the run immediately and returns without waiting; follow it with get_run. Parameters are validated against the flow's schema.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "description": "Flow name, or project/flow when the name exists in several projects",
+            "type": "string"
+          },
+          "name": {
+            "description": "Optional run name",
+            "type": "string"
+          },
+          "parameters": {
+            "description": "Flow parameters as JSON",
+            "type": "object"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "flow"
+        ],
+        "type": "object"
+      },
+      "name": "run_flow"
+    },
+    {
+      "description": "Cancel a run. A queued run is cancelled at once; a running run is asked to stop and killed after the grace period.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "cancel_run"
+    },
+    {
+      "description": "Answer a Paused run's wait_for_input question and schedule its next attempt. The answer can be any JSON.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "input": {
+            "description": "The answer, any JSON"
+          },
+          "run_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "input"
+        ],
+        "type": "object"
+      },
+      "name": "resume_run"
+    },
+    {
+      "description": "Create one run per value of a date or datetime parameter between start and end. Defaults to a dry run that only reports how many runs would be created; pass dry_run false to create them. Can create thousands of runs.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "concurrency": {
+            "default": 1,
+            "type": "integer"
+          },
+          "dry_run": {
+            "default": true,
+            "type": "boolean"
+          },
+          "end": {
+            "type": "string"
+          },
+          "extra_parameters": {
+            "type": "object"
+          },
+          "flow": {
+            "description": "Flow name, or project/flow when the name exists in several projects",
+            "type": "string"
+          },
+          "interval": {
+            "description": "Seconds or a duration such as 1d or 12h (default 1d)",
+            "type": "string"
+          },
+          "parameter": {
+            "type": "string"
+          },
+          "reverse": {
+            "type": "boolean"
+          },
+          "start": {
+            "description": "YYYY-MM-DD or RFC 3339",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flow",
+          "parameter",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
+      "name": "backfill"
+    },
+    {
+      "description": "Pause a schedule so it stops creating runs until resumed.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "schedule_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schedule_id"
+        ],
+        "type": "object"
+      },
+      "name": "pause_schedule"
+    },
+    {
+      "description": "Resume a paused schedule.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "schedule_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schedule_id"
+        ],
+        "type": "object"
+      },
+      "name": "resume_schedule"
+    },
+    {
+      "description": "Create or overwrite a variable. Secrets are encrypted at rest and never returned in plain text.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "secret": {
+            "default": false,
+            "type": "boolean"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "value": {
+            "description": "Any JSON"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object"
+      },
+      "name": "set_variable"
+    }
+  ]
+}

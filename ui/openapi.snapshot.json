@@ -1,0 +1,5459 @@
+{
+  "components": {
+    "schemas": {
+      "AcquireRequest": {
+        "properties": {
+          "resources": {
+            "type": "object"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "wait_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "resources"
+        ],
+        "type": "object"
+      },
+      "AfterSpec": {
+        "properties": {
+          "flow": {
+            "description": "The first upstream (kept for 1.0 payloads and the run details link).",
+            "type": "string"
+          },
+          "flows": {
+            "description": "Every upstream; empty for rows written before fan-in existed.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key": {
+            "description": "Parameter that identifies a batch: the downstream runs once per value.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parameters": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "flow"
+        ],
+        "type": "object"
+      },
+      "ArtifactBody": {
+        "properties": {
+          "data": {
+            "type": "object"
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "task_run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "run_id",
+          "kind",
+          "data"
+        ],
+        "type": "object"
+      },
+      "ArtifactListItem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ArtifactRow"
+          },
+          {
+            "properties": {
+              "flow_name": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              },
+              "run_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "run_name",
+              "flow_name",
+              "project"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "One artifact in the cross-run listing, with its run's identity."
+      },
+      "ArtifactRow": {
+        "description": "A stored artifact attached to a run and optionally a task run.",
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "data": {
+            "type": "object"
+          },
+          "external_id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "description": "`markdown`, `table`, `progress`, `link`, or `image`.",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "task_run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/i64"
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "run_id",
+          "kind",
+          "data",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ArtifactsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactListItem"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "Backfill": {
+        "properties": {
+          "cancelled": {
+            "type": "boolean"
+          },
+          "concurrency": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "end_value": {
+            "type": "string"
+          },
+          "external_id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "extra_parameters": {
+            "type": "object"
+          },
+          "flow_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "interval_secs": {
+            "format": "double",
+            "type": "number"
+          },
+          "parameter": {
+            "type": "string"
+          },
+          "start_value": {
+            "type": "string"
+          },
+          "total": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "flow_id",
+          "parameter",
+          "start_value",
+          "end_value",
+          "interval_secs",
+          "concurrency",
+          "total",
+          "cancelled",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "BackfillBody": {
+        "properties": {
+          "concurrency": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "end": {
+            "type": "string"
+          },
+          "extra_parameters": {
+            "type": "object"
+          },
+          "interval": {
+            "description": "Seconds, or a shorthand like `1d`, `12h`, `30m`. Default one day."
+          },
+          "parameter": {
+            "type": "string"
+          },
+          "reverse": {
+            "type": "boolean"
+          },
+          "start": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "parameter",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
+      "BackfillStatus": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Backfill"
+          },
+          {
+            "properties": {
+              "counts": {
+                "additionalProperties": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "tag": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "counts",
+              "tag"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "CatchupPolicy": {
+        "enum": [
+          "skip",
+          "latest",
+          "all"
+        ],
+        "type": "string"
+      },
+      "Counts": {
+        "properties": {
+          "active": {
+            "description": "Number of non-terminal runs held in memory.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "flows": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "propertyNames": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "description": "Run counts by flow id and state type.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "runs": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "description": "Run counts by state type.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "task_runs": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "description": "Task run counts by state type.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "runs",
+          "flows",
+          "task_runs",
+          "active"
+        ],
+        "type": "object"
+      },
+      "CreateRunBody": {
+        "description": "Create a run by flow key, registering the flow when the server does not\nknow it yet (offline handoff from another project).",
+        "properties": {
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "flow": {
+            "type": "string"
+          },
+          "flow_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "module": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "options": {
+            "type": "object"
+          },
+          "parameter_schema": {
+            "type": "object"
+          },
+          "parameters": {
+            "type": "object"
+          },
+          "project": {
+            "type": "string"
+          },
+          "source_dir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "project",
+          "flow"
+        ],
+        "type": "object"
+      },
+      "CreateRunForFlowBody": {
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parameters": {
+            "type": "object"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "EmitEventBody": {
+        "properties": {
+          "flow_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "resource": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Resource"
+              }
+            ]
+          },
+          "run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "ErrorBody": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "Event": {
+        "properties": {
+          "external_id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "flow_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "occurred": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "related": {
+            "items": {
+              "$ref": "#/components/schemas/Resource"
+            },
+            "type": "array"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/Resource"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "seq": {
+            "description": "Sequence number: the writer assigns ids in commit order.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "external_id",
+          "name",
+          "occurred",
+          "resource"
+        ],
+        "type": "object"
+      },
+      "EventsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "Expectation": {
+        "description": "An armed expectation of a proactive rule.",
+        "properties": {
+          "armed_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "deadline": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "flow_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "key": {
+            "description": "`run:<id>` or `flow:<id>`.",
+            "type": "string"
+          },
+          "rule_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "status": {
+            "description": "`open`, `met`, `lapsed`, or `cancelled`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "rule_id",
+          "key",
+          "armed_at",
+          "deadline",
+          "status"
+        ],
+        "type": "object"
+      },
+      "FailedRequest": {
+        "properties": {
+          "engine_id": {
+            "type": "string"
+          },
+          "isolated": {
+            "type": "boolean"
+          },
+          "module": {
+            "type": "string"
+          },
+          "nice": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_dir": {
+            "type": "string"
+          },
+          "traceback": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "engine_id",
+          "source_dir",
+          "module",
+          "traceback"
+        ],
+        "type": "object"
+      },
+      "Flow": {
+        "description": "A registered flow. Identity is `(project, name)`.",
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "external_id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_seen_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "live": {
+            "description": "Whether the running server has this flow registered from code.",
+            "type": "boolean"
+          },
+          "module": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "type": "object"
+          },
+          "parameter_schema": {
+            "type": "object"
+          },
+          "project": {
+            "type": "string"
+          },
+          "source_dir": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "project",
+          "name",
+          "module",
+          "source_dir",
+          "created_at",
+          "last_seen_at"
+        ],
+        "type": "object"
+      },
+      "FlowOptions": {
+        "description": "Flow-level options declared in Python and stored as JSON on the flow row.",
+        "properties": {
+          "after": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AfterSpec"
+              }
+            ]
+          },
+          "crash_retries": {
+            "default": null,
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "disable_after": {
+            "default": null,
+            "description": "(count, window_seconds, persist_seconds)",
+            "items": false,
+            "prefixItems": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "format": "int64",
+                "type": "integer"
+              }
+            ],
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "has_bulk_complete": {
+            "default": false,
+            "type": "boolean"
+          },
+          "has_crash_hooks": {
+            "default": false,
+            "type": "boolean"
+          },
+          "isolated": {
+            "default": false,
+            "type": "boolean"
+          },
+          "log_prints": {
+            "default": false,
+            "type": "boolean"
+          },
+          "max_concurrent": {
+            "default": null,
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "on_overlap": {
+            "default": "",
+            "description": "`enqueue`, `skip`, or `cancel_new`.",
+            "type": "string"
+          },
+          "priority": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          },
+          "resources": {
+            "type": "object"
+          },
+          "retries": {
+            "default": 0,
+            "format": "int64",
+            "type": "integer"
+          },
+          "schedules": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ScheduleDecl"
+            },
+            "type": "array"
+          },
+          "timeout_seconds": {
+            "default": null,
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "FlowSummary": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Flow"
+          },
+          {
+            "properties": {
+              "batch_key": {
+                "description": "The batch key of a keyed fan-in.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "recent_runs": {
+                "description": "Newest first: (run id, state type, state name, duration in microseconds\nor null while the run has none) of the last ten runs.",
+                "items": {
+                  "items": false,
+                  "prefixItems": [
+                    {
+                      "format": "int64",
+                      "type": "integer"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "format": "int64",
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              "schedules": {
+                "items": {
+                  "$ref": "#/components/schemas/ScheduleRow"
+                },
+                "type": "array"
+              },
+              "triggered_by": {
+                "description": "The flow this one runs after, if any (the first upstream).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "triggers": {
+                "description": "Flows that run after this one.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "upstreams": {
+                "description": "Every upstream of a fan-in flow (empty without `after=`).",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "recent_runs",
+              "triggers",
+              "schedules"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "GraphEdge": {
+        "properties": {
+          "from": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "to": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
+      "GraphNode": {
+        "properties": {
+          "created_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dynamic_key": {
+            "type": "string"
+          },
+          "end_time": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "start_time": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "name",
+          "dynamic_key",
+          "state",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "HeartbeatRequest": {
+        "properties": {
+          "engine_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "engine_id",
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "Id": {
+        "type": "string"
+      },
+      "Log": {
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "level": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "logger": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "task_run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "timestamp": {
+            "$ref": "#/components/schemas/i64"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "level",
+          "logger",
+          "timestamp",
+          "message"
+        ],
+        "type": "object"
+      },
+      "LogsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Log"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "PrefilterBody": {
+        "properties": {
+          "skip": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "skip"
+        ],
+        "type": "object"
+      },
+      "PreviewBody": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          {
+            "properties": {
+              "count": {
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        ]
+      },
+      "PreviewResponse": {
+        "properties": {
+          "next": {
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "timezone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "next",
+          "timezone"
+        ],
+        "type": "object"
+      },
+      "ReleaseRequest": {
+        "properties": {
+          "lease": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "lease"
+        ],
+        "type": "object"
+      },
+      "ReportRequest": {
+        "properties": {
+          "engine_id": {
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "engine_id",
+          "run_id",
+          "events"
+        ],
+        "type": "object"
+      },
+      "ReportResponse": {
+        "properties": {
+          "applied": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cancel": {
+            "type": "boolean"
+          },
+          "last_seq": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "skipped": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "applied",
+          "skipped",
+          "last_seq",
+          "cancel"
+        ],
+        "type": "object"
+      },
+      "Resource": {
+        "description": "What an event is about.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "description": "`run`, `task_run`, `flow`, `schedule`, `rule`, or `custom`.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "type": "object"
+      },
+      "ResumeBody": {
+        "properties": {
+          "input": {
+            "description": "The answer handed to `wait_for_input` on the resumed attempt (any JSON)."
+          }
+        },
+        "required": [
+          "input"
+        ],
+        "type": "object"
+      },
+      "RouteSpec": {
+        "properties": {
+          "id": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "method": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "source": {
+            "description": "Where the handler is defined (module and function), for the settings page.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "method",
+          "path"
+        ],
+        "type": "object"
+      },
+      "RuleAction": {
+        "description": "One rule action. `kind` selects the variant; other fields are optional.",
+        "properties": {
+          "body": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "callable": {
+            "default": null,
+            "description": "Name of the Python callable for `call` actions (code rules).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "flow": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "headers": {
+            "type": "object"
+          },
+          "kind": {
+            "default": "",
+            "description": "`run_flow`, `cancel_run`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`.",
+            "type": "string"
+          },
+          "message": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "method": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parameters": {
+            "type": "object"
+          },
+          "state_type": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "to": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "url": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RuleBody": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RuleSpec"
+          },
+          {
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "RuleClock": {
+        "description": "Clock of a clock-armed proactive rule: a cron expression in a timezone.",
+        "properties": {
+          "cron": {
+            "default": "",
+            "type": "string"
+          },
+          "tz": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RuleFiring": {
+        "properties": {
+          "event_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "outcomes": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "rule_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "timestamp": {
+            "$ref": "#/components/schemas/i64"
+          }
+        },
+        "required": [
+          "id",
+          "rule_id",
+          "timestamp",
+          "outcomes"
+        ],
+        "type": "object"
+      },
+      "RuleMatch": {
+        "description": "Match clause of a rule.",
+        "properties": {
+          "events": {
+            "default": [],
+            "description": "Event names, or prefixes ending in `*`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "flows": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "project": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "states": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RulePatch": {
+        "properties": {
+          "allow_self": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "at": {
+            "type": "object"
+          },
+          "cooldown_seconds": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "do": {
+            "items": {
+              "$ref": "#/components/schemas/RuleAction"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "max_per_minute": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "once": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unless": {
+            "type": "object"
+          },
+          "when": {
+            "type": "object"
+          },
+          "within": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RuleRow": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RuleSpec"
+          },
+          {
+            "properties": {
+              "created_at": {
+                "$ref": "#/components/schemas/i64"
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "external_id": {
+                "$ref": "#/components/schemas/Id"
+              },
+              "fire_count": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "id": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "last_fired": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/i64"
+                  }
+                ]
+              },
+              "module": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "source": {
+                "description": "`ui` or `code`.",
+                "type": "string"
+              },
+              "updated_at": {
+                "$ref": "#/components/schemas/i64"
+              }
+            },
+            "required": [
+              "id",
+              "external_id",
+              "name",
+              "enabled",
+              "source",
+              "fire_count",
+              "created_at",
+              "updated_at"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "RuleSpec": {
+        "properties": {
+          "allow_self": {
+            "default": false,
+            "type": "boolean"
+          },
+          "at": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuleClock",
+                "description": "Clock-armed rules: evaluate at each cron tick instead of on an event."
+              }
+            ]
+          },
+          "cooldown_seconds": {
+            "default": 0.0,
+            "format": "double",
+            "type": "number"
+          },
+          "do": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RuleAction"
+            },
+            "type": "array"
+          },
+          "max_per_minute": {
+            "default": 60,
+            "format": "int64",
+            "type": "integer"
+          },
+          "once": {
+            "default": "per_run",
+            "description": "`per_run` or `never`.",
+            "type": "string"
+          },
+          "unless": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuleMatch",
+                "description": "Proactive rules: the expected event that disarms an expectation."
+              }
+            ]
+          },
+          "when": {
+            "default": {
+              "events": [],
+              "flows": [],
+              "project": null,
+              "states": [],
+              "tags": []
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RuleMatch"
+              }
+            ]
+          },
+          "within": {
+            "default": null,
+            "description": "Seconds after the arming event (or look-back before a clock tick).",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "Run": {
+        "properties": {
+          "attempt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "backfill_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "crash_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "end_time": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/i64"
+              }
+            ]
+          },
+          "engine_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "engine_pid": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "external_id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "failure_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "flow_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "flow_name": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "object"
+          },
+          "parent_run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "priority": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "project": {
+            "type": "string"
+          },
+          "report_seq": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "schedule_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "scheduled_time": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/i64"
+              }
+            ]
+          },
+          "start_time": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/i64"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "task_counts": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "description": "Task runs of this run counted by state type; empty until tasks exist.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "total_run_time": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/i64"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "flow_id",
+          "flow_name",
+          "project",
+          "name",
+          "state",
+          "failure_count",
+          "crash_count",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "RunGraph": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "type": "array"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "nodes",
+          "edges"
+        ],
+        "type": "object"
+      },
+      "RunsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Run"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "Schedule": {
+        "oneOf": [
+          {
+            "properties": {
+              "cron": {
+                "type": "string"
+              },
+              "day_or": {
+                "type": "boolean"
+              },
+              "kind": {
+                "enum": [
+                  "cron"
+                ],
+                "type": "string"
+              },
+              "timezone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "cron",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "anchor": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/i64",
+                    "description": "Anchor time in microseconds UTC; defaults to the schedule's creation."
+                  }
+                ]
+              },
+              "interval": {
+                "description": "Seconds between fires.",
+                "format": "double",
+                "type": "number"
+              },
+              "kind": {
+                "enum": [
+                  "interval"
+                ],
+                "type": "string"
+              },
+              "timezone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "interval",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "rrule"
+                ],
+                "type": "string"
+              },
+              "rrule": {
+                "type": "string"
+              },
+              "timezone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "rrule",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "ScheduleBody": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          {
+            "properties": {
+              "active": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "catchup": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CatchupPolicy"
+                  }
+                ]
+              },
+              "catchup_max": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "persist": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        ]
+      },
+      "ScheduleDecl": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          {
+            "properties": {
+              "catchup": {
+                "$ref": "#/components/schemas/CatchupPolicy"
+              },
+              "catchup_max": {
+                "format": "int64",
+                "type": "integer"
+              },
+              "key": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        ]
+      },
+      "SchedulePatchBody": {
+        "properties": {
+          "anchor": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "catchup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CatchupPolicy"
+              }
+            ]
+          },
+          "catchup_max": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cron": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "day_or": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "interval": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "persist": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "rrule": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ScheduleRow": {
+        "description": "Placeholders for later phases; defined now so the schema and API types\nare stable from the start.\nA stored schedule row: the schedule itself plus policy and bookkeeping.",
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "catchup": {
+            "$ref": "#/components/schemas/CatchupPolicy"
+          },
+          "catchup_max": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "code_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "external_id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "flow_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "next_fire": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/i64",
+                "description": "Next fire time computed by the scheduler (not stored)."
+              }
+            ]
+          },
+          "paused_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paused_until": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/i64"
+              }
+            ]
+          },
+          "persist": {
+            "type": "boolean"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "source": {
+            "description": "`code` for schedules declared on the flow, `ui` for ones created at runtime.",
+            "type": "string"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/i64"
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "flow_id",
+          "schedule",
+          "catchup",
+          "catchup_max",
+          "active",
+          "source",
+          "persist",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ServerInfo": {
+        "properties": {
+          "engines": {
+            "items": {},
+            "type": "array"
+          },
+          "home": {
+            "type": "string"
+          },
+          "pid": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "queued": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "served_dir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "started_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "stream_seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "home",
+          "pid",
+          "started_at",
+          "url",
+          "engines",
+          "queued",
+          "stream_seq"
+        ],
+        "type": "object"
+      },
+      "Settings": {
+        "properties": {
+          "catchup_default": {
+            "type": "string"
+          },
+          "crash_retries_default": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "custom_routes": {
+            "items": {
+              "$ref": "#/components/schemas/RouteSpec"
+            },
+            "type": "array"
+          },
+          "database_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "database_path": {
+            "type": "string"
+          },
+          "email_configured": {
+            "type": "boolean"
+          },
+          "engine_max_runs": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "engine_saturation_risk": {
+            "type": "boolean"
+          },
+          "home": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "max_engines": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pid": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "port": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "resources": {
+            "type": "object"
+          },
+          "retain_days": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "saturation_flows": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "saturation_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "secret_key_missing": {
+            "type": "boolean"
+          },
+          "secret_key_present": {
+            "type": "boolean"
+          },
+          "served_dir": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "wal_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "host",
+          "port",
+          "pid",
+          "version",
+          "home",
+          "database_path",
+          "database_bytes",
+          "wal_bytes",
+          "resources",
+          "max_engines",
+          "engine_max_runs",
+          "crash_retries_default",
+          "catchup_default",
+          "retain_days",
+          "email_configured",
+          "secret_key_present",
+          "secret_key_missing",
+          "custom_routes",
+          "engine_saturation_risk",
+          "saturation_flows"
+        ],
+        "type": "object"
+      },
+      "SettingsPatch": {
+        "properties": {
+          "crash_retries": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "resources": {
+            "additionalProperties": {
+              "format": "double",
+              "type": "number"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "retain_days": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "State": {
+        "properties": {
+          "details": {
+            "type": "object"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "timestamp": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "type": {
+            "$ref": "#/components/schemas/StateType"
+          }
+        },
+        "required": [
+          "type",
+          "name",
+          "timestamp"
+        ],
+        "type": "object"
+      },
+      "StateType": {
+        "enum": [
+          "Scheduled",
+          "Pending",
+          "Running",
+          "Completed",
+          "Failed",
+          "Cancelled",
+          "Crashed",
+          "Paused",
+          "Cancelling"
+        ],
+        "type": "string"
+      },
+      "TaskRun": {
+        "properties": {
+          "crash_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "dynamic_key": {
+            "type": "string"
+          },
+          "end_time": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/i64"
+              }
+            ]
+          },
+          "external_id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "failure_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "flow_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "flow_name": {
+            "type": "string"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parents": {
+            "description": "External ids of task runs this one waited on (futures and wait_for).",
+            "items": {
+              "$ref": "#/components/schemas/Id"
+            },
+            "type": "array"
+          },
+          "project": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run_name": {
+            "type": "string"
+          },
+          "start_time": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/i64"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          },
+          "task_key": {
+            "type": "string"
+          },
+          "total_run_time": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/i64"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "run_id",
+          "name",
+          "task_key",
+          "dynamic_key",
+          "state",
+          "failure_count",
+          "crash_count",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "TaskRunsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskRun"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "TransitionBody": {
+        "properties": {
+          "details": {
+            "type": "object"
+          },
+          "force": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/StateType"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "TransitionRejected": {
+        "properties": {
+          "current": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/State"
+              }
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "VariableBody": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "overwrite": {
+            "type": "boolean"
+          },
+          "secret": {
+            "type": "boolean"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "value": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "type": "object"
+      },
+      "VariablePatch": {
+        "properties": {
+          "secret": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
+      "VariableRow": {
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "boolean"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "value": {
+            "description": "Plain JSON value, or `\"********\"` for secrets in API responses.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "secret",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "VariableWithRaw": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VariableRow"
+          },
+          {
+            "properties": {
+              "raw": {
+                "description": "Ciphertext of a secret, present only when `raw=true` was requested.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        ]
+      },
+      "WorkItem": {
+        "description": "Work handed to an engine.",
+        "properties": {
+          "cancel_requested": {
+            "type": "boolean"
+          },
+          "external_id": {
+            "type": "string"
+          },
+          "flow": {
+            "type": "string"
+          },
+          "kind": {
+            "description": "`run`, `hooks`, or `bulk_complete`.",
+            "type": "string"
+          },
+          "options": {
+            "type": "object"
+          },
+          "parameters": {
+            "type": "object"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "project": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_name",
+          "external_id",
+          "project",
+          "flow",
+          "parameters",
+          "options",
+          "cancel_requested"
+        ],
+        "type": "object"
+      },
+      "WorkRequest": {
+        "properties": {
+          "engine_id": {
+            "type": "string"
+          },
+          "isolated": {
+            "type": "boolean"
+          },
+          "module": {
+            "type": "string"
+          },
+          "nice": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pid": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source_dir": {
+            "type": "string"
+          },
+          "wait_ms": {
+            "description": "Long-poll wait in milliseconds (max 30000).",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "engine_id",
+          "pid",
+          "source_dir",
+          "module"
+        ],
+        "type": "object"
+      },
+      "WorkResponse": {
+        "properties": {
+          "exit": {
+            "type": "boolean"
+          },
+          "run": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WorkItem"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "i64": {
+        "format": "int64",
+        "type": "integer"
+      }
+    }
+  },
+  "info": {
+    "description": "Local-first pipeline orchestrator API",
+    "license": {
+      "identifier": "MIT",
+      "name": "MIT"
+    },
+    "title": "cereyan",
+    "version": "1.3.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/artifacts": {
+      "get": {
+        "operationId": "list_artifacts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "flow",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Keyset cursor: the id of the last artifact of the previous page.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactsPage"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      },
+      "post": {
+        "operationId": "create_artifact",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/backfills/{id}": {
+      "get": {
+        "operationId": "get_backfill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackfillStatus"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "backfills"
+        ]
+      }
+    },
+    "/api/backfills/{id}/cancel": {
+      "post": {
+        "operationId": "cancel_backfill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackfillStatus"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "backfills"
+        ]
+      }
+    },
+    "/api/backfills/{id}/prefilter": {
+      "post": {
+        "operationId": "prefilter_backfill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrefilterBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "backfills"
+        ]
+      }
+    },
+    "/api/counts": {
+      "get": {
+        "operationId": "counts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Counts"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "counts"
+        ]
+      }
+    },
+    "/api/engine/failed": {
+      "post": {
+        "operationId": "failed",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FailedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Queued runs of the module failed"
+          }
+        },
+        "tags": [
+          "engine"
+        ]
+      }
+    },
+    "/api/engine/heartbeat": {
+      "post": {
+        "operationId": "heartbeat",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "{cancel: bool, active: bool}"
+          }
+        },
+        "tags": [
+          "engine"
+        ]
+      }
+    },
+    "/api/engine/report": {
+      "post": {
+        "operationId": "report",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "engine"
+        ]
+      }
+    },
+    "/api/engine/work": {
+      "post": {
+        "operationId": "work",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkResponse"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "engine"
+        ]
+      }
+    },
+    "/api/events": {
+      "get": {
+        "operationId": "list_events",
+        "parameters": [
+          {
+            "description": "Exact name, or a prefix ending in `*` (e.g. `run.*`).",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "resource_kind",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "resource_id",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "flow_id",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Keyset cursor: the id of the last event of the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Ascending order when true (defaults to newest first).",
+            "in": "query",
+            "name": "ascending",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventsPage"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      },
+      "post": {
+        "operationId": "emit_event",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmitEventBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/events/{id}": {
+      "get": {
+        "operationId": "get_event",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Event"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/flows": {
+      "get": {
+        "operationId": "list_flows",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FlowSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "flows"
+        ]
+      }
+    },
+    "/api/flows/{id}": {
+      "delete": {
+        "operationId": "delete_flow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "Flow is live"
+          }
+        },
+        "tags": [
+          "flows"
+        ]
+      },
+      "get": {
+        "operationId": "get_flow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowSummary"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "flows"
+        ]
+      }
+    },
+    "/api/flows/{id}/backfill": {
+      "post": {
+        "operationId": "create_backfill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackfillBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackfillStatus"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "backfills"
+        ]
+      }
+    },
+    "/api/flows/{id}/backfills": {
+      "get": {
+        "operationId": "list_backfills",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BackfillStatus"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "backfills"
+        ]
+      }
+    },
+    "/api/flows/{id}/pause": {
+      "post": {
+        "operationId": "pause_flow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All schedules paused"
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/flows/{id}/resume": {
+      "post": {
+        "operationId": "resume_flow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All schedules resumed"
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/flows/{id}/runs": {
+      "post": {
+        "operationId": "create_run_for_flow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunForFlowBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "description": "Invalid parameters"
+          }
+        },
+        "tags": [
+          "flows"
+        ]
+      }
+    },
+    "/api/flows/{id}/schedules": {
+      "get": {
+        "operationId": "list_schedules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduleRow"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      },
+      "post": {
+        "operationId": "create_schedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/flows/{id}/upcoming": {
+      "get": {
+        "operationId": "upcoming_runs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Run"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Server is up"
+          }
+        },
+        "tags": []
+      }
+    },
+    "/api/resources/acquire": {
+      "post": {
+        "operationId": "acquire",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcquireRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "{lease: id} or {waiting: name}"
+          }
+        },
+        "tags": [
+          "engine"
+        ]
+      }
+    },
+    "/api/resources/release": {
+      "post": {
+        "operationId": "release",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "engine"
+        ]
+      }
+    },
+    "/api/rules": {
+      "get": {
+        "operationId": "list_rules",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RuleRow"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      },
+      "post": {
+        "operationId": "create_rule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/rules/{id}": {
+      "delete": {
+        "operationId": "delete_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      },
+      "get": {
+        "operationId": "get_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RulePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/rules/{id}/expectations": {
+      "get": {
+        "operationId": "rule_expectations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only open (armed) expectations; default true.",
+            "in": "query",
+            "name": "open",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Expectation"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/rules/{id}/firings": {
+      "get": {
+        "operationId": "rule_firings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RuleFiring"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/rules/{id}/test": {
+      "post": {
+        "operationId": "test_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rendered actions against the latest matching event"
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/runs": {
+      "get": {
+        "operationId": "list_runs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "flow",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "flow_id",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "state_type",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "state_name",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Tags the run must carry; a query string may pass them comma-separated.",
+            "in": "query",
+            "name": "tags",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Inclusive lower bound on the run's start time (or creation when never started), microseconds.",
+            "in": "query",
+            "name": "start_after",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_before",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "`created_desc` (default), `created_asc`, `start_desc`, `start_asc`, `duration_desc`, `duration_asc`, `name_asc`.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Keyset cursor: the id of the last run of the previous page (id-ordered sorts only).",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "schedule_id",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "backfill_id",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Only runs with a scheduled time after this (upcoming lists).",
+            "in": "query",
+            "name": "scheduled_after",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunsPage"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      },
+      "post": {
+        "operationId": "create_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": "Unknown flow and no module given"
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}": {
+      "delete": {
+        "operationId": "delete_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      },
+      "get": {
+        "operationId": "get_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}/artifacts": {
+      "get": {
+        "operationId": "run_artifacts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ArtifactRow"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/runs/{id}/cancel": {
+      "post": {
+        "operationId": "cancel_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}/graph": {
+      "get": {
+        "operationId": "run_graph",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunGraph"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}/input": {
+      "get": {
+        "operationId": "run_input",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{input: <json>} or {input: null} when nothing was stored"
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}/logs": {
+      "get": {
+        "operationId": "run_logs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Return rows with id greater than this (keyset cursor).",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Minimum level: a Python numeric level or DEBUG, INFO, WARNING, ERROR, CRITICAL.",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogsPage"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "logs"
+        ]
+      }
+    },
+    "/api/runs/{id}/resume": {
+      "post": {
+        "operationId": "resume_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}/tasks": {
+      "get": {
+        "operationId": "run_tasks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TaskRun"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}/transition": {
+      "post": {
+        "operationId": "transition_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransitionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransitionRejected"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/schedules/preview": {
+      "post": {
+        "operationId": "preview_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/schedules/{sid}": {
+      "delete": {
+        "operationId": "delete_schedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_schedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchedulePatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/schedules/{sid}/pause": {
+      "post": {
+        "operationId": "pause_schedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRow"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/schedules/{sid}/resume": {
+      "post": {
+        "operationId": "resume_schedule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRow"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/server": {
+      "get": {
+        "operationId": "server_info",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerInfo"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": []
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "operationId": "get_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Settings"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/stream": {
+      "get": {
+        "operationId": "stream",
+        "parameters": [
+          {
+            "description": "Last sequence number the client has seen.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/event-stream of run.updated, task_run.updated, log.appended, flow.registered, resync"
+          }
+        },
+        "tags": [
+          "stream"
+        ]
+      }
+    },
+    "/api/task-runs": {
+      "get": {
+        "operationId": "list_task_runs",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "flow",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "state_type",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "state_name",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_after",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_before",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRunsPage"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "task_runs"
+        ]
+      }
+    },
+    "/api/task-runs/{id}": {
+      "get": {
+        "operationId": "get_task_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskRun"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "task_runs"
+        ]
+      }
+    },
+    "/api/task-runs/{id}/artifacts": {
+      "get": {
+        "operationId": "task_run_artifacts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ArtifactRow"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/task-runs/{id}/logs": {
+      "get": {
+        "operationId": "task_run_logs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Return rows with id greater than this (keyset cursor).",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Minimum level: a Python numeric level or DEBUG, INFO, WARNING, ERROR, CRITICAL.",
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogsPage"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "logs"
+        ]
+      }
+    },
+    "/api/variables": {
+      "get": {
+        "operationId": "list_variables",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VariableRow"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      },
+      "post": {
+        "operationId": "create_variable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VariableBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VariableRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    },
+    "/api/variables/{name}": {
+      "delete": {
+        "operationId": "delete_variable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      },
+      "get": {
+        "operationId": "get_variable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Return the stored ciphertext of a secret so a local client can decrypt it.",
+            "in": "query",
+            "name": "raw",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VariableWithRaw"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_variable",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VariablePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VariableRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "observability"
+        ]
+      }
+    }
+  }
+}

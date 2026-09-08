@@ -1,0 +1,196 @@
+site_name: cereyan
+site_description: Minimal, local-first orchestrator for Python data pipelines
+site_url: https://sercanatalik.github.io/cereyan/
+repo_url: https://github.com/sercanatalik/cereyan
+repo_name: sercanatalik/cereyan
+edit_uri: edit/master/docs/
+docs_dir: docs
+site_dir: site
+strict: true
+
+exclude_docs: |
+  conftest.py
+  __pycache__/
+  images/README.md
+  AGENTS.md
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      base_path: [".", "docs"]
+      check_paths: true
+
+plugins:
+  - search
+  - redirects:
+      redirect_maps:
+        agents.md: guides/agents.md
+        concepts.md: concepts/app-and-projects.md
+        configuration.md: reference/configuration.md
+        projects.md: concepts/app-and-projects.md
+        quickstart.md: get-started/quickstart.md
+        reference.md: reference/python-api.md
+        release.md: contributing.md
+        rules.md: concepts/events-and-rules.md
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [python]
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            docstring_options:
+              ignore_init_summary: true
+              warn_unknown_params: false
+              returns_named_value: false
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            show_if_no_docstring: false
+            heading_level: 3
+  - llmstxt:
+      markdown_description: >-
+        Cereyan is a minimal, local-first orchestrator for Python data pipelines:
+        a Rust core (SQLite store, state machine, scheduler, HTTP server) behind a
+        thin layer of Python decorators, shipped as one wheel with no runtime
+        dependencies. Flows and tasks run offline as plain scripts and are recorded
+        locally; `cereyan serve` adds the API, the UI, schedules, engines, rules, and
+        a built-in MCP server on top of the same store.
+      full_output: llms-full.txt
+      sections:
+        Home:
+          - index.md
+        Get started:
+          - get-started/*.md
+        Concepts:
+          - concepts/*.md
+        Guides:
+          - guides/*.md
+        Reference:
+          - reference/*.md
+        Examples:
+          - examples/*.md
+        Design:
+          - design/*.md
+        Project:
+          - changelog.md
+          - contributing.md
+
+nav:
+  - Home: index.md
+  - Get started:
+      - Install: get-started/install.md
+      - Quickstart: get-started/quickstart.md
+      - Tour of the UI: get-started/tour.md
+  - Concepts:
+      - App and projects: concepts/app-and-projects.md
+      - Flows and parameters: concepts/flows-and-parameters.md
+      - Tasks: concepts/tasks.md
+      - Runs and states: concepts/runs-and-states.md
+      - Schedules: concepts/schedules.md
+      - Targets, caching and results: concepts/targets-caching-results.md
+      - Resources and concurrency: concepts/resources-and-concurrency.md
+      - Backfills: concepts/backfills.md
+      - Dependencies: concepts/dependencies.md
+      - Events and rules: concepts/events-and-rules.md
+      - Artifacts: concepts/artifacts.md
+      - Variables: concepts/variables.md
+      - Engines and the home directory: concepts/engines-and-home.md
+  - Guides:
+      - Reliability:
+          - Retry, time out and survive crashes: guides/retries-timeouts-crashes.md
+          - Run code on state changes: guides/state-hooks.md
+          - Make reruns idempotent with targets: guides/idempotent-reruns.md
+          - Cache task results: guides/cache-results.md
+      - Running work:
+          - Run tasks concurrently: guides/concurrent-tasks.md
+          - Schedule a flow: guides/schedule-a-flow.md
+          - Backfill a date range: guides/backfill.md
+          - Limit concurrency and overlap: guides/resources-and-overlap.md
+          - Chain flows: guides/chain-flows.md
+      - Reacting:
+          - React to events with rules: guides/rules.md
+          - Detect when something did not happen: guides/detect-missing-events.md
+          - Pause a run for approval: guides/human-approval.md
+      - Extending:
+          - Add custom HTTP routes: guides/custom-routes.md
+          - Publish artifacts: guides/artifacts.md
+          - Store variables and secrets: guides/variables-and-secrets.md
+      - Operating:
+          - Secure the server: guides/secure-the-server.md
+          - Use cereyan with an AI agent: guides/agents.md
+          - Test a pipeline: guides/test-a-pipeline.md
+          - Run the server as a service: guides/run-as-a-service.md
+          - Migrate from Prefect or Luigi: guides/migrate.md
+  - Reference:
+      - Python API: reference/python-api.md
+      - CLI: reference/cli.md
+      - HTTP API: reference/http-api.md
+      - MCP tools, resources and prompts: reference/mcp.md
+      - Events: reference/events.md
+      - States and transitions: reference/states.md
+      - Configuration: reference/configuration.md
+      - Exit codes and the discovery file: reference/exit-codes.md
+  - Examples:
+      - Quickstart pipeline: examples/pipeline.md
+      - Daily ETL: examples/daily_etl.md
+      - Fan-in: examples/fan_in.md
+      - Approval: examples/approval.md
+      - Alerting: examples/alerting.md
+      - Webhook route: examples/webhook_route.md
+      - Agent diagnosis: examples/agent_diagnosis.md
+  - Design:
+      - Design and limitations: design/limitations.md
+      - Architecture: design/architecture.md
+      - Performance targets: design/performance.md
+  - Changelog: changelog.md
+  - Contributing: contributing.md

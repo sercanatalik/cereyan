@@ -1,0 +1,259 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ui:
+    name: UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: ui
+      - run: node scripts/service-sync.mjs --from openapi.snapshot.json --check
+        working-directory: ui
+      - run: npx biome check src
+        working-directory: ui
+      - run: npx vitest run
+        working-directory: ui
+      - run: npm run build
+        working-directory: ui
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+
+  test:
+    name: Test (${{ matrix.os }})
+    needs: ui
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Rust tests
+        run: cargo test --workspace
+      - name: Lint
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+      - name: Build extension
+        run: |
+          uv sync
+          uv run maturin develop --uv
+      - name: Python tests
+        run: uv run pytest -q
+      - name: Documentation tests
+        run: |
+          uv sync --group docs
+          uv run --group docs pytest --markdown-docs --markdown-docs-syntax superfences --ignore=docs/examples --ignore-glob='*/conftest.py' docs tests/docs -q
+
+  docs:
+    name: Docs
+    needs: ui
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - uses: extractions/setup-just@v3
+      - name: Build extension
+        run: |
+          uv sync --group docs
+          uv run maturin develop --uv
+      - name: Generators, docstring check, strict build, block summary
+        run: just docs
+      - name: Generated pages are current
+        run: |
+          uv run python scripts/gen_cli_reference.py --check
+          uv run python scripts/gen_http_reference.py --check
+          uv run python scripts/gen_mcp_reference.py --check
+          uv run python scripts/gen_examples.py --check
+      - name: Publish to GitHub Pages
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          uv run --group docs mkdocs gh-deploy --force --no-history
+
+  wheels:
+    name: Wheel (${{ matrix.platform.target }} on ${{ matrix.platform.os }})
+    needs: ui
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-13, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, manylinux: "2_28" }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-gnu, manylinux: "2_28" }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          manylinux: ${{ matrix.platform.manylinux || 'auto' }}
+          args: --release --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.platform.target }}
+          path: dist/*.whl
+
+  sdist:
+    name: Source distribution
+    needs: ui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  bench:
+    name: Benchmarks (targets)
+    needs: ui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Criterion benchmarks
+        run: cargo bench --workspace -- --noplot --warm-up-time 1 --measurement-time 3
+      - name: Build release extension
+        run: |
+          uv sync
+          uv run maturin develop --uv --release
+      - name: End-to-end targets (fails on a missed target or a >20% regression against a checked-in baseline for this runner)
+        run: uv run python benches/e2e.py --quick
+
+  soak:
+    name: Overlap soak (quick, manual)
+    if: github.event_name == 'workflow_dispatch'
+    needs: ui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Build release extension
+        run: |
+          uv sync
+          uv run maturin develop --uv --release
+      - name: Twelve-minute overlap soak (invariants only, no baseline)
+        run: uv run python benches/soak_overlap.py --quick
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: soak-report
+          path: benches/soak-report.json
+
+  smoke:
+    name: Fresh install (${{ matrix.platform.os }})
+    needs: wheels
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-${{ matrix.platform.target }}
+          path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Smoke test the wheel
+        shell: bash
+        run: scripts/smoke.sh "$(ls dist/*.whl | head -1)"
+
+  publish:
+    name: Publish to PyPI
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [test, smoke, sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # trusted publishing; no API token stored in the repository
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          print-hash: true

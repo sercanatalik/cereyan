@@ -1,0 +1,36 @@
+[package]
+name = "cereyan-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+build = "build.rs"
+
+[dependencies]
+cereyan-core = { path = "../core", features = ["openapi"] }
+cereyan-store = { path = "../store", features = ["openapi"] }
+cereyan-rules = { path = "../rules" }
+ureq = { workspace = true }
+lettre = { workspace = true }
+toml = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+utoipa = { workspace = true }
+rust-embed = { workspace = true }
+mime_guess = { workspace = true }
+chrono = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "timer"
+harness = false

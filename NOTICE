@@ -1,0 +1,15 @@
+cereyan
+Copyright 2026 the cereyan authors
+Licensed under the MIT License (see LICENSE).
+
+This product includes UI components adapted from Prefect
+(https://github.com/PrefectHQ/prefect), licensed under the Apache License,
+Version 2.0. The adapted components are marked with a "Ported from Prefect"
+comment in ui/src/components/ported/: state badge, run logs viewer, key-value
+list, tag input, date range selector, and JSON view. They were rewritten in
+React from the original Vue implementations.
+
+This product bundles the Geist and Geist Mono typefaces (https://vercel.com/font),
+Copyright 2023 Vercel, Inc., licensed under the SIL Open Font License, Version 1.1
+(https://openfontlicense.org). The font files are embedded in the UI assets through
+the @fontsource-variable/geist and @fontsource-variable/geist-mono packages.

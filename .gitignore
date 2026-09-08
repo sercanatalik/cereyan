@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+*.so
+.pytest_cache/
+
+# Virtual environments
+.venv
+
+# Rust
+target/
+
+# Local runtime home used during manual testing
+.cereyan-home/
+
+# UI
+ui/node_modules/
+ui/dist/
+ui/src/routeTree.gen.ts
+
+# MkDocs build output
+site/
+
+# Overlap soak output
+benches/soak-report.json
+
+# Spec-driven workflow and AI-assistant scaffolding: kept locally, not published
+openspec/
+.claude/
+CLAUDE.md

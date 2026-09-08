@@ -1,0 +1,75 @@
+[build-system]
+requires = ["maturin>=1.12,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "cereyan"
+version = "1.3.0"
+description = "Minimal, local-first orchestrator for Python data pipelines with a Rust core"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "the cereyan authors" }]
+keywords = [
+  "orchestration",
+  "workflow",
+  "data-pipeline",
+  "etl",
+  "scheduler",
+  "dag",
+  "local-first",
+  "rust",
+]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Web Environment",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Information Technology",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: System :: Distributed Computing",
+  "Topic :: System :: Monitoring",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://sercanatalik.github.io/cereyan/"
+Documentation = "https://sercanatalik.github.io/cereyan/"
+Repository = "https://github.com/sercanatalik/cereyan"
+Changelog = "https://sercanatalik.github.io/cereyan/changelog/"
+Issues = "https://github.com/sercanatalik/cereyan/issues"
+
+[project.scripts]
+cereyan = "cereyan.cli:main"
+
+[tool.maturin]
+python-source = "python"
+module-name = "cereyan._core"
+manifest-path = "crates/py/Cargo.toml"
+features = ["pyo3/extension-module"]
+
+[dependency-groups]
+dev = ["maturin>=1.12,<2.0", "pytest>=8"]
+docs = [
+  "mkdocs>=1.6,<2",
+  "mkdocs-material>=9.5",
+  "mkdocstrings[python]>=0.27",
+  "mkdocs-redirects>=1.2",
+  "mkdocs-llmstxt>=0.2",
+  "pytest-markdown-docs>=0.7",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["performance: throughput and timing checks"]
