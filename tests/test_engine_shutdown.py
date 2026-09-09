@@ -69,14 +69,33 @@ def test_graceful_stop_leaves_no_engine(served):
     assert not leaked, f"engines outlived the server: {leaked}"
 
 
+def _idle(served, timeout: float = 30.0) -> None:
+    """Wait until no engine holds a run and the tail of its report has landed.
+
+    `wait_run` returns when the *server* records the terminal state; the engine is
+    still flushing its last events then, and a flush retries for MAX_RETRY (600 s in
+    crates/py/src/client.rs) so a server restart cannot lose the outcome of a finished
+    run. Killing the server inside that window measures the 600 s path, not the idle
+    one these tests are about.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        engines = served.client.server()["engines"]
+        if engines and not any(e.get("current_run") for e in engines):
+            break
+        time.sleep(0.1)
+    time.sleep(2.0)
+
+
 def _kill_the_server_under(served) -> list[int]:
-    """Warm an engine, then SIGKILL the server so it never says exit."""
+    """Warm an engine, let it go idle, then SIGKILL the server so it never says exit."""
     flows = served.client._request("GET", "/api/flows")
     flow_id = (flows if isinstance(flows, list) else flows["items"])[0]["id"]
     run = served.client._request("POST", f"/api/flows/{flow_id}/runs", body={"parameters": {}})
     served.wait_run(run["id"])
     pids = served.engine_pids()
     assert pids, "the run should have warmed an engine"
+    _idle(served)
     served.proc.kill()
     served.proc.wait()
     return pids
