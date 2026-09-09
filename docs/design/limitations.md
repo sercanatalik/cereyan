@@ -46,4 +46,4 @@ Cereyan is built for one machine, one wheel, and pipelines that can always be re
 - Unix sockets and engine niceness do not exist on Windows.
 - Schedules, dependencies, backfills, data rules, clock-armed proactive rules, and pausing need a running server; offline scripts record runs and fire code rules that a server has registered.
 
-Related: [Architecture](architecture.md), [Migrate from Prefect or Luigi](../guides/migrate.md).
+Related: [Architecture](architecture.md).

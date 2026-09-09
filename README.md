@@ -93,7 +93,7 @@ stable. Issues and questions are welcome; production use is not advised yet.
 
 ## Development
 
-Rust stable, Python 3.11 or newer with uv, Node 22, and just. `just ui` builds the UI, `just dev` builds the extension in place, `just test` and `just lint` run everything, `just demo` serves the examples. Details, the repository layout, and the release checklist are in the [contributing guide](https://sercanatalik.github.io/cereyan/contributing/). Design decisions and the phased roadmap live in `roadmap.md`.
+Rust stable, Python 3.11 or newer with uv, Node 22, and just. `just ui` builds the UI, `just dev` builds the extension in place, `just test` and `just lint` run everything, `just demo` serves the examples. Details, the repository layout, and the release checklist are in the [contributing guide](https://sercanatalik.github.io/cereyan/contributing/).
 
 ## Credits
 
@@ -103,7 +103,7 @@ Cereyan owes its shape to two projects that came first.
 
 [**Prefect**](https://github.com/PrefectHQ/prefect) contributed the authoring model — flows and tasks as decorated functions, runs carrying explicit states, a server watching them — and the look of the UI. Six UI components were adapted from Prefect's, rewritten in React from the Vue originals; they are marked in `ui/src/components/ported/` and listed in `NOTICE`, and remain under the Apache License 2.0 of their origin.
 
-Neither is a dependency, and cereyan deliberately does far less than either: one machine, one process, one wheel, no remote workers and no database to run. If you need what they do, use them. [Migrating from Prefect or Luigi](https://sercanatalik.github.io/cereyan/guides/migrate/) says what carries over and what does not.
+Neither is a dependency, and cereyan deliberately does far less than either: one machine, one process, one wheel, no remote workers and no database to run. If you need what they do, use them. [Design and limitations](https://sercanatalik.github.io/cereyan/design/limitations/) says what cereyan does not do, and why.
 
 ## License
 

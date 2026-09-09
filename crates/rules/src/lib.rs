@@ -252,7 +252,7 @@ fn render_value(
     }
 }
 
-/// The default failure email body, in the spirit of Luigi's failure email.
+/// The default failure email body.
 pub const DEFAULT_EMAIL_BODY: &str =
     "Run {{ run.name }} of flow {{ run.project }}/{{ run.flow_name }} ended {{ state.name }}.\n\n\
 Parameters:\n{% for k, v in parameters | dictsort %}  {{ k }} = {{ v }}\n{% endfor %}\n\

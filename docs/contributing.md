@@ -1,6 +1,6 @@
 # Contributing
 
-Cereyan is a Cargo workspace (`crates/`) with a Python package (`python/cereyan`), a React UI (`ui/`), and this documentation (`docs/`), built as one wheel by maturin. Design decisions and the phased history live in `roadmap.md`.
+Cereyan is a Cargo workspace (`crates/`) with a Python package (`python/cereyan`), a React UI (`ui/`), and this documentation (`docs/`), built as one wheel by maturin.
 
 ## Set up
 
@@ -101,4 +101,4 @@ gh api -X POST repos/<owner>/<repo>/environments/github-pages/deployment-branch-
 
 ## License
 
-MIT. UI components adapted from Prefect are listed in `NOTICE` and remain under the Apache License 2.0 of their origin.
+MIT. Third-party components and their licences are listed in `NOTICE`.

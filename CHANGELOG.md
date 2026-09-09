@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Removed `roadmap.md` and the migration guide, and the references to other projects that went with them. The credits in the README stay, as does `NOTICE` and the per-file attribution it points at, which the Apache 2.0 licence of the adapted UI components requires. The old migration-guide URL redirects to Design and limitations.
+
 ## 1.5.0 (2026-09-09)
 
 - The runtime home is readable only by the account that created it. It was created with whatever the umask gave — `0755` on a typical machine — so `db.sqlite`, with every run, log, event and variable, was readable by any other account, and `secret.key` was too: it was narrowed to `0600` after being written, leaving a window in which the key that decrypts every secret was world-readable, and that narrowing never ran on Windows at all. Protecting the directory covers everything in it, closes the window, and needs nothing platform-specific for a home under your user profile. A home from an earlier version is narrowed when opened, with a message saying so.

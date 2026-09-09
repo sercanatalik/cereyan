@@ -57,7 +57,7 @@ Every page ends with a `Related:` line linking two or three neighbours. Every ha
 
 App, flow, task, run, task run, state, schedule, parameter, target, resource, backfill, artifact, variable, event, rule. State types: Scheduled, Pending, Running, Completed, Failed, Cancelled, Crashed, Paused, Cancelling. Named sub-states: Late, AwaitingRetry, Retrying, TimedOut, Cached, Skipped.
 
-Never write "deployment", "job", "DAG", or "workflow" for a flow. "Deployment" appears only in `docs/guides/migrate.md`, explaining the Prefect term.
+Never write "deployment", "job", "DAG", or "workflow" for a flow.
 
 ## Style
 
