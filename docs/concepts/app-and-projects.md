@@ -14,7 +14,7 @@ assert daily_etl.project == "warehouse"
 
 An **App** is the registry a module's flows, custom routes, and code rules belong to. Its name is the **project** every one of its flows is identified by: a flow's identity is `(project, name)`, so two projects can each have a flow called `etl` without colliding.
 
-The project is also how flows and runs are grouped in the UI, unless a flow declares a group of its own with `@flow(group=...)`. Groups are a flat axis rather than a level inside the project, so flows in different projects that declare the same group form one group, and a group named after a project merges with the flows defaulting to it. See [Tour of the UI](../get-started/tour.md).
+The project is also how flows and runs are listed in the UI, unless a flow declares a [group](#groups) of its own.
 
 ## The default App
 
@@ -31,6 +31,22 @@ print(etl.project)   # the basename of the directory this module lives in
 ```
 
 Two directories with the same basename that both rely on the default App collapse into one project. Give them an explicit `App(name=)` when that matters.
+
+## Groups
+
+The UI lists flows and runs in collapsible groups. A flow's group is the one it declares with `group=`, else its project:
+
+```python
+from cereyan import flow
+
+@flow(group="nightly")
+def daily_etl() -> int:
+    return 1
+
+assert daily_etl.group == "nightly"
+```
+
+Groups are a flat axis rather than a level inside the project: flows in different projects that declare the same group form one group, and a group named after a project merges with the flows defaulting to it, which is how a flow joins a group it does not live beside. A run is grouped by its flow's group, read through the flow rather than stored on the run, so renaming a group moves the run history with it. What a collapsed group header shows is on the [tour](../get-started/tour.md#flows).
 
 ## What an App holds
 

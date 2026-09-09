@@ -46,7 +46,7 @@ Runs get a random `adjective-animal` name unless the flow sets `run_name`: a `st
 | Dependencies | `after`, `batch_key` | [Dependencies](dependencies.md) |
 | Backfills | `bulk_complete` | [Backfills](backfills.md) |
 | Execution | `runner`, `isolated`, `log_prints` | [Tasks](tasks.md), [Engines and the home directory](engines-and-home.md) |
-| Display | `name`, `description`, `tags` | |
+| Display | `name`, `description`, `tags`, `group` | [App and projects](app-and-projects.md) |
 
 The full option list with types and defaults is in the [Python API reference](../reference/python-api.md#cereyan.flow).
 

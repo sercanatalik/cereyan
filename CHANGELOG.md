@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.11.0 (2026-09-09)
+
+- Documentation: `@flow(group=...)` shipped in 1.10.0 with a paragraph on App and projects and nothing a reader could copy. It now has a section of its own there with a snippet, and Flows and parameters lists it among what a flow declares, so the option is findable from the page a reader reaches for when choosing one. The README's screenshot captions describe the collapsible groups the recaptured Flows and Runs shots already show.
+
 ## 1.10.0 (2026-09-09)
 
 - **Flows can declare a group, and the UI collapses by it.** `@flow(group="nightly")` names the group a flow is listed under; without it a flow is grouped under its project, as before. Groups are a flat axis rather than a level inside the project, so flows in different projects declaring the same group form one group and a group named after a project merges with the flows defaulting to it — which is how a flow joins a group it does not live beside. A run carries its flow's group, read through the flow rather than stored on the run, so renaming a group moves the run history with it instead of cleaving it in two. Both the Flows and the Runs page now draw their groups as collapsible sections whose header is the same columns rolled up: the soonest next fire, the group's recent runs, its states as a bar with counts, the tag union, and the row count. Flows the running server no longer has registered are counted separately as stale, because a group whose flows all last succeeded but have since deregistered would otherwise read as healthy behind a folded header. A group of more than five rows starts collapsed, a lone group is always open, a search opens every group it matches, and the default is fixed when a group is first seen so a live update never shuts one under the cursor.
