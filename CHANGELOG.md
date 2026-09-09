@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.6.1 (2026-09-09)
+
+- Internal refactoring.
+
 ## 1.6.0 (2026-09-09)
 
 - **`@flow` and `@task` reject `async def`.** An async body was never awaited: the call returned a coroutine, the body never ran, and the run was recorded `Completed` — a pipeline that fetched nothing and reported success, its only trace a `RuntimeWarning` on stderr after the fact. Both decorators now raise `TypeError` at decoration, naming the function and showing the synchronous wrapper. `async def` with `yield` is rejected too: `inspect.iscoroutinefunction` is false for an async generator function, which failed the same way. Async bodies remain unsupported; `async def` route handlers are unaffected. Anything this breaks was already reporting success without running.
