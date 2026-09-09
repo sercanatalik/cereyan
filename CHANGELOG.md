@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.9.1 (2026-09-09)
+
 - The engine give-up test no longer gates a release on a wall-clock ceiling. `test_idle_engine_gives_up_when_the_server_is_killed` asserted that a SIGKILLed server's engine exits within 60 seconds, against a bound of 40; on a loaded macOS runner the same commit that passed on `main` failed on the tag, which is the flake the repository already has a rule against. It now asserts only that the engine gives up, and the 40 second bound moved to a `performance` test that `just bench` runs on calibrated hardware, where a number like that means something. No product behaviour changed.
 
 ## 1.9.0 (2026-09-09)
