@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.9.0 (2026-09-09)
+
 - Documentation: features that shipped without a page. The MCP guide still described fifteen tools and named none of the four schedule tools added in 1.8.0. `cereyan.runtime`, the public view of the run in progress (`run`, `task_run`, `flow`), was exported from the package and mentioned nowhere; it now has a section on the Python API page and a pointer from Runs and states. The events reference listed five of the fifteen kinds the SSE stream carries and the OpenAPI description behind `GET /api/stream` listed four; both now list all of them with their payloads. The tour still said the run page's Details tab shows an exit code, which was removed in 1.4.0, and did not mention the task run page.
 - Documentation: the three Windows behaviours tracked in `WINDOWS.md` are now stated where a reader meets them rather than only in a file that ships with the repository. A flow's `timeout_seconds` does nothing on the offline path there, so Retry, time out and survive crashes says so; a cancel cannot interrupt a flow blocked in a call, so Engines and the home directory says so; a clock-armed proactive rule can lapse while its events are still arriving, so Detect when something did not happen says so. Install carries the three as a table and Design and limitations names them.
 
