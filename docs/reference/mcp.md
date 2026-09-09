@@ -17,13 +17,13 @@ Runs created through MCP record `created_by = mcp:<client name>` from the `initi
 
 `initialize` answers with protocol version `2025-06-18`, server name `cereyan` and its release version, and the capabilities `prompts`, `resources`, `tools`. It also carries the instructions the server gives the model:
 
-> cereyan runs Python pipelines on this machine. Use list_flows to see what can run, run_flow to start work, get_run and run_logs to follow it, and explain_failure when a run fails. Writes (run_flow, cancel_run, resume_run, backfill, pause_schedule, resume_schedule, set_variable) take effect immediately.
+> cereyan runs Python pipelines on this machine. Use list_flows to see what can run, run_flow to start work, get_run and run_logs to follow it, and explain_failure when a run fails. Flows run on demand: a flow needs no schedule, and run_flow is how work usually starts. For work that should recur, list_schedules shows what is scheduled and the create, edit, delete, pause and resume schedule tools manage it. Writes take effect immediately.
 
 ## Tools
 
-Every tool description states its effect so a model can decide before calling. A tool returns one text content block holding the JSON whose top-level keys are listed as its response; a failure returns `isError: true` and a message instead. Rule creation is not exposed.
+Every tool description states its effect so a model can decide before calling. A tool returns one text content block holding the JSON whose top-level keys are listed as its response; a failure returns `isError: true` and a message instead. Rule creation is not exposed, and a schedule declared in a flow's code cannot be deleted through MCP: the next restart recreates it from the declaration, so pausing it is what lasts.
 
-### Read-only tools (8)
+### Read-only tools (9)
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -34,9 +34,10 @@ Every tool description states its effect so a model can decide before calling. A
 | `list_events` | `flow_id` (integer)<br>`limit` (integer, 1 to 500, default `50`)<br>`name` (string) — Exact name or a prefix ending in * such as run.*<br>`run_id` (integer) | Recent events (run and task transitions, schedule changes, rule firings, custom events), newest first. Response keys: `events`, `next_cursor` |
 | `list_artifacts` | `flow` (string)<br>`key` (string)<br>`kind` (string)<br>`limit` (integer, 1 to 200, default `50`)<br>`project` (string)<br>`run_id` (integer) | Artifacts across runs, newest first, with their run, flow, and project. Response keys: `artifacts`, `next_cursor` |
 | `list_rules` | none | The rules (reactive and proactive) with their match, actions, guards, and fire counts. Response keys: `rules` |
+| `list_schedules` | `flow` (string) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) — Only schedules of this project | The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, and whether it was declared in the flow's code, created in the interface, or created by an agent. Response keys: `schedules` |
 | `explain_failure` | `run_id` (integer, required) | Everything needed to diagnose a run in one call: the run, its failed or crashed task runs, the last warning-or-above log lines, and the run's events. Response keys: `error_logs`, `events`, `failed_task_runs`, `run`, `verdict` |
 
-### Tools that change state (7)
+### Tools that change state (10)
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -44,6 +45,9 @@ Every tool description states its effect so a model can decide before calling. A
 | `cancel_run` | `run_id` (integer, required) | Cancel a run. A queued run is cancelled at once; a running run is asked to stop and killed after the grace period. Response keys: `run` |
 | `resume_run` | `input` (any JSON, required) — The answer, any JSON<br>`run_id` (integer, required) | Answer a Paused run's wait_for_input question and schedule its next attempt. The answer can be any JSON. Response keys: `run` |
 | `backfill` | `concurrency` (integer, default `1`)<br>`dry_run` (boolean, default `true`)<br>`end` (string, required)<br>`extra_parameters` (object)<br>`flow` (string, required) — Flow name, or project/flow when the name exists in several projects<br>`interval` (string) — Seconds or a duration such as 1d or 12h (default 1d)<br>`parameter` (string, required)<br>`reverse` (boolean)<br>`start` (string, required) — YYYY-MM-DD or RFC 3339 | Create one run per value of a date or datetime parameter between start and end. Defaults to a dry run that only reports how many runs would be created; pass dry_run false to create them. Can create thousands of runs. Response keys: dry run: `dry_run`, `first`, `flow`, `interval_seconds`, `last`, `note`, `parameter`, `runs`<br>dry_run false: `backfill`, `dry_run` |
+| `create_schedule` | `anchor` (integer) — Microseconds UTC the interval counts from; defaults to now<br>`catchup` (string, default `"skip"`)<br>`catchup_max` (integer, default `100`)<br>`cron` (string) — Five-field cron expression, for kind cron<br>`day_or` (boolean) — For cron, OR day-of-month with day-of-week (default true)<br>`flow` (string, required) — Flow name, or project/flow when the name exists in several projects<br>`interval` (number) — Seconds between fires, for kind interval<br>`kind` (string, required) — Which kind of schedule<br>`project` (string)<br>`rrule` (string) — RFC 5545 RRULE, for kind rrule<br>`timezone` (string) — IANA name such as Europe/Istanbul; UTC when unset | Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Returns the schedule and the next few times it will fire. Response keys: `next_fires`, `schedule` |
+| `edit_schedule` | `anchor` (integer)<br>`catchup` (string)<br>`catchup_max` (integer)<br>`cron` (string)<br>`day_or` (boolean)<br>`interval` (number)<br>`rrule` (string)<br>`schedule_id` (integer, required)<br>`timezone` (string) | Retime an existing schedule. Editing one that was declared in the flow's code detaches it permanently: the declaration in the Python source stops governing it, and the result says so. Returns the schedule and the next few times it will fire. Response keys: `next_fires`, `schedule` |
+| `delete_schedule` | `schedule_id` (integer, required) | Remove a schedule that was created in the interface or by an agent. A schedule declared in the flow's code cannot be removed this way, because the next restart recreates it from the declaration; pause_schedule stops that one durably. Response keys: `deleted`, `schedule_id` |
 | `pause_schedule` | `schedule_id` (integer, required) | Pause a schedule so it stops creating runs until resumed. Response keys: `schedule` |
 | `resume_schedule` | `schedule_id` (integer, required) | Resume a paused schedule. Response keys: `schedule` |
 | `set_variable` | `name` (string, required)<br>`secret` (boolean, default `false`)<br>`tags` (array of string)<br>`value` (any JSON, required) — Any JSON | Create or overwrite a variable. Secrets are encrypted at rest and never returned in plain text. Response keys: `variable` |
@@ -61,6 +65,7 @@ Recorded from real responses, so a model knows what it gets without a second cal
 | `list_events` | `events` | `external_id`, `flow_id`, `id`, `name`, `occurred`, `payload`, `related`, `resource`, `run_id`, `seq` |
 | `list_flows` | `flows` | `description`, `error`, `id`, `live`, `name`, `options`, `parameter_schema`, `project`, `tags` |
 | `list_runs` | `runs` | `attempt`, `backfill_id`, `crash_count`, `created_at`, `created_by`, `end_time`, `engine_id`, `engine_pid`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `id`, `name`, `parameters`, `parent_run_id`, `priority`, `project`, `report_seq`, `schedule_id`, `scheduled_time`, `start_time`, `state`, `tags`, `task_counts`, `total_run_time` |
+| `list_schedules` | `schedules` | `active`, `catchup`, `catchup_max`, `flow`, `id`, `next_fire`, `paused_reason`, `paused_until`, `project`, `schedule`, `source` |
 | `run_logs` | `logs` | `id`, `level`, `logger`, `message`, `run_id`, `task_run_id`, `timestamp` |
 
 ## Resources

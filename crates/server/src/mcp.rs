@@ -11,12 +11,13 @@ use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use cereyan_core::{now_micros, StateType};
+use cereyan_core::{now_micros, ScheduleRow, StateType};
 use cereyan_store::{ArtifactFilter, EventFilter, ListRunsFilter, LogFilter};
 use serde_json::{json, Map, Value};
 
 use crate::api::backfills::{self, BackfillBody};
 use crate::api::error::ApiError;
+use crate::api::schedules::{ScheduleBody, SchedulePatchBody};
 use crate::api::{observability, runs};
 use crate::state::AppState;
 
@@ -159,7 +160,7 @@ pub async fn handle_post(
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
             "serverInfo": {"name": "cereyan", "version": state.config.version},
-            "instructions": "cereyan runs Python pipelines on this machine. Use list_flows to see what can run, run_flow to start work, get_run and run_logs to follow it, and explain_failure when a run fails. Writes (run_flow, cancel_run, resume_run, backfill, pause_schedule, resume_schedule, set_variable) take effect immediately.",
+            "instructions": "cereyan runs Python pipelines on this machine. Use list_flows to see what can run, run_flow to start work, get_run and run_logs to follow it, and explain_failure when a run fails. Flows run on demand: a flow needs no schedule, and run_flow is how work usually starts. For work that should recur, list_schedules shows what is scheduled and the create, edit, delete, pause and resume schedule tools manage it. Writes take effect immediately.",
         });
         let mut resp = Json(rpc_result(id, result)).into_response();
         if let Ok(v) = header::HeaderValue::from_str(&sid) {
@@ -296,6 +297,8 @@ pub fn tool_list() -> Vec<Value> {
             json!({"kind": {"type": "string"}, "key": {"type": "string"}, "flow": {"type": "string"}, "project": {"type": "string"}, "run_id": {"type": "integer"}, "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}), &[]),
         tool("list_rules", "The rules (reactive and proactive) with their match, actions, guards, and fire counts. Read-only.",
             json!({}), &[]),
+        tool("list_schedules", "The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, and whether it was declared in the flow's code, created in the interface, or created by an agent. Read-only.",
+            json!({"flow": flow_prop, "project": {"type": "string", "description": "Only schedules of this project"}}), &[]),
         tool("explain_failure", "Everything needed to diagnose a run in one call: the run, its failed or crashed task runs, the last warning-or-above log lines, and the run's events. Read-only.",
             json!({"run_id": {"type": "integer"}}), &["run_id"]),
         tool("run_flow", "Start a run of a flow now. Creates the run immediately and returns without waiting; follow it with get_run. Parameters are validated against the flow's schema.",
@@ -306,6 +309,29 @@ pub fn tool_list() -> Vec<Value> {
             json!({"run_id": {"type": "integer"}, "input": {"description": "The answer, any JSON"}}), &["run_id", "input"]),
         tool("backfill", "Create one run per value of a date or datetime parameter between start and end. Defaults to a dry run that only reports how many runs would be created; pass dry_run false to create them. Can create thousands of runs.",
             json!({"flow": flow_prop, "parameter": {"type": "string"}, "start": {"type": "string", "description": "YYYY-MM-DD or RFC 3339"}, "end": {"type": "string"}, "interval": {"type": "string", "description": "Seconds or a duration such as 1d or 12h (default 1d)"}, "concurrency": {"type": "integer", "default": 1}, "extra_parameters": {"type": "object"}, "reverse": {"type": "boolean"}, "dry_run": {"type": "boolean", "default": true}}), &["flow", "parameter", "start", "end"]),
+        tool("create_schedule", "Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Returns the schedule and the next few times it will fire.",
+            json!({
+                "flow": flow_prop, "project": {"type": "string"},
+                "kind": {"type": "string", "enum": ["cron", "interval", "rrule"], "description": "Which kind of schedule"},
+                "cron": {"type": "string", "description": "Five-field cron expression, for kind cron"},
+                "interval": {"type": "number", "description": "Seconds between fires, for kind interval"},
+                "anchor": {"type": "integer", "description": "Microseconds UTC the interval counts from; defaults to now"},
+                "rrule": {"type": "string", "description": "RFC 5545 RRULE, for kind rrule"},
+                "timezone": {"type": "string", "description": "IANA name such as Europe/Istanbul; UTC when unset"},
+                "day_or": {"type": "boolean", "description": "For cron, OR day-of-month with day-of-week (default true)"},
+                "catchup": {"type": "string", "enum": ["skip", "latest", "all"], "default": "skip"},
+                "catchup_max": {"type": "integer", "default": 100}
+            }), &["flow", "kind"]),
+        tool("edit_schedule", "Retime an existing schedule. Editing one that was declared in the flow's code detaches it permanently: the declaration in the Python source stops governing it, and the result says so. Returns the schedule and the next few times it will fire.",
+            json!({
+                "schedule_id": {"type": "integer"},
+                "cron": {"type": "string"}, "interval": {"type": "number"}, "anchor": {"type": "integer"},
+                "rrule": {"type": "string"}, "timezone": {"type": "string"}, "day_or": {"type": "boolean"},
+                "catchup": {"type": "string", "enum": ["skip", "latest", "all"]},
+                "catchup_max": {"type": "integer"}
+            }), &["schedule_id"]),
+        tool("delete_schedule", "Remove a schedule that was created in the interface or by an agent. A schedule declared in the flow's code cannot be removed this way, because the next restart recreates it from the declaration; pause_schedule stops that one durably.",
+            json!({"schedule_id": {"type": "integer"}}), &["schedule_id"]),
         tool("pause_schedule", "Pause a schedule so it stops creating runs until resumed.",
             json!({"schedule_id": {"type": "integer"}}), &["schedule_id"]),
         tool("resume_schedule", "Resume a paused schedule.",
@@ -337,6 +363,36 @@ fn arg_usize(args: &Map<String, Value>, key: &str, default: usize, max: usize) -
         .map(|v| v as usize)
         .unwrap_or(default)
         .clamp(1, max)
+}
+
+/// The schedule arguments as `ScheduleBody` expects them on the wire. `Schedule`
+/// is `#[serde(tag = "kind")]`, so the variant fields sit alongside `kind`; the
+/// tool takes them flat and only the keys belonging to a schedule are forwarded.
+fn schedule_body_json(args: &Map<String, Value>) -> Value {
+    let mut body = Map::new();
+    for key in [
+        "kind",
+        "cron",
+        "interval",
+        "anchor",
+        "rrule",
+        "timezone",
+        "day_or",
+        "catchup",
+        "catchup_max",
+    ] {
+        if let Some(v) = args.get(key) {
+            body.insert(key.to_string(), v.clone());
+        }
+    }
+    Value::Object(body)
+}
+
+/// The next few times a schedule fires, so an agent can check a spec means what
+/// it intended before it fires unattended. An unparseable spec yields nothing
+/// rather than failing the call: the schedule is already stored by this point.
+fn preview_of(row: &ScheduleRow) -> Vec<i64> {
+    crate::scheduler::preview(&row.schedule, 3).unwrap_or_default()
 }
 
 fn resolve_flow(
@@ -552,6 +608,93 @@ async fn call_tool(
             }
             let status = backfills::create_backfill_inner(state, &flow, &body).await?;
             Ok(json!({"dry_run": false, "backfill": status}))
+        }
+        "list_schedules" => {
+            let flow_id = match arg_str(args, "flow") {
+                Some(n) => Some(resolve_flow(state, &n, arg_str(args, "project").as_deref())?.id),
+                None => None,
+            };
+            let project = arg_str(args, "project");
+            let rows = state.store.list_schedules(flow_id)?;
+            let flows = state.store.list_flows(None)?;
+            let schedules: Vec<Value> = rows
+                .into_iter()
+                .filter_map(|row| {
+                    let flow = flows.iter().find(|f| f.id == row.flow_id)?;
+                    if let Some(p) = &project {
+                        if &flow.project != p {
+                            return None;
+                        }
+                    }
+                    let row = crate::api::schedules::decorate(state, row);
+                    Some(json!({
+                        "id": row.id, "flow": flow.name, "project": flow.project,
+                        "schedule": row.schedule, "catchup": row.catchup, "catchup_max": row.catchup_max,
+                        "active": row.active, "source": row.source, "next_fire": row.next_fire,
+                        "paused_reason": row.paused_reason, "paused_until": row.paused_until,
+                    }))
+                })
+                .collect();
+            Ok(json!({"schedules": schedules}))
+        }
+        "create_schedule" => {
+            let name = arg_str(args, "flow")
+                .ok_or_else(|| ToolError::Failed("flow is required".into()))?;
+            let flow = resolve_flow(state, &name, arg_str(args, "project").as_deref())?;
+            let body: ScheduleBody = serde_json::from_value(schedule_body_json(args))
+                .map_err(|e| ToolError::Failed(format!("schedule is not valid: {e}")))?;
+            let row =
+                crate::api::schedules::create_schedule_inner(state, flow.id, body, "mcp").await?;
+            let mut out = json!({"schedule": row, "next_fires": preview_of(&row)});
+            // Two schedules on one flow is legal and occasionally meant; more often
+            // the agent has not noticed the flow already declares its own.
+            let existing = state.store.list_schedules(Some(flow.id))?;
+            if existing.iter().any(|s| s.source == "code") {
+                out["note"] = json!(format!(
+                    "{} already has a schedule declared in its code; it now has more than one.",
+                    flow.name
+                ));
+            }
+            Ok(out)
+        }
+        "edit_schedule" => {
+            let sid = arg_i64(args, "schedule_id")?;
+            let before = state
+                .store
+                .get_schedule(sid)?
+                .ok_or_else(|| ToolError::Failed(format!("schedule {sid} not found")))?;
+            let body: SchedulePatchBody = serde_json::from_value(Value::Object(args.clone()))
+                .map_err(|e| ToolError::Failed(format!("patch is not valid: {e}")))?;
+            let row = crate::api::schedules::patch_schedule_inner(state, sid, body).await?;
+            let mut out = json!({"schedule": row, "next_fires": preview_of(&row)});
+            if before.source == "code" {
+                out["note"] = json!(
+                    "This schedule was declared in the flow's code. That declaration no longer \
+                     governs it: the edit is permanent and re-registering the flow will not undo it."
+                );
+            }
+            Ok(out)
+        }
+        "delete_schedule" => {
+            let sid = arg_i64(args, "schedule_id")?;
+            let row = state
+                .store
+                .get_schedule(sid)?
+                .ok_or_else(|| ToolError::Failed(format!("schedule {sid} not found")))?;
+            if row.source == "code" {
+                // Deleting would not last: register() recreates every declared
+                // schedule it does not find, so a success here would be a lie.
+                return Err(ToolError::Failed(format!(
+                    "schedule {sid} is declared in the flow's code and would be recreated at the \
+                     next restart; use pause_schedule to stop it, or remove the declaration from \
+                     the flow"
+                )));
+            }
+            let st = state.clone();
+            let ok = tokio::task::spawn_blocking(move || crate::scheduler::delete(&st, sid))
+                .await
+                .map_err(|e| ToolError::Failed(e.to_string()))?;
+            Ok(json!({"deleted": ok, "schedule_id": sid}))
         }
         "pause_schedule" | "resume_schedule" => {
             let sid = arg_i64(args, "schedule_id")?;

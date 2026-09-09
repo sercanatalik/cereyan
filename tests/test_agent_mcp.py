@@ -18,7 +18,7 @@ SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_snapsho
 
 PIPELINE = '''
 from datetime import date
-from cereyan import App, artifacts, task, wait_for_input
+from cereyan import App, Cron, artifacts, task, wait_for_input
 
 app = App("agent")
 
@@ -39,6 +39,10 @@ def boom():
 @app.flow
 def ask():
     return wait_for_input("Go?")
+
+@app.flow(schedule=Cron("0 3 1 1 *", timezone="UTC"))
+def nightly():
+    return "ok"
 '''
 
 
@@ -167,6 +171,13 @@ def _response_keys(srv):
     keys["pause_schedule"] = {"default": _keys(call(srv, "pause_schedule", schedule_id=sched["id"]))}
     keys["resume_schedule"] = {"default": _keys(call(srv, "resume_schedule", schedule_id=sched["id"]))}
 
+    keys["list_schedules"] = {"default": _keys(call(srv, "list_schedules"))}
+    made = call(srv, "create_schedule", flow="etl", kind="interval", interval=86400)
+    keys["create_schedule"] = {"default": _keys(made)}
+    made_id = made["data"]["schedule"]["id"]
+    keys["edit_schedule"] = {"default": _keys(call(srv, "edit_schedule", schedule_id=made_id, interval=43200))}
+    keys["delete_schedule"] = {"default": _keys(call(srv, "delete_schedule", schedule_id=made_id))}
+
     keys["set_variable"] = {"default": _keys(call(srv, "set_variable", name="snapshot", value="v"))}
     return {name: keys[name] for name in sorted(keys)}
 
@@ -207,7 +218,7 @@ def test_mcp_snapshot(agent):
 def test_run_flow_attribution_and_explain_failure(agent):
     rpc(agent, "initialize", {"clientInfo": {"name": "claude-code"}})
     flows = call(agent, "list_flows")["data"]["flows"]
-    assert {f["name"] for f in flows} == {"etl", "boom", "ask"}
+    assert {f["name"] for f in flows} == {"etl", "boom", "ask", "nightly"}
     created = call(agent, "run_flow", flow="etl", parameters={"day": "2026-09-01", "n": 2}, tags=["agent"])
     assert not created["isError"]
     run = created["data"]["run"]
@@ -276,7 +287,7 @@ def test_stdio_proxy_round_trip_and_no_server(agent, isolated_home, tmp_path):
     assert [r["id"] for r in replies] == [1, 2]
     assert replies[0]["result"]["serverInfo"]["name"] == "cereyan"
     flows = json.loads(replies[1]["result"]["content"][0]["text"])["flows"]
-    assert {f["name"] for f in flows} == {"etl", "boom", "ask"}
+    assert {f["name"] for f in flows} == {"etl", "boom", "ask", "nightly"}
     # No server: every request gets a -32000 error, and the process stays up until EOF.
     empty_home = tmp_path / "empty_home"
     env2 = dict(os.environ, CEREYAN_HOME=str(empty_home))
@@ -286,3 +297,56 @@ def test_stdio_proxy_round_trip_and_no_server(agent, isolated_home, tmp_path):
     replies = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
     assert proc.returncode == 0 and len(replies) == 2
     assert all(r["error"]["code"] == -32000 and "server" in r["error"]["message"] for r in replies)
+
+
+def test_schedule_tools_reach_and_guard(agent):
+    """The dead end this closes, plus the two guards on code-declared schedules."""
+    rpc(agent, "initialize", {"clientInfo": {"name": "claude-code"}})
+
+    # A schedule declared in code that has never fired is still discoverable, and
+    # the id it yields is the one pause_schedule wants. This was the dead end:
+    # no tool returned a schedule id, so pause_schedule could not be reached.
+    listed = call(agent, "list_schedules")["data"]["schedules"]
+    nightly = next(s for s in listed if s["flow"] == "nightly")
+    assert nightly["source"] == "code" and nightly["active"]
+    assert nightly["next_fire"], "a schedule that has never fired still reports its next fire"
+    paused = call(agent, "pause_schedule", schedule_id=nightly["id"])
+    assert not paused["isError"] and not paused["data"]["schedule"]["active"]
+    call(agent, "resume_schedule", schedule_id=nightly["id"])
+
+    # Filters narrow to a flow, and the tool answers for one flow or for all.
+    only = call(agent, "list_schedules", flow="nightly")["data"]["schedules"]
+    assert [s["flow"] for s in only] == ["nightly"]
+
+    # A schedule an agent creates is attributed to it and carries its fire times.
+    made = call(agent, "create_schedule", flow="etl", kind="cron", cron="0 4 1 1 *")
+    assert not made["isError"], made
+    assert made["data"]["schedule"]["source"] == "mcp"
+    assert len(made["data"]["next_fires"]) == 3
+    assert "note" not in made["data"], "etl declares no schedule of its own"
+    made_id = made["data"]["schedule"]["id"]
+
+    # Creating a second schedule on a flow that declares one in code is legal,
+    # and says so rather than failing.
+    second = call(agent, "create_schedule", flow="nightly", kind="interval", interval=86400)
+    assert "already has a schedule declared in its code" in second["data"]["note"]
+    call(agent, "delete_schedule", schedule_id=second["data"]["schedule"]["id"])
+
+    # Editing a code-declared schedule detaches it from its declaration, which a
+    # human sees in the UI and an agent has to be told.
+    edited = call(agent, "edit_schedule", schedule_id=nightly["id"], cron="0 5 1 1 *")
+    assert "no longer" in edited["data"]["note"]
+    # Editing one the agent made says nothing, because nothing was detached.
+    quiet = call(agent, "edit_schedule", schedule_id=made_id, cron="0 6 1 1 *")
+    assert "note" not in quiet["data"]
+
+    # Deleting a code-declared schedule is refused: startup would recreate it, so
+    # reporting success would be untrue.
+    refused = call(agent, "delete_schedule", schedule_id=nightly["id"])
+    assert refused["isError"] and "pause_schedule" in refused["data"]
+    assert call(agent, "list_schedules", flow="nightly")["data"]["schedules"], "still there"
+
+    # One the agent made deletes normally.
+    gone = call(agent, "delete_schedule", schedule_id=made_id)
+    assert not gone["isError"] and gone["data"]["deleted"]
+    assert made_id not in [s["id"] for s in call(agent, "list_schedules")["data"]["schedules"]]

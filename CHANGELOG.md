@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **An agent can manage schedules.** `pause_schedule` and `resume_schedule` both took a `schedule_id` that no MCP tool returned, so reaching them meant already knowing the id: a schedule that had never fired was invisible while the tool to pause it sat in the list. `list_schedules` closes that, filtered by flow or project, reporting each schedule's spec, whether it is active, when it next fires, and whether it came from code, the interface or an agent. `create_schedule`, `edit_schedule` and `delete_schedule` complete the lifecycle; create and edit return the next few fire times so a spec can be checked before it fires unattended, and schedules an agent creates record `source: "mcp"`. Two guards: editing a schedule declared in a flow's code returns a note that the declaration no longer governs it, and deleting one is refused, because startup recreates it from the declaration and a success would be untrue. Flows still run on demand by default; a flow needs no schedule.
+
 ## 1.7.0 (2026-09-09)
 
 - **Cereyan is production ready.** The Python API, the HTTP API, the CLI, the MCP surface and the database schema are settled; the under-development warning is gone from the README and the documentation, and the PyPI classifier moves from Beta to Production/Stable. The README also said the package was not yet published, which stopped being true at 1.4.0.

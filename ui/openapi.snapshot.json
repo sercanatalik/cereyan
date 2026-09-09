@@ -2153,7 +2153,7 @@
             "$ref": "#/components/schemas/Schedule"
           },
           "source": {
-            "description": "`code` for schedules declared on the flow, `ui` for ones created at runtime.",
+            "description": "`code` for schedules declared on the flow, `ui` for ones created in the\ninterface, `mcp` for ones created by an agent. Startup reconciliation\nsingles out `code` alone; every other value is left as it is.",
             "type": "string"
           },
           "updated_at": {

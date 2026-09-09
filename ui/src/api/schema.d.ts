@@ -1475,7 +1475,11 @@ export interface components {
             paused_until?: null | components["schemas"]["i64"];
             persist: boolean;
             schedule: components["schemas"]["Schedule"];
-            /** @description `code` for schedules declared on the flow, `ui` for ones created at runtime. */
+            /**
+             * @description `code` for schedules declared on the flow, `ui` for ones created in the
+             *     interface, `mcp` for ones created by an agent. Startup reconciliation
+             *     singles out `code` alone; every other value is left as it is.
+             */
             source: string;
             updated_at: components["schemas"]["i64"];
         };

@@ -17,7 +17,7 @@ Runs created through MCP record `created_by = mcp:<client name>` from the `initi
 
 ## Tools
 
-Every tool description states its effect so a model can decide before calling. A tool returns one text content block holding the JSON whose top-level keys are listed as its response; a failure returns `isError: true` and a message instead. Rule creation is not exposed.
+Every tool description states its effect so a model can decide before calling. A tool returns one text content block holding the JSON whose top-level keys are listed as its response; a failure returns `isError: true` and a message instead. Rule creation is not exposed, and a schedule declared in a flow's code cannot be deleted through MCP: the next restart recreates it from the declaration, so pausing it is what lasts.
 
 <!-- generated: tools -->
 

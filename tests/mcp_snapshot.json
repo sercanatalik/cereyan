@@ -5,7 +5,7 @@
       "resources": {},
       "tools": {}
     },
-    "instructions": "cereyan runs Python pipelines on this machine. Use list_flows to see what can run, run_flow to start work, get_run and run_logs to follow it, and explain_failure when a run fails. Writes (run_flow, cancel_run, resume_run, backfill, pause_schedule, resume_schedule, set_variable) take effect immediately.",
+    "instructions": "cereyan runs Python pipelines on this machine. Use list_flows to see what can run, run_flow to start work, get_run and run_logs to follow it, and explain_failure when a run fails. Flows run on demand: a flow needs no schedule, and run_flow is how work usually starts. For work that should recur, list_schedules shows what is scheduled and the create, edit, delete, pause and resume schedule tools manage it. Writes take effect immediately.",
     "protocolVersion": "2025-06-18",
     "serverInfo": {
       "name": "cereyan"
@@ -75,6 +75,30 @@
       "default": {
         "keys": [
           "run"
+        ]
+      }
+    },
+    "create_schedule": {
+      "default": {
+        "keys": [
+          "next_fires",
+          "schedule"
+        ]
+      }
+    },
+    "delete_schedule": {
+      "default": {
+        "keys": [
+          "deleted",
+          "schedule_id"
+        ]
+      }
+    },
+    "edit_schedule": {
+      "default": {
+        "keys": [
+          "next_fires",
+          "schedule"
         ]
       }
     },
@@ -250,6 +274,28 @@
         "keys": [
           "next_cursor",
           "runs"
+        ]
+      }
+    },
+    "list_schedules": {
+      "default": {
+        "items": {
+          "schedules": [
+            "active",
+            "catchup",
+            "catchup_max",
+            "flow",
+            "id",
+            "next_fire",
+            "paused_reason",
+            "paused_until",
+            "project",
+            "schedule",
+            "source"
+          ]
+        },
+        "keys": [
+          "schedules"
         ]
       }
     },
@@ -474,6 +520,25 @@
       "name": "list_rules"
     },
     {
+      "description": "The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, and whether it was declared in the flow's code, created in the interface, or created by an agent. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "description": "Flow name, or project/flow when the name exists in several projects",
+            "type": "string"
+          },
+          "project": {
+            "description": "Only schedules of this project",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_schedules"
+    },
+    {
       "description": "Everything needed to diagnose a run in one call: the run, its failed or crashed task runs, the last warning-or-above log lines, and the run's events. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
@@ -603,6 +668,134 @@
         "type": "object"
       },
       "name": "backfill"
+    },
+    {
+      "description": "Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Returns the schedule and the next few times it will fire.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "description": "Microseconds UTC the interval counts from; defaults to now",
+            "type": "integer"
+          },
+          "catchup": {
+            "default": "skip",
+            "enum": [
+              "skip",
+              "latest",
+              "all"
+            ],
+            "type": "string"
+          },
+          "catchup_max": {
+            "default": 100,
+            "type": "integer"
+          },
+          "cron": {
+            "description": "Five-field cron expression, for kind cron",
+            "type": "string"
+          },
+          "day_or": {
+            "description": "For cron, OR day-of-month with day-of-week (default true)",
+            "type": "boolean"
+          },
+          "flow": {
+            "description": "Flow name, or project/flow when the name exists in several projects",
+            "type": "string"
+          },
+          "interval": {
+            "description": "Seconds between fires, for kind interval",
+            "type": "number"
+          },
+          "kind": {
+            "description": "Which kind of schedule",
+            "enum": [
+              "cron",
+              "interval",
+              "rrule"
+            ],
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "rrule": {
+            "description": "RFC 5545 RRULE, for kind rrule",
+            "type": "string"
+          },
+          "timezone": {
+            "description": "IANA name such as Europe/Istanbul; UTC when unset",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flow",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "name": "create_schedule"
+    },
+    {
+      "description": "Retime an existing schedule. Editing one that was declared in the flow's code detaches it permanently: the declaration in the Python source stops governing it, and the result says so. Returns the schedule and the next few times it will fire.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "type": "integer"
+          },
+          "catchup": {
+            "enum": [
+              "skip",
+              "latest",
+              "all"
+            ],
+            "type": "string"
+          },
+          "catchup_max": {
+            "type": "integer"
+          },
+          "cron": {
+            "type": "string"
+          },
+          "day_or": {
+            "type": "boolean"
+          },
+          "interval": {
+            "type": "number"
+          },
+          "rrule": {
+            "type": "string"
+          },
+          "schedule_id": {
+            "type": "integer"
+          },
+          "timezone": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schedule_id"
+        ],
+        "type": "object"
+      },
+      "name": "edit_schedule"
+    },
+    {
+      "description": "Remove a schedule that was created in the interface or by an agent. A schedule declared in the flow's code cannot be removed this way, because the next restart recreates it from the declaration; pause_schedule stops that one durably.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "schedule_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schedule_id"
+        ],
+        "type": "object"
+      },
+      "name": "delete_schedule"
     },
     {
       "description": "Pause a schedule so it stops creating runs until resumed.",

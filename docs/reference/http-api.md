@@ -1292,7 +1292,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `paused_until` | null or [`i64`](#i64) | no |  |
 | `persist` | boolean | yes |  |
 | `schedule` | [`Schedule`](#schedule) | yes |  |
-| `source` | string | yes | `code` for schedules declared on the flow, `ui` for ones created at runtime. |
+| `source` | string | yes | `code` for schedules declared on the flow, `ui` for ones created in the interface, `mcp` for ones created by an agent. Startup reconciliation singles out `code` alone; every other value is left as it is. |
 | `updated_at` | [`i64`](#i64) | yes |  |
 
 ### `ServerInfo`

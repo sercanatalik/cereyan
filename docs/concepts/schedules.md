@@ -49,4 +49,6 @@ A scheduled run gets the flow's default parameter values, and the schedule edito
 
 Schedules declared in code can be edited on the flow page (`PATCH /api/schedules/{id}`); the code declaration wins again on the next restart unless the override is marked `persist`. `POST /api/schedules/preview` returns the next fire times for a declaration, which the editor uses to show them before saving.
 
+An agent can do the same through the [MCP tools](../reference/mcp.md): `list_schedules` shows what is scheduled and `create_schedule`, `edit_schedule`, `delete_schedule`, `pause_schedule` and `resume_schedule` manage it. Two things differ from the flow page. Editing a schedule that was declared in code detaches it from that declaration for good, and the tool says so in its result, because an agent cannot see the badge that tells you the same thing here. Deleting one is refused outright, since the declaration would recreate it at the next restart; pause it instead, or remove the declaration from the flow.
+
 Related: [Schedule a flow](../guides/schedule-a-flow.md), [Backfills](backfills.md), [Resources and concurrency](resources-and-concurrency.md).

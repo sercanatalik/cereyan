@@ -145,7 +145,9 @@ pub struct ScheduleRow {
     pub paused_reason: Option<String>,
     #[serde(default)]
     pub paused_until: Option<Micros>,
-    /// `code` for schedules declared on the flow, `ui` for ones created at runtime.
+    /// `code` for schedules declared on the flow, `ui` for ones created in the
+    /// interface, `mcp` for ones created by an agent. Startup reconciliation
+    /// singles out `code` alone; every other value is left as it is.
     pub source: String,
     #[serde(default)]
     pub code_key: Option<String>,

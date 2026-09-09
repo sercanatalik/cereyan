@@ -56,7 +56,7 @@ pub struct PreviewResponse {
     pub timezone: String,
 }
 
-fn decorate(state: &AppState, mut row: ScheduleRow) -> ScheduleRow {
+pub(crate) fn decorate(state: &AppState, mut row: ScheduleRow) -> ScheduleRow {
     if let Some(cached) = state.scheduler.get(row.id) {
         row.next_fire = cached.next_fire;
     }
@@ -80,24 +80,38 @@ pub async fn create_schedule(
     Path(id): Path<i64>,
     Json(body): Json<ScheduleBody>,
 ) -> ApiResult<(StatusCode, Json<ScheduleRow>)> {
+    let row = create_schedule_inner(&state, id, body, "ui").await?;
+    Ok((StatusCode::CREATED, Json(row)))
+}
+
+/// Store a new schedule for a flow. `source` records who made it: `ui` for the
+/// interface, `mcp` for an agent. Reconciliation only ever singles out `code`,
+/// so any other value is left alone when the flow re-registers.
+pub async fn create_schedule_inner(
+    state: &Arc<AppState>,
+    flow_id: i64,
+    body: ScheduleBody,
+    source: &str,
+) -> ApiResult<ScheduleRow> {
     state
         .store
-        .get_flow(id)?
+        .get_flow(flow_id)?
         .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
     body.schedule
         .validate()
         .map_err(|e| ApiError::Unprocessable(e.to_string()))?;
     let pinned = body.schedule.clone().with_anchor_if_missing(now_micros());
     let st = state.clone();
+    let source = source.to_string();
     let schedule_id = tokio::task::spawn_blocking(move || {
         let sid = st.store.upsert_schedule(ScheduleWrite {
             id: None,
-            flow_id: id,
+            flow_id,
             spec: serde_json::to_string(&pinned).unwrap_or_default(),
             catchup: body.catchup.unwrap_or_default().as_str().into(),
             catchup_max: body.catchup_max.unwrap_or(100),
             active: body.active.unwrap_or(true),
-            source: "ui".into(),
+            source,
             code_key: None,
             persist: body.persist.unwrap_or(true),
         })?;
@@ -111,7 +125,7 @@ pub async fn create_schedule(
         .store
         .get_schedule(schedule_id)?
         .ok_or_else(|| ApiError::Internal("schedule vanished".into()))?;
-    Ok((StatusCode::CREATED, Json(decorate(&state, row))))
+    Ok(decorate(state, row))
 }
 
 fn apply_patch(current: &Schedule, body: &SchedulePatchBody) -> Schedule {
@@ -147,6 +161,17 @@ pub async fn patch_schedule(
     Path(sid): Path<i64>,
     Json(body): Json<SchedulePatchBody>,
 ) -> ApiResult<Json<ScheduleRow>> {
+    Ok(Json(patch_schedule_inner(&state, sid, body).await?))
+}
+
+/// Retime a schedule. A spec change marks the row `persist`, after which the
+/// flow's own declaration no longer governs it: `scheduler::register` skips
+/// every persisted row. Callers that can explain that to a person should.
+pub async fn patch_schedule_inner(
+    state: &Arc<AppState>,
+    sid: i64,
+    body: SchedulePatchBody,
+) -> ApiResult<ScheduleRow> {
     let row = state
         .store
         .get_schedule(sid)?
@@ -200,7 +225,7 @@ pub async fn patch_schedule(
         .store
         .get_schedule(sid)?
         .ok_or_else(|| ApiError::NotFound("schedule not found".into()))?;
-    Ok(Json(decorate(&state, row)))
+    Ok(decorate(state, row))
 }
 
 #[utoipa::path(delete, path = "/api/schedules/{sid}", params(("sid" = i64, Path)), responses((status = 204), (status = 404)))]
