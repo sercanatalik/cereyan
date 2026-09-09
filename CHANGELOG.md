@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 (2026-09-09)
 
 - The runtime home is readable only by the account that created it. It was created with whatever the umask gave — `0755` on a typical machine — so `db.sqlite`, with every run, log, event and variable, was readable by any other account, and `secret.key` was too: it was narrowed to `0600` after being written, leaving a window in which the key that decrypts every secret was world-readable, and that narrowing never ran on Windows at all. Protecting the directory covers everything in it, closes the window, and needs nothing platform-specific for a home under your user profile. A home from an earlier version is narrowed when opened, with a message saying so.
 - An engine whose server disappeared could take up to ninety seconds to exit rather than the thirty its documentation promised. It notices only between requests, so the wait was bounded by the client's long-poll timeout — ninety seconds — and not by the thirty second idle threshold that appeared to govern it. The timeout is now forty seconds, ten more than the server ever holds a request, so the worst case is forty rather than ninety. The regression test used to wait exactly ninety seconds and so raced the very timeout that defeated the bound; it now waits sixty against a forty second bound.

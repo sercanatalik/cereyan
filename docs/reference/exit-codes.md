@@ -38,7 +38,7 @@ A running server records how to reach it so scripts, the CLI, `cereyan mcp`, and
   "url": "http://127.0.0.1:4200",
   "pid": 12345,
   "started_at": 1788998400000000,
-  "version": "1.4.0",
+  "version": "1.5.0",
   "auth": true,
   "socket": "/tmp/cereyan.sock"
 }
