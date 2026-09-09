@@ -24,13 +24,13 @@ Every run, newest first. Filters are popover buttons for state, project, flow, t
 
 The header band shows the run's name, state, flow, tags, and a line with its start, elapsed or total time, attempt, what created it, and its parameters. **Run again** and **Cancel** sit on the right; **Delete** is in the overflow menu. A paused run shows its question and the **Resume** form in the band.
 
-The **tasks rail** on the left lists every task run with its state, duration, and, for a task waiting to retry, the attempt and a countdown. Click a task to focus it: the **Logs** tab then shows only that task run's lines, with a chip you can clear. The tabs on the right:
+The **tasks rail** on the left lists every task run with its state, duration, and, for a task waiting to retry, the attempt and a countdown. Click a task to focus it: the **Logs** tab then shows only that task run's lines, with a chip you can clear. A task run also has a page of its own, opened from the **Task runs** tab of the runs page or from a bar on the Timeline, carrying its logs, artifacts, and details. The tabs on the right:
 
 - **Logs**: log lines with a level filter, a search box, and **Follow** to keep the newest line in view while the run executes.
 - **Timeline**: the task runs on a time axis, and a **dependency** view of the same graph.
 - **Artifacts**: markdown, tables, progress bars, links, and images the run published.
 - **Parameters**: the values the run was called with.
-- **Details**: ids, timing, priority, attempt, the previous attempt, failure and crash counts, engine PID, and exit code.
+- **Details**: ids, timing, what created the run, its scheduled time, priority, attempt, the previous attempt, failure and crash counts, and the engine PID.
 
 ![The run page in the dark theme](../images/run-detail-dark.png)
 

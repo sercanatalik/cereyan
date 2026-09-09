@@ -18,9 +18,34 @@ Everything below is importable from `cereyan` unless a module path is shown. Thi
 
 ::: cereyan.App
     options:
-      members: [flow, task, route, get, post, put, delete, patch, rule, serve]
+      members: [flow, task, register, route, get, post, put, delete, patch, rule, serve]
 
 ::: cereyan.get_default_app
+
+## The current run
+
+`cereyan.runtime` is a live view of the run executing in this thread. Each attribute is `None` outside a run, so a task called directly from a test reads `None` rather than raising.
+
+| Attribute | Type | Carries |
+|---|---|---|
+| `cereyan.runtime.run` | `RunContext` | `id`, `external_id`, `name`, `flow`, `parameters`, and `flow_name` and `project` |
+| `cereyan.runtime.task_run` | `TaskRunContext` | `id` (the external UUID), `name`, `task_key`, `dynamic_key` |
+| `cereyan.runtime.flow` | `Flow` | The flow of the current run |
+
+```python
+from cereyan import flow, task, runtime
+
+@task
+def record() -> str:
+    return f"{runtime.run.name}/{runtime.task_run.dynamic_key}"
+
+@flow
+def report() -> str:
+    return f"{runtime.flow.name}#{runtime.run.id}: {record()}"
+
+assert runtime.run is None
+assert report().endswith("/record-0")   # "report#1: <run name>/record-0"
+```
 
 ## Schedules and retry delays
 

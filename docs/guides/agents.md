@@ -1,6 +1,6 @@
 # How to use cereyan with an AI agent
 
-Cereyan has a built-in [MCP](https://modelcontextprotocol.io) server, so an agent can list flows, start runs, follow and diagnose them, backfill, and answer a paused run's question. Nothing extra to install; it ships in the wheel and runs inside `cereyan serve`.
+Cereyan has a built-in [MCP](https://modelcontextprotocol.io) server, so an agent can list flows, start runs, follow and diagnose them, backfill, manage schedules, and answer a paused run's question. Nothing extra to install; it ships in the wheel and runs inside `cereyan serve`.
 
 ## Connect Claude Code or Claude Desktop
 
@@ -49,7 +49,9 @@ assert {"list_flows", "run_flow", "explain_failure", "resume_run"} <= tools
 
 ## What the agent can do
 
-The tool set is curated: eight read-only tools (`list_flows`, `list_runs`, `get_run`, `run_logs`, `list_events`, `list_artifacts`, `list_rules`, `explain_failure`) and seven that change state (`run_flow`, `cancel_run`, `resume_run`, `backfill`, `pause_schedule`, `resume_schedule`, `set_variable`). Every description states its effect, `backfill` dry-runs unless told otherwise, and rule creation is not exposed. The full list with each argument's type, default, and range, and the keys every tool returns, is on the [MCP reference](../reference/mcp.md) page.
+The tool set is curated: nine read-only tools (`list_flows`, `list_runs`, `get_run`, `run_logs`, `list_events`, `list_artifacts`, `list_rules`, `list_schedules`, `explain_failure`) and ten that change state (`run_flow`, `cancel_run`, `resume_run`, `backfill`, `create_schedule`, `edit_schedule`, `delete_schedule`, `pause_schedule`, `resume_schedule`, `set_variable`). Every description states its effect, `backfill` dry-runs unless told otherwise, and rule creation is not exposed. The full list with each argument's type, default, and range, and the keys every tool returns, is on the [MCP reference](../reference/mcp.md) page.
+
+Schedules are the one place where an agent has less room than the flow page: editing a schedule that was declared in code detaches it from that declaration for good and the result says so, and deleting such a schedule is refused, because the declaration would recreate it at the next restart. See [Schedules](../concepts/schedules.md).
 
 Two resource templates, `cereyan://runs/{id}/logs` and `cereyan://runs/{id}/artifacts`, expose a run's logs and artifacts as JSON — they are listed by `resources/templates/list`, not `resources/list` — and the `diagnose_run` prompt tells the model to call `explain_failure` and summarise the cause.
 

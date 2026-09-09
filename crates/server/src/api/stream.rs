@@ -30,7 +30,7 @@ fn to_sse(e: &StreamEvent) -> Event {
         .data(e.data.to_string())
 }
 
-#[utoipa::path(get, path = "/api/stream", params(StreamQuery), responses((status = 200, description = "text/event-stream of run.updated, task_run.updated, log.appended, flow.registered, resync")))]
+#[utoipa::path(get, path = "/api/stream", params(StreamQuery), responses((status = 200, description = "text/event-stream of hello, run.updated, task_run.updated, log.appended, event.created, flow.registered, rule.updated, variable.updated, artifact.updated, schedule.updated, backfill.created, backfill.updated, expectation.armed, expectation.met, expectation.lapsed, and resync")))]
 pub async fn stream(
     State(state): State<Arc<AppState>>,
     Query(q): Query<StreamQuery>,

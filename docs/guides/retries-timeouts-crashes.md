@@ -69,6 +69,8 @@ except TimeoutError as exc:
 
 With the default thread runner a timed-out task's thread is abandoned; with a `ProcessRunner` the worker process is terminated.
 
+A flow's timeout is enforced by the server, which records `TimedOut` and ends the engine, and offline by an alarm in the running process. That alarm does not exist on Windows: a flow run by `python pipeline.py` or `cereyan run` there is not timed out at all, and `timeout_seconds` on it is accepted and ignored. Run the flow through `cereyan serve` for a timeout that holds on every platform. Task timeouts are unaffected.
+
 ## Survive a crash
 
 A **crash** is the engine process dying while a run executes: an out-of-memory kill, a segfault in a C extension, a machine reboot. The server notices through missed heartbeats and a dead PID, marks the run `Crashed`, and reruns it up to `crash_retries` times (the decorator, then `[defaults] crash_retries` in `cereyan.toml`, then 5) before it stays `Failed`. Crash reruns carry `created_by = crash:<n>`.

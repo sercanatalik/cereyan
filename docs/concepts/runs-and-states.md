@@ -52,6 +52,8 @@ Named sub-states refine a type: `Late` and `AwaitingRetry` and `AwaitingResource
 - Timing: created, scheduled, start, end, total run time; and counters for failures and crashes.
 - Every log line, task run, artifact, and event.
 
+Inside the run, `cereyan.runtime.run`, `cereyan.runtime.task_run`, and `cereyan.runtime.flow` read the run in progress — its id, name, and parameters — and are `None` outside one; see the [Python API](../reference/python-api.md).
+
 ## Attempts
 
 Retries, crash reruns, and resumes after a pause are new attempts of the same run: the run keeps its id and history, `failure_count` or `crash_count` grows, and the task runs of the new attempt are recorded alongside the old ones. Tasks marked `cache=INPUTS` return their stored result on a replay instead of executing again.

@@ -82,4 +82,23 @@ Runs created by a rule record `created_by = rule:<id>`, and a rule never fires o
 
 ## Stream messages
 
-The SSE stream at `GET /api/stream` carries `run.updated`, `task_run.updated`, `log.appended`, `flow.registered`, `event.created`, and `resync`. These are live notifications for the UI, not stored events, and rules cannot match them.
+The SSE stream at `GET /api/stream` carries live notifications for the UI. They are not stored events and rules cannot match them, even where a name is shared with one.
+
+| Message | Data | Sent when |
+|---|---|---|
+| `hello` | `latest`, `since` | The connection opens, before any backlog |
+| `run.updated` | The run | A run was created or changed state |
+| `task_run.updated` | The task run | A task run was created or changed state |
+| `log.appended` | `run_id`, `last_id`, `count` | New log lines arrived |
+| `event.created` | The event | Any event was recorded |
+| `flow.registered` | The flow | A flow was registered or re-registered |
+| `rule.updated` | The rule, or `id` and `deleted` | A rule was created, edited, fired, or deleted |
+| `variable.updated` | The variable, or `name` and `deleted` | A variable was set or removed |
+| `artifact.updated` | The artifact | A run published or updated an artifact |
+| `schedule.updated` | The schedule, or `id` and `deleted` | A schedule was created, edited, paused, resumed, or deleted |
+| `backfill.created` | `backfill_id`, `flow_id`, `count` | A backfill created its runs |
+| `backfill.updated` | `backfill_id`, `cancelled` | A backfill was cancelled |
+| `expectation.armed`, `expectation.met`, `expectation.lapsed` | `id`, `rule_id`, and the key or the event | A proactive rule armed, disarmed, or lapsed an expectation |
+| `resync` | `latest` | The client asked for a sequence number older than the replay buffer; refetch everything |
+
+Each message carries the sequence number as its SSE id. Reconnect with `?since=<seq>` to replay what was missed, or receive `resync` when the buffer no longer reaches back that far.

@@ -3086,7 +3086,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description text/event-stream of run.updated, task_run.updated, log.appended, flow.registered, resync */
+            /** @description text/event-stream of hello, run.updated, task_run.updated, log.appended, event.created, flow.registered, rule.updated, variable.updated, artifact.updated, schedule.updated, backfill.created, backfill.updated, expectation.armed, expectation.met, expectation.lapsed, and resync */
             200: {
                 headers: {
                     [name: string]: unknown;
