@@ -944,6 +944,8 @@ export interface components {
             created_by?: string | null;
             description?: string | null;
             flow: string;
+            /** @description The flow's declared group; absent leaves the registered group as it is. */
+            flow_group?: string | null;
             flow_tags?: string[];
             module?: string | null;
             name?: string | null;
@@ -1027,6 +1029,13 @@ export interface components {
             description?: string | null;
             error?: string | null;
             external_id: components["schemas"]["Id"];
+            /**
+             * @description The group the flow is listed under, declared in Python with `group=`.
+             *     Null means none was declared and the flow is grouped under its project;
+             *     API responses carry the resolved value, so clients never apply that
+             *     fallback themselves.
+             */
+            group?: string | null;
             /** Format: int64 */
             id: number;
             last_seen_at: components["schemas"]["i64"];
@@ -1370,6 +1379,8 @@ export interface components {
             /** Format: int64 */
             flow_id: number;
             flow_name: string;
+            /** @description The flow's group, read through the flow: never stored on the run. */
+            group?: string;
             /** Format: int64 */
             id: number;
             name: string;

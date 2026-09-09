@@ -14,9 +14,9 @@ Counts for the selected range (Running, Completed, Failed, Crashed, Waiting for 
 
 ## Runs
 
-![Runs list with state, name, flow, a task-state bar, start, duration, and tags, plus popover filters and a floating selection bar](../images/runs.png)
+![Runs list in collapsible groups, each header rolling up its runs' states, over rows with state, name, flow, a task-state bar, start, duration, and tags, plus popover filters](../images/runs.png)
 
-Every run, newest first. Filters are popover buttons for state, project, flow, tags, and range, plus a name search and a sort. The **Tasks** column is a bar of the run's task runs by state. The **Task runs** tab lists task runs across runs the same way. Selecting rows raises a bar at the bottom of the window with **Cancel** and **Delete** for the selection.
+Every run, newest first, in collapsible groups by the flow's group. Filters are popover buttons for state, project, flow, tags, and range, plus a name search and a sort. The **Tasks** column is a bar of the run's task runs by state. The **Task runs** tab lists task runs across runs the same way. Selecting rows raises a bar at the bottom of the window with **Cancel** and **Delete** for the selection; a selection may span groups.
 
 ## Run detail
 
@@ -38,9 +38,11 @@ The **tasks rail** on the left lists every task run with its state, duration, an
 
 ## Flows
 
-![Flows grouped by project with the schedule in words, a run-history sparkline, the last run's state, tags, and a Run button per row, under a Dependencies panel](../images/flows.png)
+![Flows in collapsible groups, each header rolling up the next fire, recent runs, last-run states and tags of the flows beneath it, over rows with the schedule in words, a run-history sparkline, the last run's state, tags, and a Run button, under a Dependencies panel](../images/flows.png)
 
-Every flow the server has registered, grouped by project with the project's source directory. Each row shows the schedule in words with the next fire time, the last ten runs as bars coloured by state and sized by duration, the last run's state, and tags. **Run** opens a form built from the flow's parameter schema. The **Dependencies** panel above the table draws each `after=` chain as nodes joined by arrows and each fan-in as its upstreams joined into the downstream flow with its key. A flow the running server did not register stays listed, dimmed, with its last-seen time and a **Delete** action.
+Every flow the server has registered, in collapsible groups. A flow's group is the one it declared with `group=`, else its project; a group of one project shows that project's source directory, and a group spanning several names them. Each row shows the schedule in words with the next fire time, the last ten runs as bars coloured by state and sized by duration, the last run's state, and tags. **Run** opens a form built from the flow's parameter schema. The **Dependencies** panel above the table draws each `after=` chain as nodes joined by arrows and each fan-in as its upstreams joined into the downstream flow with its key. A flow the running server did not register stays listed, dimmed, with its last-seen time and a **Delete** action.
+
+A group header is the same columns rolled up, so collapsing a group hides the detail without hiding what it says: the soonest next fire, the group's recent runs, its last-run states as a bar with counts, the union of its tags, and how many flows it holds. Flows the running server no longer has registered are counted separately as **stale**, so an all-green bar cannot hide them. A group of more than five rows starts collapsed and everything else starts open; a lone group is always open, and a search opens every group it matches.
 
 ## Flow detail
 

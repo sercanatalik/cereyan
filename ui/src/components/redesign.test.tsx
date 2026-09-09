@@ -197,7 +197,7 @@ function mockFetch() {
     const p = url.pathname;
     if (p === "/api/counts")
       return json({ runs: { Running: 1, Paused: 1, Scheduled: 1 }, task_runs: {}, active: 1, flows: {} });
-    if (p === "/api/flows") return json(FLOWS);
+    if (p === "/api/flows") return json(flowsOverride ?? FLOWS);
     if (p === "/api/settings")
       return json({ engine_saturation_risk: false, saturation_flows: [], served_dir: "~/pipelines" });
     if (p === "/api/runs") {
@@ -223,6 +223,8 @@ function mockFetch() {
   });
 }
 
+let flowsOverride: ReturnType<typeof flow>[] | null = null;
+
 function mount(path: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createRouter({
@@ -241,6 +243,7 @@ function mount(path: string) {
 }
 
 beforeEach(() => {
+  flowsOverride = null;
   localStorage.clear();
   document.documentElement.classList.remove("dark");
   mockFetch();
@@ -359,7 +362,9 @@ test("run table draws task bars and the selection bar comes and goes", async () 
   const { router } = mount("/runs?state=Running");
   await screen.findByText("brisk-otter");
   expect(screen.getByTestId("filter-state")).toHaveAttribute("data-value", "Running");
-  const bar = screen.getByTestId("state-bar");
+  // The group header carries a rollup bar of its own, so scope to the run's row.
+  const row = screen.getByText("brisk-otter").closest("tr") as HTMLElement;
+  const bar = within(row).getByTestId("state-bar");
   expect(Array.from(bar.children).map((c) => c.getAttribute("data-state"))).toEqual([
     "Completed",
     "Running",
@@ -419,9 +424,11 @@ test("dependency rows: chains and fan-in", () => {
 
 test("flows page groups by project, shows the stale row, and still runs a flow", async () => {
   const { router } = mount("/flows");
-  await screen.findByTestId("project-group-warehouse");
-  expect(screen.getByTestId("project-group-warehouse")).toHaveTextContent("/home/me/warehouse");
-  expect(screen.getByTestId("project-group-warehouse")).toHaveTextContent("3 flows");
+  // No flow declares a group, so each group falls back to its project.
+  const group = await screen.findByTestId("group-warehouse");
+  expect(group).toHaveTextContent("/home/me/warehouse");
+  expect(within(group).getByTestId("group-count")).toHaveTextContent("3");
+  expect(within(group).getByRole("button", { name: /warehouse/ })).toHaveAttribute("aria-expanded", "true");
   expect(screen.getByTestId("fan-in")).toHaveTextContent("fan-in, key=day");
   const stale = screen.getByText("nightly_export").closest("tr");
   expect(stale).toHaveAttribute("data-flow-live", "false");
@@ -438,4 +445,49 @@ test("flows page groups by project, shows the stale row, and still runs a flow",
     expect(calls.some((c) => c.method === "POST" && c.url === "/api/flows/2/runs")).toBe(true),
   );
   expect(router.state.location.pathname).toMatch(/\/(flows|runs)/);
+});
+
+test("flows page: a declared group spans projects and names them", async () => {
+  flowsOverride = [
+    flow(1, "load", "warehouse", { group: "nightly" }),
+    flow(2, "rollup", "analytics", { group: "nightly" }),
+    flow(3, "adhoc", "warehouse"),
+  ];
+  mount("/flows");
+  const group = await screen.findByTestId("group-nightly");
+  // A declared group shows what it spans; a derived one shows its source.
+  expect(group).toHaveTextContent("analytics · warehouse");
+  expect(within(group).getByTestId("group-count")).toHaveTextContent("2");
+  expect(screen.getByTestId("group-warehouse")).toHaveTextContent("/home/me/warehouse");
+});
+
+test("flows page: a collapsed group still reports its stale flows", async () => {
+  // Six flows so the group starts collapsed, all last completed, three not live.
+  flowsOverride = Array.from({ length: 6 }, (_, i) =>
+    flow(i + 1, `f${i}`, "big", {
+      live: i >= 3,
+      recent_runs: [[100 + i, "Completed", "Completed", 1_000_000]],
+    }),
+  ).concat([flow(99, "other", "second")]);
+  mount("/flows");
+  const group = await screen.findByTestId("group-big");
+  expect(group).toHaveAttribute("data-open", "false");
+  // An all-green state bar must not let a deregistered flow hide behind it.
+  expect(within(group).getByTestId("state-bar")).toHaveAttribute("aria-label", "6 Completed");
+  expect(within(group).getByTestId("group-stale")).toHaveTextContent("3 stale");
+});
+
+test("flows page: the group header spans exactly the table's columns", async () => {
+  // A cell too many in the header silently shifts every rollup out of its column.
+  mount("/flows");
+  const header = await screen.findByTestId("group-warehouse");
+  const width = (tr: HTMLElement) =>
+    Array.from(tr.querySelectorAll(":scope > td")).reduce(
+      (n, td) => n + Number(td.getAttribute("colspan") ?? 1),
+      0,
+    );
+  const dataRow = screen.getByText("customer_dim").closest("tr") as HTMLElement;
+  const headings = document.querySelectorAll("thead th").length;
+  expect(width(header)).toBe(width(dataRow));
+  expect(width(header)).toBe(headings);
 });

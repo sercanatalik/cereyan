@@ -69,8 +69,12 @@ fn summarize(
     })
 }
 
+/// Fill the read-time fields the store does not hold: whether the flow is live,
+/// and its group resolved to the project when it declared none, so that clients
+/// never re-apply the fallback.
 pub fn decorate(state: &AppState, mut flow: Flow) -> Flow {
     flow.live = state.is_live(flow.id);
+    flow.group = Some(flow.group_or_project().to_string());
     flow
 }
 

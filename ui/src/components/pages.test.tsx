@@ -7,6 +7,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { Histogram } from "@/components/histogram";
 import { RunTable } from "@/components/run-table";
 
@@ -65,4 +66,90 @@ test("run table renders rows with state badge and link", async () => {
 test("histogram buckets runs by state", () => {
   const { container } = render(<Histogram runs={runs} start={0} end={3_000_000} buckets={3} />);
   expect(container.querySelectorAll("rect").length).toBe(1);
+});
+
+const grouped = (id: number, name: string, project: string, group: string | null, type: string) =>
+  ({ ...runs[0], id, name, project, group, state: { ...runs[0].state, type, name: type } }) as any;
+
+test("grouped run table sections runs by group and rolls up their states", async () => {
+  const rows = [
+    grouped(1, "one", "warehouse", "nightly", "Completed"),
+    grouped(2, "two", "analytics", "nightly", "Failed"),
+    grouped(3, "three", "warehouse", null, "Completed"),
+  ];
+  // Swap the data from inside the tree: `rerender` would drop the router context.
+  function Live() {
+    const [data, setData] = useState(rows);
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setData((d) => [grouped(2, "two", "analytics", "nightly", "Completed"), d[0], d[2]])}
+        >
+          complete it
+        </button>
+        <RunTable runs={data} grouped />
+      </>
+    );
+  }
+  renderWithRouter(<Live />);
+  await waitFor(() => expect(screen.getByTestId("group-nightly")).toBeInTheDocument());
+  // A declared group spans projects; an undeclared run falls back to its project.
+  expect(screen.getByTestId("group-nightly")).toHaveTextContent("analytics · warehouse");
+  expect(screen.getByTestId("group-warehouse")).toBeInTheDocument();
+  const nightly = screen.getByTestId("group-nightly");
+  expect(nightly.querySelector("[data-testid=state-bar]")).toHaveAttribute(
+    "aria-label",
+    "1 Completed, 1 Failed",
+  );
+
+  // The rollup follows the rows: a state change is reflected in the header.
+  screen.getByText("complete it").click();
+  await waitFor(() =>
+    expect(screen.getByTestId("group-nightly").querySelector("[data-testid=state-bar]")).toHaveAttribute(
+      "aria-label",
+      "2 Completed",
+    ),
+  );
+});
+
+test("selection works across groups", async () => {
+  const rows = [
+    grouped(1, "one", "warehouse", "nightly", "Completed"),
+    grouped(2, "two", "warehouse", null, "Completed"),
+  ];
+  const picked = new Set<number>();
+  renderWithRouter(
+    <RunTable
+      runs={rows}
+      grouped
+      selected={picked}
+      onSelect={(id, checked) => (checked ? picked.add(id) : picked.delete(id))}
+      onSelectAll={(checked) => {
+        picked.clear();
+        if (checked) for (const r of rows) picked.add(r.id);
+      }}
+    />,
+  );
+  await waitFor(() => expect(screen.getByText("one")).toBeInTheDocument());
+  // Select-all spans every group, not just the first.
+  screen.getByRole("checkbox", { name: "Select all runs on this page" }).click();
+  expect(Array.from(picked).sort()).toEqual([1, 2]);
+});
+
+test("grouped run table: the group header spans exactly the table's columns", async () => {
+  const rows = [grouped(1, "one", "warehouse", "nightly", "Completed")];
+  renderWithRouter(
+    <RunTable runs={rows} grouped selected={new Set()} onSelect={() => {}} onSelectAll={() => {}} />,
+  );
+  await waitFor(() => expect(screen.getByTestId("group-nightly")).toBeInTheDocument());
+  const width = (tr: HTMLElement) =>
+    Array.from(tr.querySelectorAll(":scope > td")).reduce(
+      (n, td) => n + Number(td.getAttribute("colspan") ?? 1),
+      0,
+    );
+  const dataRow = screen.getByText("one").closest("tr") as HTMLElement;
+  const headings = document.querySelectorAll("thead th").length;
+  expect(width(screen.getByTestId("group-nightly"))).toBe(width(dataRow));
+  expect(width(screen.getByTestId("group-nightly"))).toBe(headings);
 });

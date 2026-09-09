@@ -151,6 +151,7 @@ impl Store {
             tags: tags.into(),
             parameter_schema: parameter_schema.into(),
             options: "{}".into(),
+            group: None,
         })
     }
 

@@ -596,3 +596,79 @@ fn a_home_from_an_earlier_version_is_narrowed_on_open() {
     );
     drop(store);
 }
+
+fn grouped_flow(store: &Store, project: &str, name: &str, group: Option<&str>) -> i64 {
+    store
+        .upsert_flow_full(cereyan_store::UpsertFlow {
+            project: project.into(),
+            name: name.into(),
+            module: "pipeline".into(),
+            source_dir: "/tmp/proj".into(),
+            description: None,
+            tags: "[]".into(),
+            parameter_schema: "{}".into(),
+            options: "{}".into(),
+            group: group.map(Into::into),
+        })
+        .unwrap()
+}
+
+#[test]
+fn flow_group_round_trips_and_reaches_runs() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+
+    // Declared and undeclared sit side by side; the undeclared one stays NULL.
+    let declared = grouped_flow(&store, "warehouse", "load", Some("nightly"));
+    let plain = grouped_flow(&store, "warehouse", "reconcile", None);
+    let by_key = store.get_flow_by_key("warehouse", "load").unwrap().unwrap();
+    assert_eq!(by_key.group.as_deref(), Some("nightly"));
+    assert_eq!(by_key.group_or_project(), "nightly");
+    let plain_row = store
+        .get_flow_by_key("warehouse", "reconcile")
+        .unwrap()
+        .unwrap();
+    assert_eq!(plain_row.group, None);
+    assert_eq!(plain_row.group_or_project(), "warehouse");
+
+    // Runs read the flow's group; an undeclared flow's runs read its project.
+    let (run, _) = store.create_run(declared, "one", "{}", "[]").unwrap();
+    let (other, _) = store.create_run(plain, "two", "{}", "[]").unwrap();
+    assert_eq!(store.get_run(run).unwrap().unwrap().group, "nightly");
+    assert_eq!(store.get_run(other).unwrap().unwrap().group, "warehouse");
+
+    // Renaming the group moves the history: nothing was stored on the run.
+    grouped_flow(&store, "warehouse", "load", Some("overnight"));
+    assert_eq!(store.get_run(run).unwrap().unwrap().group, "overnight");
+    let page = store.list_runs(&ListRunsFilter::default()).unwrap();
+    assert!(page.items.iter().all(|r| r.group != "nightly"));
+
+    // Clearing it falls back to the project again.
+    grouped_flow(&store, "warehouse", "load", None);
+    assert_eq!(store.get_run(run).unwrap().unwrap().group, "warehouse");
+}
+
+#[test]
+fn flows_written_before_the_group_column_read_as_their_project() {
+    let dir = TempDir::new().unwrap();
+    {
+        let store = open(&dir);
+        grouped_flow(&store, "warehouse", "load", Some("nightly"));
+        grouped_flow(&store, "analytics", "rollup", None);
+    }
+    // Wind the schema back to before 0007, as an older release left it.
+    {
+        let conn = rusqlite::Connection::open(dir.path().join("db.sqlite")).unwrap();
+        conn.execute_batch("ALTER TABLE flow DROP COLUMN flow_group; PRAGMA user_version = 6;")
+            .unwrap();
+    }
+    let store = open(&dir);
+    let flows = store.list_flows(None).unwrap();
+    assert_eq!(flows.len(), 2);
+    // The migration adds the column without a backfill, so every row reads as
+    // its project until something declares a group again.
+    for f in &flows {
+        assert_eq!(f.group, None);
+        assert_eq!(f.group_or_project(), f.project);
+    }
+}

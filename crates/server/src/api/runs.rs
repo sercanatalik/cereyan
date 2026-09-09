@@ -44,6 +44,9 @@ pub struct CreateRunBody {
     pub options: Option<Map<String, Value>>,
     #[serde(default)]
     pub flow_tags: Vec<String>,
+    /// The flow's declared group; absent leaves the registered group as it is.
+    #[serde(default)]
+    pub flow_group: Option<String>,
     #[serde(default)]
     #[schema(value_type = Object)]
     pub parameters: Map<String, Value>,
@@ -220,6 +223,7 @@ pub async fn create_run(
                 .unwrap_or_default(),
                 options: serde_json::to_string(body.options.as_ref().unwrap_or(&f.options))
                     .unwrap_or_default(),
+                group: body.flow_group.clone().or_else(|| f.group.clone()),
             })?;
             let flow = state
                 .store
@@ -251,6 +255,7 @@ pub async fn create_run(
                 .unwrap_or_default(),
                 options: serde_json::to_string(body.options.as_ref().unwrap_or(&Map::new()))
                     .unwrap_or_default(),
+                group: body.flow_group.clone(),
             })?;
             let flow = state
                 .store

@@ -134,3 +134,72 @@ def test_the_four_version_strings_agree():
         "cereyan._core.__version__": _core.__version__,
     }
     assert len(set(versions.values())) == 1, versions
+
+
+def test_flow_group_declared_and_defaulted(store):
+    app = App("warehouse")
+
+    @app.flow(group="nightly")
+    def load():
+        pass
+
+    @app.flow
+    def reconcile():
+        pass
+
+    assert load.group == "nightly" and load.declared_group == "nightly"
+    # No group of its own: the flow reads as grouped under its project.
+    assert reconcile.group == "warehouse" and reconcile.declared_group is None
+    # It is flow metadata, not an execution option.
+    assert "group" not in load.options and "group" not in reconcile.options
+
+    load()
+    reconcile()
+    flows = {f["name"]: f for f in json.loads(store.list_flows())}
+    assert flows["load"]["group"] == "nightly"
+    assert flows["reconcile"]["group"] is None
+    runs = {r["flow_name"]: r for r in json.loads(store.list_runs())["items"]}
+    assert runs["load"]["group"] == "nightly"
+    assert runs["reconcile"]["group"] == "warehouse"
+
+
+def test_flow_group_spans_projects(store):
+    warehouse, analytics = App("warehouse"), App("analytics")
+
+    @warehouse.flow(group="nightly")
+    def load():
+        pass
+
+    @analytics.flow(group="nightly")
+    def rollup():
+        pass
+
+    load()
+    rollup()
+    flows = json.loads(store.list_flows())
+    assert {(f["project"], f["group"]) for f in flows} == {
+        ("warehouse", "nightly"),
+        ("analytics", "nightly"),
+    }
+
+
+def test_flow_group_follows_a_rename(store):
+    app = App("warehouse")
+
+    @app.flow(group="nightly")
+    def load():
+        pass
+
+    load()
+    run_id = json.loads(store.list_runs())["items"][0]["id"]
+    assert json.loads(store.get_run(run_id))["group"] == "nightly"
+
+    # Re-registering with a new group moves the history: nothing is stored on the run.
+    app2 = App("warehouse")
+
+    @app2.flow(name="load", group="overnight")
+    def load2():
+        pass
+
+    load2()
+    assert json.loads(store.get_run(run_id))["group"] == "overnight"

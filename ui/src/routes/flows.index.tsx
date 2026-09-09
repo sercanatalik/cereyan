@@ -5,6 +5,13 @@ import { useState } from "react";
 import { ApiError, api, type Flow, type StateType, unwrap } from "@/api/client";
 import { FilterSelect } from "@/components/filter-select";
 import { FlowGraph } from "@/components/flow-graph";
+import {
+  GroupCount,
+  GroupSection,
+  GroupStateRollup,
+  GroupTags,
+  useGroupOpen,
+} from "@/components/grouped-rows";
 import { DOT_COLORS, StateBadge } from "@/components/ported/state-badge";
 import { RunForm } from "@/components/run-form";
 import { Tags } from "@/components/run-table";
@@ -21,6 +28,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { type Group, groupBy, groupOf } from "@/lib/groups";
 import { useProject } from "@/lib/project";
 import { cn, relativeTime } from "@/lib/utils";
 import { describeSchedule } from "./flows.$flowId";
@@ -115,8 +123,14 @@ function FlowsPage() {
       (!project || f.project === project) &&
       (!lower || `${f.project}/${f.name}`.toLowerCase().includes(lower)),
   );
-  const groups = new Map<string, Flow[]>();
-  for (const f of list) groups.set(f.project, [...(groups.get(f.project) ?? []), f]);
+  const groups = groupBy(list);
+  const totals = new Map<string, number>();
+  // Unfiltered sizes, so a narrowed group's header can read "n of m".
+  for (const f of flows.data ?? []) {
+    const key = groupOf(f);
+    totals.set(key, (totals.get(key) ?? 0) + 1);
+  }
+  const open = useGroupOpen(groups, lower.length > 0);
   const served = settings.data?.served_dir;
   return (
     <Page
@@ -179,12 +193,17 @@ function FlowsPage() {
               <Th className="w-32" />
             </tr>
           </thead>
-          <tbody>
-            {Array.from(groups.entries()).map(([proj, items]) => (
+          {groups.map((group) => (
+            <GroupSection
+              key={group.key}
+              group={group}
+              open={open.isOpen(group.key)}
+              onOpenChange={(next) => open.toggle(group.key, next)}
+              identity={group.spansProjects ? group.projects.join(" \u00b7 ") : group.items[0]?.source_dir}
+              rollup={<FlowGroupRollup group={group} total={totals.get(group.key)} />}
+            >
               <GroupRows
-                key={proj}
-                project={proj}
-                flows={items}
+                flows={group.items}
                 onRun={(f) => {
                   setTarget(f);
                   setError(null);
@@ -193,15 +212,17 @@ function FlowsPage() {
                   window.confirm(`Delete flow ${f.project}/${f.name} and its runs?`) && remove.mutate(f)
                 }
               />
-            ))}
-            {list.length === 0 ? (
+            </GroupSection>
+          ))}
+          {list.length === 0 ? (
+            <tbody>
               <tr>
                 <td colSpan={6} className="px-3 py-8 text-center text-muted-foreground">
                   {flows.data?.length ? "No flows match" : "No flows registered"}
                 </td>
               </tr>
-            ) : null}
-          </tbody>
+            </tbody>
+          ) : null}
         </Table>
       </Card>
       <Modal
@@ -224,13 +245,69 @@ function FlowsPage() {
   );
 }
 
+/**
+ * The group header's cells, each the rollup of the column beneath it: the
+ * soonest fire, the group's runs merged, the last-run states with the flows
+ * this server no longer has registered, the tag union, and the flow count.
+ */
+function FlowGroupRollup({ group, total }: { group: Group<Flow>; total?: number }) {
+  const flows = group.items;
+  const schedules = flows.flatMap((f) => f.schedules);
+  const active = schedules.filter((s) => s.active);
+  const nexts = active.map((s) => s.next_fire).filter((n): n is number => n != null);
+  const paused = schedules.length - active.length;
+  const unscheduled = flows.filter((f) => f.schedules.length === 0).length;
+  // Newest first across the group. Run ids are monotonic, so they order the
+  // merge without a timestamp, and they identify a run so each appears once.
+  const byId = new Map(flows.flatMap((f) => f.recent_runs).map((r) => [r[0], r]));
+  const recent = Array.from(byId.values())
+    .sort((a, b) => b[0] - a[0])
+    .slice(0, 10);
+  const counts: Record<string, number> = {};
+  for (const f of flows) {
+    const last = f.recent_runs[0];
+    if (last) counts[last[1]] = (counts[last[1]] ?? 0) + 1;
+  }
+  const stale = flows.filter((f) => !f.live || f.error).length;
+  const tags = Array.from(new Set(flows.flatMap((f) => f.tags ?? []))).sort();
+  return (
+    <>
+      <Td className="text-xs text-muted-foreground">
+        <span className="flex flex-col gap-px">
+          {nexts.length ? (
+            <span>
+              next{" "}
+              {relativeTime(Math.min(...nexts))
+                .replace(" ago", " late")
+                .replace(" from now", "")}
+            </span>
+          ) : null}
+          <span>
+            {[paused ? `${paused} paused` : null, unscheduled ? `${unscheduled} unscheduled` : null]
+              .filter(Boolean)
+              .join(", ")}
+          </span>
+        </span>
+      </Td>
+      <Td>{recent.length ? <RunSparkline runs={recent} /> : null}</Td>
+      <Td>
+        <GroupStateRollup counts={counts} stale={stale} />
+      </Td>
+      <Td>
+        <GroupTags tags={tags} />
+      </Td>
+      <Td className="text-right text-xs">
+        <GroupCount shown={flows.length} total={total} />
+      </Td>
+    </>
+  );
+}
+
 function GroupRows({
-  project,
   flows,
   onRun,
   onDelete,
 }: {
-  project: string;
   flows: Flow[];
   onRun: (f: Flow) => void;
   onDelete: (f: Flow) => void;
@@ -238,17 +315,6 @@ function GroupRows({
   const navigate = useNavigate();
   return (
     <>
-      <tr data-testid={`project-group-${project}`}>
-        <td colSpan={6} className="h-[34px] bg-muted px-3 text-xs">
-          <span className="flex items-center gap-2.5">
-            <span className="font-semibold">{project}</span>
-            <span className="font-mono text-[11.5px] text-muted-foreground">{flows[0]?.source_dir}</span>
-            <span className="ml-auto text-muted-foreground">
-              {flows.length} flow{flows.length === 1 ? "" : "s"}
-            </span>
-          </span>
-        </td>
-      </tr>
       {flows.map((f) => {
         const sched = scheduleSummary(f);
         const last = f.recent_runs[0];

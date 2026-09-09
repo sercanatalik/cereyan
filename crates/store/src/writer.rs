@@ -32,6 +32,8 @@ pub struct UpsertFlow {
     pub tags: String,
     pub parameter_schema: String,
     pub options: String,
+    /// The group declared in Python; `None` writes NULL, which reads as the project.
+    pub group: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -778,8 +780,8 @@ fn upsert_flow(conn: &Connection, f: &UpsertFlow) -> Result<i64> {
         &f.options
     };
     conn.execute(
-        "INSERT INTO flow (external_id, project, name, module, source_dir, description, tags, parameter_schema, created_at, last_seen_at, options)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)
+        "INSERT INTO flow (external_id, project, name, module, source_dir, description, tags, parameter_schema, created_at, last_seen_at, options, flow_group)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11)
          ON CONFLICT (project, name) DO UPDATE SET
             module = excluded.module,
             source_dir = excluded.source_dir,
@@ -787,6 +789,7 @@ fn upsert_flow(conn: &Connection, f: &UpsertFlow) -> Result<i64> {
             tags = excluded.tags,
             parameter_schema = excluded.parameter_schema,
             options = excluded.options,
+            flow_group = excluded.flow_group,
             error = NULL,
             last_seen_at = excluded.last_seen_at",
         params![
@@ -799,7 +802,8 @@ fn upsert_flow(conn: &Connection, f: &UpsertFlow) -> Result<i64> {
             f.tags,
             f.parameter_schema,
             now,
-            options
+            options,
+            f.group
         ],
     )?;
     let flow_id: i64 = conn.query_row(

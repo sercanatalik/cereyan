@@ -19,6 +19,12 @@ pub struct Flow {
     pub description: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// The group the flow is listed under, declared in Python with `group=`.
+    /// Null means none was declared and the flow is grouped under its project;
+    /// API responses carry the resolved value, so clients never apply that
+    /// fallback themselves.
+    #[serde(default)]
+    pub group: Option<String>,
     #[serde(default)]
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub parameter_schema: Value,
@@ -34,6 +40,14 @@ pub struct Flow {
     pub live: bool,
 }
 
+impl Flow {
+    /// The group this flow belongs to: the one it declared, else its project.
+    /// Resolved on read so a flow with no group of its own follows its project.
+    pub fn group_or_project(&self) -> &str {
+        self.group.as_deref().unwrap_or(&self.project)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Run {
@@ -42,6 +56,9 @@ pub struct Run {
     pub flow_id: i64,
     pub flow_name: String,
     pub project: String,
+    /// The flow's group, read through the flow: never stored on the run.
+    #[serde(default)]
+    pub group: String,
     pub name: String,
     #[serde(default)]
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]

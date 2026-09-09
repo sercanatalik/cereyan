@@ -118,6 +118,7 @@ def register_flow(store: _core.Store, flow) -> int:
         json.dumps(flow.tags),
         json.dumps(flow.schema),
         json.dumps(flow.options),
+        flow.declared_group,
     )
 
 
@@ -332,6 +333,7 @@ def _handoff(flow, values: dict[str, Any], locked: Exception) -> Any:
         parameter_schema=flow.schema,
         options=flow.options,
         flow_tags=flow.tags,
+        flow_group=flow.declared_group,
         created_by="script",
     )
     run = follow_run(server, run["id"])

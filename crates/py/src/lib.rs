@@ -91,7 +91,7 @@ impl Store {
         self.inner.home().display().to_string()
     }
 
-    #[pyo3(signature = (project, name, module, source_dir, description=None, tags=String::from("[]"), parameter_schema=String::from("{}"), options=String::from("{}")))]
+    #[pyo3(signature = (project, name, module, source_dir, description=None, tags=String::from("[]"), parameter_schema=String::from("{}"), options=String::from("{}"), group=None))]
     #[allow(clippy::too_many_arguments)]
     fn upsert_flow(
         &self,
@@ -104,6 +104,7 @@ impl Store {
         tags: String,
         parameter_schema: String,
         options: String,
+        group: Option<String>,
     ) -> PyResult<i64> {
         let store = self.inner.clone();
         py.detach(move || {
@@ -116,6 +117,7 @@ impl Store {
                 tags,
                 parameter_schema,
                 options,
+                group,
             })
         })
         .map_err(to_py)

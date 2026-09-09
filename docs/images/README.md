@@ -9,4 +9,4 @@ Captured by hand from a demo server; there is no automated regeneration.
 
 Every file here must be referenced from a page (checked in review) with alt text that says what the picture shows.
 
-The current set was captured on the ui-redesign change (2026-09-06) with the top bar shell. `dashboard-dark.png` and `run-detail-dark.png` show the dark theme; the dark captures come from a browser whose system theme is dark, since the page follows `prefers-color-scheme` until the toggle is used. `artifacts.png` shows the Artifacts page.
+The current set was captured on the ui-redesign change (2026-09-06) with the top bar shell; `flows.png` and `runs.png` were recaptured on add-flow-groups (2026-09-09) with the collapsible groups. `dashboard-dark.png` and `run-detail-dark.png` show the dark theme; the dark captures come from a browser whose system theme is dark, since the page follows `prefers-color-scheme` until the toggle is used. `artifacts.png` shows the Artifacts page.

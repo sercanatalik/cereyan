@@ -231,6 +231,8 @@ function RunsTab({
       <Card className="gap-0 overflow-hidden py-0">
         <RunTable
           runs={runs}
+          grouped
+          searchActive={!!search.q}
           selected={selected}
           onSelect={(id, checked) =>
             setSelected((old) => {

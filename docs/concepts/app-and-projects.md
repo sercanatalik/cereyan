@@ -14,6 +14,8 @@ assert daily_etl.project == "warehouse"
 
 An **App** is the registry a module's flows, custom routes, and code rules belong to. Its name is the **project** every one of its flows is identified by: a flow's identity is `(project, name)`, so two projects can each have a flow called `etl` without colliding.
 
+The project is also how flows and runs are grouped in the UI, unless a flow declares a group of its own with `@flow(group=...)`. Groups are a flat axis rather than a level inside the project, so flows in different projects that declare the same group form one group, and a group named after a project merges with the flows defaulting to it. See [Tour of the UI](../get-started/tour.md).
+
 ## The default App
 
 You do not have to create an App. `@flow` without one registers on the default App, which is created on first use and named after the directory of the module that defined the first flow, lowercased and sanitised to `[a-z0-9][a-z0-9_-]*`:

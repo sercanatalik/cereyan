@@ -43,7 +43,8 @@ pub const RUN_COLUMNS: &str =
     r.engine_pid, r.engine_id, r.created_by, r.report_seq, \
     r.schedule_id, r.scheduled_time, r.priority, r.parent_run_id, r.attempt, r.backfill_id, \
     (SELECT json_group_object(st, n) FROM (SELECT COALESCE(t.state_type, 'Pending') AS st, COUNT(*) AS n \
-     FROM task_run t WHERE t.run_id = r.id GROUP BY st)) AS task_counts";
+     FROM task_run t WHERE t.run_id = r.id GROUP BY st)) AS task_counts, \
+    COALESCE(f.flow_group, f.project) AS flow_group";
 
 pub fn run_from_row(row: &Row<'_>) -> rusqlite::Result<Run> {
     let external: Vec<u8> = row.get(1)?;
@@ -61,6 +62,7 @@ pub fn run_from_row(row: &Row<'_>) -> rusqlite::Result<Run> {
         flow_id: row.get(2)?,
         flow_name: row.get(3)?,
         project: row.get(4)?,
+        group: row.get(30)?,
         name: row.get(5)?,
         parameters: json_map(row.get(6)?),
         tags: json_list(row.get(7)?),
@@ -321,7 +323,7 @@ pub fn firing_from_row(row: &Row<'_>) -> rusqlite::Result<RuleFiring> {
 
 pub const FLOW_COLUMNS: &str =
     "id, external_id, project, name, module, source_dir, description, tags, \
-    parameter_schema, created_at, last_seen_at, error, options";
+    parameter_schema, created_at, last_seen_at, error, options, flow_group";
 
 pub fn flow_from_row(row: &Row<'_>) -> rusqlite::Result<Flow> {
     let blob: Vec<u8> = row.get(1)?;
@@ -340,6 +342,7 @@ pub fn flow_from_row(row: &Row<'_>) -> rusqlite::Result<Flow> {
         last_seen_at: row.get(10)?,
         error: row.get(11)?,
         options: json_map(row.get(12)?),
+        group: row.get(13)?,
         live: false,
     })
 }

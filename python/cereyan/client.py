@@ -261,7 +261,7 @@ class Client:
                tags: list[str] | None = None, module: str | None = None, source_dir: str | None = None,
                description: str | None = None, parameter_schema: dict | None = None,
                options: dict | None = None, flow_tags: list[str] | None = None,
-               created_by: str = "client") -> dict:
+               flow_group: str | None = None, created_by: str = "client") -> dict:
         """``POST /api/runs``: create a run with explicit project and flow, registering the flow when needed.
 
         This is the low-level call used by the offline handoff and by `run`; pass
@@ -287,6 +287,8 @@ class Client:
             body["options"] = options
         if flow_tags:
             body["flow_tags"] = flow_tags
+        if flow_group is not None:
+            body["flow_group"] = flow_group
         return self._request("POST", "/api/runs", body=body)
 
     def run(self, flow: str, project: str | None = None, *, name: str | None = None,

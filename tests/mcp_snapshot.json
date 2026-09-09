@@ -255,6 +255,7 @@
             "failure_count",
             "flow_id",
             "flow_name",
+            "group",
             "id",
             "name",
             "parameters",

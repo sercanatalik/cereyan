@@ -866,6 +866,7 @@ know it yet (offline handoff from another project).
 | `created_by` | string or null | no |  |
 | `description` | string or null | no |  |
 | `flow` | string | yes |  |
+| `flow_group` | string or null | no | The flow's declared group; absent leaves the registered group as it is. |
 | `flow_tags` | array of string | no |  |
 | `module` | string or null | no |  |
 | `name` | string or null | no |  |
@@ -958,6 +959,7 @@ A registered flow. Identity is `(project, name)`.
 | `description` | string or null | no |  |
 | `error` | string or null | no |  |
 | `external_id` | [`Id`](#id) | yes |  |
+| `group` | string or null | no | The group the flow is listed under, declared in Python with `group=`. Null means none was declared and the flow is grouped under its project; API responses carry the resolved value, so clients never apply that fallback themselves. |
 | `id` | integer (int64) | yes |  |
 | `last_seen_at` | [`i64`](#i64) | yes |  |
 | `live` | boolean | no | Whether the running server has this flow registered from code. |
@@ -1215,6 +1217,7 @@ Type: any.
 | `failure_count` | integer (int32) | yes |  |
 | `flow_id` | integer (int64) | yes |  |
 | `flow_name` | string | yes |  |
+| `group` | string | no | The flow's group, read through the flow: never stored on the run. |
 | `id` | integer (int64) | yes |  |
 | `name` | string | yes |  |
 | `parameters` | object | no |  |

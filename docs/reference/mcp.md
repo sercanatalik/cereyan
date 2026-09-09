@@ -64,7 +64,7 @@ Recorded from real responses, so a model knows what it gets without a second cal
 | `list_artifacts` | `artifacts` | `created_at`, `data`, `external_id`, `flow_name`, `id`, `key`, `kind`, `project`, `run_id`, `run_name`, `task_run_id`, `updated_at` |
 | `list_events` | `events` | `external_id`, `flow_id`, `id`, `name`, `occurred`, `payload`, `related`, `resource`, `run_id`, `seq` |
 | `list_flows` | `flows` | `description`, `error`, `id`, `live`, `name`, `options`, `parameter_schema`, `project`, `tags` |
-| `list_runs` | `runs` | `attempt`, `backfill_id`, `crash_count`, `created_at`, `created_by`, `end_time`, `engine_id`, `engine_pid`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `id`, `name`, `parameters`, `parent_run_id`, `priority`, `project`, `report_seq`, `schedule_id`, `scheduled_time`, `start_time`, `state`, `tags`, `task_counts`, `total_run_time` |
+| `list_runs` | `runs` | `attempt`, `backfill_id`, `crash_count`, `created_at`, `created_by`, `end_time`, `engine_id`, `engine_pid`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `group`, `id`, `name`, `parameters`, `parent_run_id`, `priority`, `project`, `report_seq`, `schedule_id`, `scheduled_time`, `start_time`, `state`, `tags`, `task_counts`, `total_run_time` |
 | `list_schedules` | `schedules` | `active`, `catchup`, `catchup_max`, `flow`, `id`, `next_fire`, `paused_reason`, `paused_until`, `project`, `schedule`, `source` |
 | `run_logs` | `logs` | `id`, `level`, `logger`, `message`, `run_id`, `task_run_id`, `timestamp` |
 

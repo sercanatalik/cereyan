@@ -287,3 +287,55 @@ def test_task_counts_and_recent_run_durations(server):
     entry = next(e for e in server.client.flow(flow_id(server, "sleepy"))["recent_runs"] if e[0] == scheduled["id"])
     assert entry[3] is None
     server.client._request("POST", f"/api/runs/{scheduled['id']}/cancel")
+
+
+GROUPED_PIPELINE = '''
+from cereyan import App
+
+warehouse = App("warehouse")
+analytics = App("analytics")
+
+@warehouse.flow(group="nightly")
+def load():
+    return 1
+
+@analytics.flow(group="nightly")
+def rollup():
+    return 1
+
+@warehouse.flow
+def reconcile():
+    return 1
+'''
+
+
+@pytest.fixture
+def grouped(isolated_home, tmp_path):
+    from cereyan import engine
+
+    engine.close_store()
+    d = tmp_path / "grouped"
+    d.mkdir()
+    (d / "pipeline.py").write_text(GROUPED_PIPELINE)
+    srv = ServerProcess(str(isolated_home), str(d))
+    try:
+        yield srv
+    finally:
+        srv.stop()
+
+
+def test_flow_and_run_payloads_carry_the_resolved_group(grouped):
+    flows = {f["name"]: f for f in grouped.client.flows()}
+    # Declared groups span projects; an undeclared flow resolves to its project,
+    # so a client never has to re-apply the fallback.
+    assert flows["load"]["group"] == "nightly"
+    assert flows["rollup"]["group"] == "nightly"
+    assert flows["reconcile"]["group"] == "warehouse"
+    assert flows["load"]["project"] == "warehouse"
+    assert flows["rollup"]["project"] == "analytics"
+
+    run = grouped.client._request("POST", f"/api/flows/{flows['reconcile']['id']}/runs", body={"parameters": {}})
+    done = grouped.wait_run(run["id"])
+    assert done["group"] == "warehouse"
+    listed = grouped.client._request("GET", "/api/runs")["items"]
+    assert [r["group"] for r in listed] == ["warehouse"]

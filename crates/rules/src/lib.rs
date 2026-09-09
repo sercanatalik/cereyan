@@ -507,6 +507,7 @@ mod tests {
             flow_id: 1,
             flow_name: "etl".into(),
             project: "p".into(),
+            group: "p".into(),
             name: "run-1".into(),
             parameters: serde_json::from_value(json!({"day": "2026-09-06"})).unwrap(),
             tags: vec!["prod".into()],

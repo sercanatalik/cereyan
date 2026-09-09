@@ -56,6 +56,7 @@ class Flow:
         name: str | None = None,
         description: str | None = None,
         tags: Iterable[str] = (),
+        group: str | None = None,
         run_name: str | Callable[..., str] | None = None,
         isolated: bool = False,
         log_prints: bool = False,
@@ -120,6 +121,7 @@ class Flow:
         self.name = name or fn.__name__
         self.description = description if description is not None else inspect.getdoc(fn)
         self.tags = sorted(set(tags))
+        self.declared_group = str(group) if group is not None else None
         self.run_name = run_name
         self.isolated = bool(isolated)
         self.log_prints = bool(log_prints)
@@ -144,6 +146,16 @@ class Flow:
 
     def __repr__(self) -> str:
         return f"Flow({self.name!r})"
+
+    @property
+    def group(self) -> str:
+        """The group this flow belongs to: the one it declared, else its `project`.
+
+        Groups are a flat axis, so flows in different projects that declare the same
+        group form one group, and a declared group equal to a project name merges with
+        the flows defaulting to that project.
+        """
+        return self.declared_group if self.declared_group is not None else self.project
 
     @property
     def project(self) -> str:
@@ -212,6 +224,7 @@ def flow(
     name: str | None = None,
     description: str | None = None,
     tags: Iterable[str] = (),
+    group: str | None = None,
     run_name: str | Callable[..., str] | None = None,
     isolated: bool = False,
     log_prints: bool = False,
@@ -231,6 +244,11 @@ def flow(
             ``(project, name)``.
         description (str | None): Shown in the UI; defaults to the function's docstring.
         tags (Iterable[str]): Tags copied onto every run.
+        group (str | None): The group this flow is listed under in the UI; defaults to the
+            flow's project. Groups are a flat axis, not a level inside the
+            project: flows in different projects declaring the same group form
+            one group, and a group named after a project merges with the flows
+            that default to it.
         run_name (str | Callable[..., str] | None): A ``str.format`` template over the parameters, such as
             ``"etl-{day}"``, or a callable taking the parameters as keyword
             arguments and returning the name.
@@ -287,6 +305,7 @@ def flow(
             name=name,
             description=description,
             tags=tags,
+            group=group,
             run_name=run_name,
             isolated=isolated,
             log_prints=log_prints,
