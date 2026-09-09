@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`@flow` and `@task` reject `async def`.** An async body was never awaited: the call returned a coroutine, the body never ran, and the run was recorded `Completed` — a pipeline that fetched nothing and reported success, its only trace a `RuntimeWarning` on stderr after the fact. Both decorators now raise `TypeError` at decoration, naming the function and showing the synchronous wrapper. `async def` with `yield` is rejected too: `inspect.iscoroutinefunction` is false for an async generator function, which failed the same way. Async bodies remain unsupported; `async def` route handlers are unaffected. Anything this breaks was already reporting success without running.
+- A guide for fetching from an HTTP API: building the client once so a warm engine reuses its connection pool, `map` over a `ThreadRunner` for concurrency, and where the reuse stops (`isolated=True`, `ProcessRunner`, offline runs). That an engine imports its module once, and so shares module-level state across the runs it serves, is now stated on Engines and the home directory and covered by a test, rather than being an undocumented accident of the implementation.
+
 - Removed `roadmap.md` and the migration guide, and the references to other projects that went with them. The credits in the README stay, as does `NOTICE` and the per-file attribution it points at, which the Apache 2.0 licence of the adapted UI components requires. The old migration-guide URL redirects to Design and limitations.
 
 ## 1.5.0 (2026-09-09)

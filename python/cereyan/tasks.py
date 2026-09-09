@@ -3,11 +3,54 @@
 from __future__ import annotations
 
 import functools
+import inspect
 from datetime import timedelta
 from typing import Any, Callable, Iterable
 
 from . import context
 from .results import CachePolicy
+
+
+def _is_async_function(fn: Any) -> bool:
+    """Whether ``fn`` is an ``async def``, with or without ``yield``.
+
+    ``inspect.iscoroutinefunction`` is false for an async generator function, which
+    fails the same way: its body never runs and the call returns an object.
+    """
+    return inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn)
+
+
+def _async_message(kind: str, fn: Callable) -> str:
+    """The error raised when ``@flow`` or ``@task`` is given an ``async def``."""
+    name = getattr(fn, "__name__", "<anonymous>")
+    record = "task run" if kind == "task" else "run"
+    if inspect.isasyncgenfunction(fn):
+        what = "`async def` with `yield`"
+        returns = "an async generator"
+        wrapper = (
+            f"    @{kind}\n"
+            f"    def {name}(...):\n"
+            f"        async def collect():\n"
+            f"            return [item async for item in _{name}(...)]\n"
+            f"        return asyncio.run(collect())"
+        )
+    else:
+        what = "`async def`"
+        returns = "a coroutine"
+        wrapper = (
+            f"    @{kind}\n"
+            f"    def {name}(...):\n"
+            f"        return asyncio.run(_{name}(...))"
+        )
+    body = "Task bodies" if kind == "task" else "Flow bodies"
+    return (
+        f"@{kind} cannot decorate an async function: {name} is {what}. "
+        f"{body} run synchronously, so calling it would return {returns} without "
+        f"running the body, and the {record} would be recorded as having succeeded. "
+        f"Drive it yourself instead:\n\n"
+        f"{wrapper}\n\n"
+        f"See https://sercanatalik.github.io/cereyan/guides/fetch-from-an-api/"
+    )
 
 
 class Task:
@@ -37,6 +80,8 @@ class Task:
         on_failure: Iterable[Callable] = (),
         on_cancellation: Iterable[Callable] = (),
     ) -> None:
+        if _is_async_function(fn):
+            raise TypeError(_async_message("task", fn))
         functools.update_wrapper(self, fn)
         self.fn = fn
         self.name = name or fn.__name__

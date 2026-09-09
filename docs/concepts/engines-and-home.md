@@ -34,7 +34,7 @@ db.sqlite                              └── supervisor ──▶ engine pro
 
 `cereyan serve dir/` is one process hosting the HTTP API, the UI, the scheduler, the rules engine, the MCP endpoint, and the **supervisor**, which keeps a warm pool of **engine** child processes.
 
-- Each engine is bound to one Python module, imports it once, and executes runs of its flows one at a time. Engines are keyed by `(source_dir, module)` and pooled up to `max_engines` (default: CPU count).
+- Each engine is bound to one Python module, imports it once, and executes runs of its flows one at a time. Because the import happens once, module-level state — an HTTP client and its connection pool, a warmed cache — is shared by every run that engine serves; see [fetching from an HTTP API](../guides/fetch-from-an-api.md). Engines are keyed by `(source_dir, module)` and pooled up to `max_engines` (default: CPU count).
 - An engine is recycled after `engine_max_runs` runs (default 100) or when its module file changes, so edits are picked up without restarting the server. `@flow(isolated=True)` gives every run of that flow a fresh process, terminated afterwards.
 - Engines report task-run transitions and logs in batches every 100 milliseconds (immediately on flow-level transitions) over one keep-alive connection, and heartbeat every five seconds per active run. Three missed heartbeats and a dead PID mark the run `Crashed`; it is rerun up to `crash_retries` times.
 - Cancelling a run moves it to `Cancelling`, tells the engine, waits `cancel_grace_secs`, sends SIGTERM, waits again, then SIGKILL.

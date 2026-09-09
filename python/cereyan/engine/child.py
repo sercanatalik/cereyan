@@ -175,6 +175,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"cereyan engine: could not lower priority: {exc}", file=sys.stderr)
     suppress_top_level_runs(True, "engine child")
     try:
+        # Imported once, outside the work loop below, so module-level state — an
+        # HTTP client and its connection pool, a warmed cache — is shared by every
+        # run this engine serves. docs/guides/fetch-from-an-api.md tells readers to
+        # rely on that, and tests/test_module_state_reuse.py pins it. Moving this
+        # into the loop changes a documented guarantee, not just a detail.
         module = importlib.import_module(args.module)
     except BaseException:
         tb = traceback.format_exc()

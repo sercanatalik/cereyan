@@ -148,3 +148,102 @@ def test_task_outside_flow_is_plain_call(store):
 
     assert add(1, 2) == 3
     assert json.loads(store.list_runs())["items"] == []
+
+
+def test_async_flow_is_rejected_at_decoration():
+    with pytest.raises(TypeError) as exc:
+
+        @flow
+        async def pipeline():
+            pass
+
+    message = str(exc.value)
+    assert "pipeline" in message
+    assert "async def" in message
+    assert "asyncio.run" in message
+    assert "pipeline" not in cereyan.app.flows
+
+
+def test_async_task_is_rejected_at_decoration():
+    with pytest.raises(TypeError) as exc:
+
+        @task
+        async def fetch():
+            pass
+
+    message = str(exc.value)
+    assert "fetch" in message
+    assert "asyncio.run" in message
+
+
+def test_async_generator_task_is_rejected_at_decoration():
+    # `inspect.iscoroutinefunction` is false for these, but the body never runs
+    # either: the call returns an async generator that is stored as the result.
+    with pytest.raises(TypeError) as exc:
+
+        @task
+        async def stream():
+            yield 1
+
+    message = str(exc.value)
+    assert "stream" in message
+    assert "async def` with `yield" in message
+    assert "async for" in message
+
+
+def test_async_generator_flow_is_rejected_at_decoration():
+    with pytest.raises(TypeError) as exc:
+
+        @flow
+        async def pages():
+            yield 1
+
+    assert "pages" in str(exc.value)
+    assert "pages" not in cereyan.app.flows
+
+
+def test_partial_of_an_async_function_is_rejected():
+    import functools
+
+    async def fetch():
+        pass
+
+    with pytest.raises(TypeError):
+        task(functools.partial(fetch))
+
+
+def test_synchronous_generator_task_is_still_accepted(store):
+    @task
+    def steps():
+        yield 1
+        return 2
+
+    @flow
+    def f():
+        return steps()
+
+    assert f() == 2
+    run = json.loads(store.list_runs())["items"][0]
+    tasks = json.loads(store.task_runs(run["id"]))
+    assert tasks[0]["state"]["type"] == "Completed"
+
+
+def test_task_wrapping_asyncio_run_is_recorded(store):
+    import asyncio
+
+    async def _fetch(path):
+        return f"body of {path}"
+
+    @task
+    def fetch(path: str) -> str:
+        return asyncio.run(_fetch(path))
+
+    @flow
+    def f():
+        return fetch("orders")
+
+    assert f() == "body of orders"
+    run = json.loads(store.list_runs())["items"][0]
+    tasks = json.loads(store.task_runs(run["id"]))
+    assert [t["dynamic_key"] for t in tasks] == ["fetch-0"]
+    assert tasks[0]["state"]["type"] == "Completed"
