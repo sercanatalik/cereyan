@@ -87,6 +87,9 @@ def test_idle_engine_gives_up_when_the_server_is_killed(served):
     served.proc.kill()
     served.proc.wait()
 
-    leaked = _gone(pids, timeout=90.0)
+    # 60 s against a 40 s bound. This waited 90 s, which was exactly the client
+    # timeout that used to defeat the bound, so the test raced the bug instead of
+    # catching it. Margin is what makes this an assertion rather than a coin flip.
+    leaked = _gone(pids, timeout=60.0)
     assert not leaked, f"idle engines never gave up: {leaked}"
     assert "server unreachable" in served.read_log()

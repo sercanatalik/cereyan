@@ -19,6 +19,15 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_RETRY: Duration = Duration::from_secs(600);
 /// An idle engine (no run in progress) stops waiting for a server sooner.
 const IDLE_RETRY: Duration = Duration::from_secs(30);
+/// How long a work long-poll may take before the client gives up on it.
+///
+/// This is the real bound on an idle engine's exit, not IDLE_RETRY. The elapsed
+/// check runs in the error arm of the request loop, so it is only reached once a
+/// request has returned: a request that hangs holds the loop for this long before
+/// anything looks at the clock. The server holds a work request for `wait_ms`
+/// (30 s), so this only has to outlast that with margin — a larger value buys
+/// nothing and pushes the give-up out by the difference.
+const LONG_POLL_TIMEOUT: Duration = Duration::from_secs(40);
 const MAX_BUFFERED_LOGS: usize = 1_000_000;
 
 /// Items (events, or log lines inside a Logs event) per report request.
@@ -331,7 +340,7 @@ impl Client {
             .into();
         let long_agent: ureq::Agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
-            .timeout_global(Some(Duration::from_secs(90)))
+            .timeout_global(Some(LONG_POLL_TIMEOUT))
             .build()
             .into();
         let inner = Arc::new(Inner {
