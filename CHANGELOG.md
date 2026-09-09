@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.9.2 (2026-09-09)
+
 - **A clock-armed proactive rule no longer cries wolf on its first tick.** `unless` with `at` fires when an expected event did not arrive in the look-back window, and an early tick's window reaches back past the rule's own creation — where the store is empty because nothing had happened yet, not because anything was missed. A rule with `within=3` fired 0.77 seconds after the server started, and one saved from the UI could page someone about the hour before it existed. A tick now evaluates only once the rule has been watching for a whole window; the schedule keeps running meanwhile, so the first honest lapse is delayed by at most `within`. This was recorded in `WINDOWS.md` as an unexplained Windows-only flake; it is neither. Windows lost the coin flip more often because a slower start delays the first event, and CI caught it on Linux at 1.9.1. The `xfail` marker that blamed Windows is gone, and `test_clock_armed_rule_waits_until_it_has_watched_a_whole_window` pins the behaviour.
 
 ## 1.9.1 (2026-09-09)
