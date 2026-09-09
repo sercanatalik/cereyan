@@ -1,12 +1,12 @@
 # Windows: what works, what does not, what is left
 
 Cereyan builds, installs and runs on Windows: CI compiles the crates, runs the Rust
-suite, builds the x86_64 wheel and smoke-tests it on every push. Three things are
+suite, builds the x86_64 wheel and smoke-tests it on every push. Two things are
 still open, and this file is where they are tracked, because the change proposals
 that describe them live under `openspec/`, which is not committed.
 
-Two of the three are **shipped bugs that affect users**, not test problems. They are
-marked in the suite so they cannot be forgotten, and the markers name the workstream
+One of the two is a pair of **shipped bugs that affect users**, not test problems. They
+are marked in the suite so they cannot be forgotten, and the markers name the workstream
 that owns each.
 
 ## Where it stands
@@ -19,7 +19,6 @@ that owns each.
 | Documentation suite in CI | yes | yes | **no** — same condition |
 | Flow `timeout_seconds` | yes | yes | **no** — accepted and silently ignored |
 | Cooperative cancel of a blocked flow | yes | yes | **no** — waits for the supervisor to terminate the engine |
-| Clock-armed proactive rules | yes | yes | **intermittent** — fires while its window is still filling |
 
 ## 1. Turn the Python and documentation suites back on
 
@@ -76,44 +75,32 @@ once. A watchdog thread is portable but cannot interrupt a blocking C call the w
 `SIGALRM` can, so it is not equivalent; ending the engine is always available and always
 abrupt. Whichever is chosen, accepting `timeout_seconds` and ignoring it has to stop.
 
-## 3. Clock-armed proactive rules fire early
-
-A clock-armed rule fires on Windows while the events it waits for are still arriving.
-The test keeps `run.completed` events inside a three second `within` and asserts the
-rule has not lapsed; on Windows it lapses anyway, reporting
-
-```
-fired despite no interval wider than 0.6s, within=3.0s
-```
-
-measured by the server's own recorded timestamps rather than the client's. It passes on
-Linux and macOS. The cause is not known. The leading hypothesis is that the tick's
-notion of "now" and the events' timestamps disagree on Windows through the local
-timezone or the clock source; `croner`, `chrono-tz` and the expectation timestamps in
-the store are where to look. This is `unless` + `within` + `at`, whose whole purpose is
-to notice that something did *not* happen, so firing when it did is the failure mode
-that matters.
-
 ## The markers that pin all of this
 
-Every one is gated on `sys.platform == "win32"`, so none of them fires on Unix — macOS
-collects 197 tests and skips none. The failures are `xfail` rather than `skip` so they
+Every one is gated on `sys.platform == "win32"`, so none of them fires on Unix. The failures are `xfail` rather than `skip` so they
 still run and report XPASS the moment the bug is fixed.
 
 | Location | Kind | Covers |
 |---|---|---|
 | `tests/test_phase2_offline.py:247` | `xfail(strict)` | flow timeout, section 2 |
 | `tests/test_supervisor.py:19` | `xfail(strict)` | cooperative cancel, section 2 |
-| `tests/test_release11_rules.py:250` | `xfail(strict=False)` | proactive rule window, section 3 |
 | `tests/test_supervisor.py:53` | `skipif` | terminate-then-kill ladder, Unix-only by design |
 | `tests/test_cli.py:112` | `skipif` | the user's home cannot be faked by environment |
 | `tests/test_release11_socket_routes.py:43` | `skipif` | Unix sockets |
 | `tests/test_release11_artifacts_nice.py:75` | `skipif` | engine niceness |
 
-The three `xfail` markers are the ones to watch: when a fix lands, a strict marker turns
-XPASS into a failure and forces itself to be removed. `test_clock_armed_rule_...` is not
-strict because it passes on Windows some runs, and a strict marker would turn those into
-failures.
+Both `xfail` markers are the ones to watch: when a fix lands, a strict marker turns XPASS
+into a failure and forces itself to be removed.
+
+A third marker used to sit here, on `test_clock_armed_rule_fires_only_when_window_is_empty`,
+blaming Windows for a clock-armed rule that lapsed while its events kept arriving. It was not
+a Windows bug. The look-back window of an early tick reached back past the rule's own
+creation, where the store is empty because nothing had happened yet, so the rule reported an
+absence over time it had not been watching — a coin flip everywhere, decided by where the
+first tick fell relative to the first event, and lost more often on Windows only because a
+slower start delays that event. It fired on Linux in CI at 1.9.1, is fixed in
+`crates/server/src/rules.rs`, and is pinned by
+`test_clock_armed_rule_waits_until_it_has_watched_a_whole_window`.
 
 ## Differences that are not bugs
 

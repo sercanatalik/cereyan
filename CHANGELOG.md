@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A clock-armed proactive rule no longer cries wolf on its first tick.** `unless` with `at` fires when an expected event did not arrive in the look-back window, and an early tick's window reaches back past the rule's own creation — where the store is empty because nothing had happened yet, not because anything was missed. A rule with `within=3` fired 0.77 seconds after the server started, and one saved from the UI could page someone about the hour before it existed. A tick now evaluates only once the rule has been watching for a whole window; the schedule keeps running meanwhile, so the first honest lapse is delayed by at most `within`. This was recorded in `WINDOWS.md` as an unexplained Windows-only flake; it is neither. Windows lost the coin flip more often because a slower start delays the first event, and CI caught it on Linux at 1.9.1. The `xfail` marker that blamed Windows is gone, and `test_clock_armed_rule_waits_until_it_has_watched_a_whole_window` pins the behaviour.
+
 ## 1.9.1 (2026-09-09)
 
 - The engine give-up test no longer gates a release on a wall-clock ceiling. `test_idle_engine_gives_up_when_the_server_is_killed` asserted that a SIGKILLed server's engine exits within 60 seconds, against a bound of 40; on a loaded macOS runner the same commit that passed on `main` failed on the tag, which is the flake the repository already has a rule against. It now asserts only that the engine gives up, and the 40 second bound moved to a `performance` test that `just bench` runs on calibrated hardware, where a number like that means something. No product behaviour changed.

@@ -34,7 +34,7 @@ spec = app.rules[0].spec()
 assert spec["at"] == {"cron": "0 9 * * *", "tz": "Europe/Istanbul"}
 ```
 
-At each tick of `at` the rule fires unless a matching event occurred in the look-back window: `within` seconds when given, otherwise the time since the previous tick. Ticks missed while the server was down are skipped with a log line. Clock-armed rules need a running server, and on Windows one can lapse while the events it waits for are still arriving, so treat a lapse there as a signal to check rather than as proof.
+At each tick of `at` the rule fires unless a matching event occurred in the look-back window: `within` seconds when given, otherwise the time since the previous tick. Ticks missed while the server was down are skipped with a log line. Clock-armed rules need a running server. A rule does not fire until it has been watching for a whole window: until then its look-back would reach past its own creation, where nothing had happened yet, and the first tick after you save a rule would page you about it.
 
 ## What the rule sees
 

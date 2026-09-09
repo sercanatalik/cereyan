@@ -6,8 +6,6 @@ import json
 import os
 import time
 
-import sys
-
 import pytest
 
 from cereyan import App
@@ -247,11 +245,23 @@ def test_expectation_survives_restart(isolated_home, tmp_path):
         again.stop()
 
 
-@pytest.mark.xfail(
-    sys.platform == "win32",
-    reason="windows-proactive-rule-window: a clock-armed rule lapses on Windows while the events it waits for keep arriving; intermittent, hence not strict",
-    strict=False,
-)
+def test_clock_armed_rule_waits_until_it_has_watched_a_whole_window(pro):
+    """A rule cannot report an absence over time before it was watching.
+
+    An early tick's look-back window reaches back past the rule's own creation, where
+    the store is empty because nothing had happened yet rather than because anything
+    was missed. That read as a lapse: a rule with `within=3` fired 0.77 s after the
+    server started. Nothing runs here, so every window really is empty and the only
+    question is when the rule is entitled to say so.
+    """
+    row = pro.client._request("GET", f"/api/rules/{rule_id(pro, 'heartbeat')}")
+    within = row["within"]
+    wait_for(lambda: pro.client.events(kind="expectation.lapsed", limit=10), timeout=within + 8)
+    first = min(e["occurred"] for e in pro.client.events(kind="expectation.lapsed", limit=50))
+    watched = (first - row["created_at"]) / 1_000_000
+    assert watched >= within, f"lapsed after watching for {watched:.2f}s of a {within}s window"
+
+
 def test_clock_armed_rule_fires_only_when_window_is_empty(pro):
     rid = rule_id(pro, "heartbeat")
     row = pro.client._request("GET", f"/api/rules/{rid}")

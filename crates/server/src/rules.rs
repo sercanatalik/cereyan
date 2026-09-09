@@ -276,6 +276,14 @@ pub fn clock_tick(state: &Arc<AppState>, rule_id: i64) {
             .timer
             .push(to_micros(next), TimerEvent::RuleClock(rule_id));
     }
+    // A rule cannot report that something did not happen over a period it was not
+    // watching. The window of an early tick reaches back before the rule existed,
+    // where the store is empty because nothing could have been recorded yet, not
+    // because the expected event was missed. Wait until the rule has been alive for
+    // a whole window; the tick above keeps the schedule running meanwhile.
+    if since < rule.created_at {
+        return;
+    }
     let unless = rule.spec.unless.clone().unwrap_or_default();
     let seen = state
         .store
