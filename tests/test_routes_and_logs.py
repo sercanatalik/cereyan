@@ -54,11 +54,31 @@ def test_route_collision_fails_startup(isolated_home, tmp_path):
     assert not os.path.exists(isolated_home / "server.json")
 
 
+def settled_logs(server, run_id, timeout=10.0):
+    """The run's logs once no more are arriving.
+
+    A run reaching a terminal state does not mean its logs have all landed: the
+    engine reports them in batches every 100 ms, so the last batch can arrive
+    after the state does. Anything comparing two log queries has to start from a
+    stream that has stopped moving, or the second query can see one more than the
+    first.
+    """
+    deadline = time.time() + timeout
+    previous = None
+    while time.time() < deadline:
+        items = server.client.logs(run_id)["items"]
+        if previous is not None and len(items) == len(previous):
+            return items
+        previous = items
+        time.sleep(0.2)
+    return previous or []
+
+
 def test_log_prints_and_filters(server):
     run = server.client._request("POST", f"/api/flows/{flow_id(server, 'printer')}/runs", body={})
     done = server.wait_run(run["id"])
     assert done["state"]["type"] == "Completed"
-    logs = server.client.logs(run["id"])["items"]
+    logs = settled_logs(server, run["id"])
     by_msg = {l["message"]: l for l in logs}
     assert by_msg["hello"]["level"] == 20
     assert by_msg["hello from task"]["task_run_id"] is not None

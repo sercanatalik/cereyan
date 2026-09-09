@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 import pytest
 
@@ -86,6 +87,19 @@ def test_logs_are_stored_with_run(store):
     assert task_log["level"] == 30
 
 
+def assert_names_holder(message: str) -> None:
+    """The lock error names the holder's PID, or says plainly that it cannot.
+
+    Unix locks are advisory, so the PID can be read back out of the locked file.
+    Windows locks are mandatory and block that read, and `local-store` makes
+    naming the holder best effort while refusing the second opener is not.
+    """
+    if sys.platform == "win32":
+        assert str(os.getpid()) in message or "PID unknown" in message, message
+    else:
+        assert str(os.getpid()) in message, message
+
+
 def test_store_lock_conflict_fails_before_user_code(isolated_home):
     holder = _core.Store.open(str(isolated_home))
     calls = []
@@ -96,7 +110,7 @@ def test_store_lock_conflict_fails_before_user_code(isolated_home):
 
     with pytest.raises(CereyanError) as info:
         f()
-    assert str(os.getpid()) in str(info.value)
+    assert_names_holder(str(info.value))
     assert "server" in str(info.value)
     assert calls == []
     del holder
@@ -105,7 +119,7 @@ def test_store_lock_conflict_fails_before_user_code(isolated_home):
 def test_second_store_open_reports_holder_pid(store):
     with pytest.raises(StoreLocked) as info:
         _core.Store.open(str(engine.resolved_home()))
-    assert str(os.getpid()) in str(info.value)
+    assert_names_holder(str(info.value))
 
 
 def test_home_created_on_first_run(isolated_home):

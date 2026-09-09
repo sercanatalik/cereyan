@@ -3,6 +3,8 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 from server_helpers import ServerProcess, free_port, is_alive, kill
 
 
@@ -14,6 +16,11 @@ def start(server, name, **params):
     return server.client._request("POST", f"/api/flows/{flow_id(server, name)}/runs", body={"parameters": params})
 
 
+@pytest.mark.xfail(
+    sys.platform == "win32",
+    reason="windows-interrupt-running-flow: _thread.interrupt_main cannot interrupt a blocking call, so a cancel waits for the supervisor to terminate the engine",
+    strict=True,
+)
 def test_cooperative_cancel(server):
     run = start(server, "sleepy", seconds=30)
     server.wait_run(run["id"], until=lambda r: r["state"]["type"] == "Running")
@@ -43,6 +50,12 @@ def test_cancel_scheduled_run_is_immediate(server):
         server.wait_run(r["id"])
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the terminate-then-kill ladder is Unix-only: Windows delivers no SIGTERM for a "
+    "process to ignore, and the server's terminate is already TerminateProcess, so a run is "
+    "ended in one step and never reports 'killed'. Cooperative cancel is covered separately",
+)
 def test_stuck_process_is_terminated_then_killed(isolated_home, project_dir):
     (project_dir / "cereyan.toml").write_text("[server]\ncancel_grace_secs = 1\n")
     srv = ServerProcess(str(isolated_home), str(project_dir))

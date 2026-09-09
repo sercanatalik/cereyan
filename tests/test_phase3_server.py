@@ -315,7 +315,10 @@ def test_settings_persist_and_retention(obs, obs_dir):
     wait_until(lambda: c.logs(run["id"])["items"] == [], timeout=15)
     assert c.get_run(run["id"])["state"]["type"] == "Completed"
     assert c.task_runs(run["id"])
-    assert c.events(kind="run.*", limit=5) == []
+    # Logs and events are aged together but not necessarily swept together, so wait
+    # for the events the same way rather than assuming one pass cleared both. The
+    # run itself and its task runs survive retention; only its logs and events go.
+    wait_until(lambda: c.events(kind="run.*", limit=5) == [], timeout=15)
 
 
 def test_unknown_config_key_warning(isolated_home, obs_dir):

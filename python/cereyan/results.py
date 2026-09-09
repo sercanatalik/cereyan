@@ -32,9 +32,19 @@ PYTHON_VERSION = f"{sys.version_info.major}.{sys.version_info.minor}"
 
 
 def storage_dir(home: str) -> str:
-    """The ``storage`` directory under ``home`` where persisted results live, created on first use."""
+    """The ``storage`` directory under ``home`` where persisted results live, created on first use.
+
+    Only the subdirectory. The home itself is created by the store, which is what
+    makes it readable by its owner alone; ``makedirs`` here would create it too, at
+    whatever the umask gives, and quietly bypass that. Results are written during a
+    run, so the store has already opened the home — if it has not, that is worth an
+    error rather than a directory anyone can read.
+    """
     path = os.path.join(home, "storage")
-    os.makedirs(path, exist_ok=True)
+    try:
+        os.mkdir(path)
+    except FileExistsError:
+        pass
     return path
 
 

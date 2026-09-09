@@ -1,5 +1,8 @@
 import json
 import os
+import sys
+
+import pytest
 
 PIPELINE = '''
 from cereyan import flow, task
@@ -106,6 +109,13 @@ def test_environment_beats_default(run_cli, write_module, tmp_path):
     assert not (fake_user_home / ".cereyan").exists()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the user's home cannot be faked by environment on Windows: dirs::home_dir() "
+    "resolves it through the Known Folder API, not HOME or USERPROFILE, so this test would "
+    "write into the real ~/.cereyan instead of the temporary one. The behaviour it checks — "
+    "the default home is .cereyan under the user's home — is not Windows-specific",
+)
 def test_default_home_under_user_home(run_cli, write_module, tmp_path):
     path = write_module("proj", PIPELINE)
     fake_user_home = tmp_path / "user"

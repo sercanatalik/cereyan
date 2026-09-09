@@ -2,6 +2,8 @@
 
 import json
 
+import sys
+
 import pytest
 
 from cereyan import App, Variable, artifacts, emit_event, flow, task
