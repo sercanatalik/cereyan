@@ -87,11 +87,6 @@ def test_artifacts_offline(store):
     assert json.loads(store.artifacts(run["id"])) == []
 
 
-@pytest.mark.xfail(
-    sys.platform == "win32",
-    reason="windows-secret-file-permissions: secret.key is restricted to its owner only under cfg(unix); Windows leaves it at the inherited ACL",
-    strict=True,
-)
 def test_variables_round_trip_and_secrets(store, isolated_home):
     Variable.set("region", "eu", tags=["infra"])
     assert Variable.get("region") == "eu"
