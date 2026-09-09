@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The engine give-up test no longer gates a release on a wall-clock ceiling. `test_idle_engine_gives_up_when_the_server_is_killed` asserted that a SIGKILLed server's engine exits within 60 seconds, against a bound of 40; on a loaded macOS runner the same commit that passed on `main` failed on the tag, which is the flake the repository already has a rule against. It now asserts only that the engine gives up, and the 40 second bound moved to a `performance` test that `just bench` runs on calibrated hardware, where a number like that means something. No product behaviour changed.
+
 ## 1.9.0 (2026-09-09)
 
 - Documentation: features that shipped without a page. The MCP guide still described fifteen tools and named none of the four schedule tools added in 1.8.0. `cereyan.runtime`, the public view of the run in progress (`run`, `task_run`, `flow`), was exported from the package and mentioned nowhere; it now has a section on the Python API page and a pointer from Runs and states. The events reference listed five of the fifteen kinds the SSE stream carries and the OpenAPI description behind `GET /api/stream` listed four; both now list all of them with their payloads. The tour still said the run page's Details tab shows an exit code, which was removed in 1.4.0, and did not mention the task run page.

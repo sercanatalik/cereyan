@@ -69,6 +69,19 @@ def test_graceful_stop_leaves_no_engine(served):
     assert not leaked, f"engines outlived the server: {leaked}"
 
 
+def _kill_the_server_under(served) -> list[int]:
+    """Warm an engine, then SIGKILL the server so it never says exit."""
+    flows = served.client._request("GET", "/api/flows")
+    flow_id = (flows if isinstance(flows, list) else flows["items"])[0]["id"]
+    run = served.client._request("POST", f"/api/flows/{flow_id}/runs", body={"parameters": {}})
+    served.wait_run(run["id"])
+    pids = served.engine_pids()
+    assert pids, "the run should have warmed an engine"
+    served.proc.kill()
+    served.proc.wait()
+    return pids
+
+
 def test_idle_engine_gives_up_when_the_server_is_killed(served):
     """A SIGKILLed server never says exit, so the engine's own idle timeout must end it.
 
@@ -76,20 +89,28 @@ def test_idle_engine_gives_up_when_the_server_is_killed(served):
     ``{"exit": true}`` once IDLE_RETRY (30 s) has passed with the server unreachable. It is
     pinned here so the graceful path above cannot become the only thing keeping engines from
     outliving their server.
+
+    Correctness only: that the engine gives up at all. The ceiling it gives up *within* is
+    asserted by the performance test below, because a wall-clock bound with 15 s of headroom
+    fails on a loaded shared runner without saying anything about the product.
     """
-    flows = served.client._request("GET", "/api/flows")
-    flow_id = (flows if isinstance(flows, list) else flows["items"])[0]["id"]
-    run = served.client._request("POST", f"/api/flows/{flow_id}/runs", body={"parameters": {}})
-    served.wait_run(run["id"])
-    pids = served.engine_pids()
-    assert pids, "the run should have warmed an engine"
+    pids = _kill_the_server_under(served)
 
-    served.proc.kill()
-    served.proc.wait()
-
-    # 60 s against a 40 s bound. This waited 90 s, which was exactly the client
-    # timeout that used to defeat the bound, so the test raced the bug instead of
-    # catching it. Margin is what makes this an assertion rather than a coin flip.
-    leaked = _gone(pids, timeout=60.0)
+    leaked = _gone(pids, timeout=150.0)
     assert not leaked, f"idle engines never gave up: {leaked}"
     assert "server unreachable" in served.read_log()
+
+
+@pytest.mark.performance
+def test_idle_engine_gives_up_within_the_documented_bound(served):
+    """The give-up is bounded by LONG_POLL_TIMEOUT (40 s), not by IDLE_RETRY.
+
+    60 s against a 40 s bound. This waited 90 s, which was exactly the client timeout that
+    used to defeat the bound, so the test raced the bug instead of catching it. Margin is
+    what makes this an assertion rather than a coin flip — and it holds only on calibrated
+    hardware, which is why `just bench` runs it and `just test` does not.
+    """
+    pids = _kill_the_server_under(served)
+
+    leaked = _gone(pids, timeout=60.0)
+    assert not leaked, f"idle engines outran the 40 s bound: {leaked}"
