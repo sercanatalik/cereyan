@@ -46,7 +46,7 @@ The Settings page lists the engines with their PID, module, runs done, and curre
 
 ## The home directory
 
-One runtime home per machine holds everything: `db.sqlite`, `db.lock`, `server.json` while a server runs, `secret.key` once a secret exists, and `storage/` for persisted results. It resolves from `--home`, then `CEREYAN_HOME`, then `~/.cereyan`; `cereyan.toml` cannot move it, so a repository can never point the store elsewhere. Engine children inherit it through `CEREYAN_HOME`.
+One runtime home per machine holds everything: `db.sqlite`, `db.lock`, `server.json` while a server runs, `secret.key` once a secret exists, and `storage/` for persisted results. Only the account that created it can read it, which is what protects the store and the key alike. It resolves from `--home`, then `CEREYAN_HOME`, then `~/.cereyan`; `cereyan.toml` cannot move it, so a repository can never point the store elsewhere. Engine children inherit it through `CEREYAN_HOME`.
 
 Because the home is global, one server runs per machine and holds the advisory lock. History is a cache: losing `db.sqlite` loses the run list, not your data, which lives in your targets. A corrupted database is quarantined and a fresh one created.
 

@@ -51,7 +51,7 @@ impl Store {
     /// Open the store at `home`, taking the advisory lock and applying
     /// migrations. The directory is created when missing.
     pub fn open(home: &Path) -> Result<Store> {
-        std::fs::create_dir_all(home)?;
+        open::ensure_home(home)?;
         let lock = open::take_lock(home)?;
         let db_path = home.join(DB_FILE);
         let write_conn = open::open_writer(&db_path)?;

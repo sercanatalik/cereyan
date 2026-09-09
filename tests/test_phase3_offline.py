@@ -100,7 +100,12 @@ def test_variables_round_trip_and_secrets(store, isolated_home):
     assert Variable.get("api_token") == "hunter2"
     key = isolated_home / "secret.key"
     assert key.exists()
-    assert oct(key.stat().st_mode & 0o777) == "0o600"
+    # The home is what protects the key, not a mode on the key itself: that was
+    # Unix-only and arrived a moment after the key was already on disk. Assert the
+    # guarantee that now holds, on the directory that carries it.
+    if sys.platform != "win32":
+        assert isolated_home.stat().st_mode & 0o077 == 0, oct(isolated_home.stat().st_mode)
+        assert oct(key.stat().st_mode & 0o777) == "0o600"  # second layer, still there
     key.unlink()
     with pytest.raises(CereyanError) as info:
         Variable.get("api_token")

@@ -20,10 +20,12 @@ One home per machine, resolved from `--home`, then `CEREYAN_HOME`, then `~/.cere
 | `db.sqlite` | The store: flows, runs, task runs, logs, events, rules, artifacts, variables, settings. WAL mode, so `db.sqlite-wal` and `db.sqlite-shm` appear while it is open. |
 | `db.lock` | OS advisory lock held by the process that owns the store: a running server, or an offline script while it writes. |
 | `server.json` | Written by a running server and removed on shutdown; see below. |
-| `secret.key` | Created when the first secret variable is set; encrypts secrets at rest. Mode 0600. |
+| `secret.key` | Created when the first secret variable is set; encrypts secrets at rest. |
 | `storage/` | Persisted task results and cache entries. |
 
 A corrupted `db.sqlite` is moved aside on open and a fresh store is created; history is a cache and the code plus targets are the source of truth.
+
+The home is created readable only by the account that creates it, and everything in the table above is protected by that rather than by permissions set on each file. A home from an earlier version that is broader is narrowed when it is opened, and cereyan says so once. On Windows a home under your user profile inherits the same protection; a `CEREYAN_HOME` pointed somewhere else is yours to protect.
 
 ## `server.json`
 

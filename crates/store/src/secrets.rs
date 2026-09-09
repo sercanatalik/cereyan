@@ -1,5 +1,5 @@
-//! Secret variables: ChaCha20-Poly1305 with a key stored at `<home>/secret.key`
-//! (created with owner-only permissions on first use).
+//! Secret variables: ChaCha20-Poly1305 with a key stored at `<home>/secret.key`,
+//! protected by the home, which excludes every other account.
 
 use std::path::Path;
 
@@ -41,8 +41,11 @@ pub fn load_or_create_key(home: &Path) -> Result<[u8; 32], SecretError> {
     let mut key = [0u8; 32];
     rand::rng().fill_bytes(&mut key);
     let encoded = base64::engine::general_purpose::STANDARD.encode(key);
-    std::fs::create_dir_all(home)?;
+    crate::open::ensure_home(home)?;
     std::fs::write(&path, encoded)?;
+    // The home is the guarantee: it excludes other accounts, so this file is
+    // unreachable to them whatever mode it carries, and there is no window
+    // between the write and the narrowing. This stays as a second layer.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

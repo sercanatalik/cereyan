@@ -8,6 +8,45 @@ use std::fs::TryLockError;
 use crate::error::StoreError;
 use crate::{Result, LOCK_FILE};
 
+/// Create the home if it is missing and make sure only its owner can reach it.
+///
+/// Everything cereyan stores lives here: the database with every run, log, event
+/// and variable, the lock, persisted results, and `secret.key`, the 32 bytes that
+/// decrypt every secret variable. Protecting the directory covers all of it and
+/// whatever a later capability adds, which protecting each file does not — and it
+/// closes the window between a file being written and being narrowed, since an
+/// unreachable parent makes the file's own mode moot.
+///
+/// A home from an earlier version is narrowed here rather than left as it was
+/// created: that is the one with data already in it. It says so once, because
+/// changing permissions on a directory the user owns should not be discovered by
+/// accident. Failure to narrow is not fatal — a read-only mount is a reason to
+/// carry on, not to refuse to start.
+///
+/// Windows needs nothing here for the default location: a directory under the
+/// user's profile inherits user-scoped permissions and passes them to files
+/// created inside, which is the same guarantee by a different mechanism.
+pub fn ensure_home(home: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(home)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(home)?.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            // 0o700 rather than `mode & 0o700`: we need our own rwx regardless of
+            // what the owner bits happened to be.
+            if std::fs::set_permissions(home, std::fs::Permissions::from_mode(0o700)).is_ok() {
+                eprintln!(
+                    "cereyan: narrowed {} to 0700 (was {:04o}); it holds the store and the secret key",
+                    home.display(),
+                    mode
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Take the exclusive advisory lock on `<home>/db.lock`. The lock is released
 /// by the OS when the process exits, so a crashed holder never leaves a stale
 /// lock behind. On success the holder's PID is written into the file so a

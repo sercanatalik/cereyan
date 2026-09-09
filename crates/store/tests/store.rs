@@ -559,3 +559,40 @@ fn bulk_create_10k_runs_is_fast() {
         "bulk create took {elapsed:?}"
     );
 }
+
+#[test]
+#[cfg(unix)]
+fn home_is_owner_only_and_covers_what_is_in_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new().unwrap();
+    let home = dir.path().join("fresh");
+    let store = Store::open(&home).unwrap();
+    let mode = std::fs::metadata(&home).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode & 0o077,
+        0,
+        "another account can reach the home: {mode:04o}"
+    );
+    // The store and the key are covered by the directory, whatever their own modes are.
+    assert!(home.join("db.sqlite").exists());
+    drop(store);
+}
+
+#[test]
+#[cfg(unix)]
+fn a_home_from_an_earlier_version_is_narrowed_on_open() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new().unwrap();
+    let home = dir.path().join("old");
+    // What every 1.4.0 install has: created before this requirement existed.
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let store = Store::open(&home).unwrap();
+    let mode = std::fs::metadata(&home).unwrap().permissions().mode() & 0o777;
+    assert_eq!(
+        mode & 0o077,
+        0,
+        "an existing broad home was left broad: {mode:04o}"
+    );
+    drop(store);
+}
