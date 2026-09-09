@@ -154,6 +154,7 @@ nav:
           - Cache task results: guides/cache-results.md
       - Running work:
           - Run tasks concurrently: guides/concurrent-tasks.md
+          - Fetch from an HTTP API: guides/fetch-from-an-api.md
           - Schedule a flow: guides/schedule-a-flow.md
           - Backfill a date range: guides/backfill.md
           - Limit concurrency and overlap: guides/resources-and-overlap.md

@@ -78,7 +78,7 @@ The flow's `runner` decides where submitted tasks execute.
 
 | Runner | Use for | Notes |
 |---|---|---|
-| `ThreadRunner(max_workers)` (default) | I/O-bound work: HTTP, databases, files | Shares the process; the run context propagates. A task that waits on a child while every worker is busy gets a warning and a temporary extra worker, so nested waits cannot deadlock. |
+| `ThreadRunner(max_workers)` (default) | I/O-bound work: HTTP ([fetching from an API](fetch-from-an-api.md)), databases, files | Shares the process; the run context propagates. A task that waits on a child while every worker is busy gets a warning and a temporary extra worker, so nested waits cannot deadlock. |
 | `ProcessRunner(max_workers)` | CPU-bound work | Each task run is a spawned process; arguments and results must be picklable and the task must be importable from a module (not defined in `__main__` or a notebook). A timeout terminates the worker. |
 
 ```python

@@ -11,6 +11,7 @@ from typing import Any, Callable, Iterable
 
 from . import params as _params
 from .exceptions import CereyanError
+from .tasks import _async_message, _is_async_function
 
 
 def _parse_after(after, batch_key):
@@ -80,6 +81,9 @@ class Flow:
     ) -> None:
         if not callable(fn):
             raise TypeError("@flow must decorate a callable")
+        if _is_async_function(fn):
+            # Raised before App.register, so a rejected flow is never registered.
+            raise TypeError(_async_message("flow", fn))
         from . import schedules as _schedules
 
         declared = list(_schedules.normalize(schedule)) + list(_schedules.normalize(schedules))
