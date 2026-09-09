@@ -24,7 +24,7 @@ just dev     # uv sync and maturin develop: builds the extension in place
 | `just docs-test` | Execute every Python block under `docs/` and every file under `examples/` |
 | `just demo` | Serve `examples/` on a temporary home at http://127.0.0.1:4200 |
 | `just service-sync` | Regenerate the UI's typed client from `ui/openapi.snapshot.json` |
-| `just bench` | Criterion benchmarks, the wall-clock tests `just test` skips, and the end-to-end benchmark against the checked-in baseline. Run it on calibrated hardware: CI runs the criterion benchmarks and the end-to-end targets advisorily, and does not run the wall-clock tests at all |
+| `just bench` | Criterion benchmarks, the wall-clock tests `just test` skips, and the end-to-end benchmark against the checked-in baseline. Only the end-to-end benchmark gates; criterion's baselines are not committed, so it compares against the previous run on the same machine and is what you use while changing the store. Run it on calibrated hardware: CI runs the criterion benchmarks and the end-to-end targets advisorily, and does not run the wall-clock tests at all |
 | `just soak` | The one-hour overlap soak: fifteen scheduled flows whose runs outlast their interval, checked against the overlap invariants at the end. `just soak --quick` takes twelve minutes; `--keep` leaves the UI up. Not a regression gate and not on the default CI path |
 | `just build` | Build a release wheel into `dist/` |
 

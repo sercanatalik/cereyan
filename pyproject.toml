@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "cereyan"
-version = "1.6.1"
+version = "1.7.0"
 description = "Minimal, local-first orchestrator for Python data pipelines with a Rust core"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,7 @@ keywords = [
   "rust",
 ]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Environment :: Web Environment",
   "Intended Audience :: Developers",
   "Intended Audience :: Information Technology",

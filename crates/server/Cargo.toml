@@ -34,7 +34,12 @@ libc = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+tempfile = { workspace = true }
 
 [[bench]]
 name = "timer"
+harness = false
+
+[[bench]]
+name = "publish"
 harness = false

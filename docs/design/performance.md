@@ -12,15 +12,18 @@ These targets shaped the design (a Rust core, batched reporting, an in-memory wo
 | Backfill create of 10k runs | under 1 s |
 | Warm-pool overhead, Scheduled to user code | under 5 ms |
 | Counts endpoint | under 5 ms |
+| Orchestration cost per completed task run | under 200 µs |
 
 ## How they are checked
 
 `just bench` runs two suites:
 
-- **Criterion benchmarks** in the Rust crates for the store's write path, the transition rules, and matching.
+- **Criterion benchmarks** in the Rust crates: the store's hot path (a transition on either table, and applying an engine report at three batch widths), bulk run creation and log append, the transition rules, matching, and the stream payload built for every transition.
 - **The end-to-end benchmark** `benches/e2e.py`, which starts a server on a temporary home, generates its own fixtures (a million-run history, wide and log-heavy flows, a long backfill, an interval schedule), and measures each operation through the public API.
 
-The end-to-end benchmark fails when a target is missed or when a number regresses more than 20 percent against the checked-in baseline for the platform, `benches/baseline.<platform>.json`. CI runs it on every push with `--quick`. When a regression is intentional, refresh the baseline in the same change with `just bench-baseline`.
+The end-to-end benchmark fails when a target is missed or when a number regresses more than 20 percent against the checked-in baseline for the platform, `benches/baseline.<platform>.json`. CI runs it on every push with `--quick`. When a regression is intentional, refresh the baseline in the same change with `just bench-baseline`. That rewrites every key, so read the table it prints before committing the result: a number that moved for a reason you have not established is not one to bless.
+
+The two suites do different jobs. Only the end-to-end benchmark gates: it is the one with a checked-in baseline. Criterion keeps its baselines in `target/criterion/`, which is not committed, so it compares a run against the previous run on the same machine — what you want while you are changing the store, and no help at all in CI. A store regression small enough to hide inside end-to-end noise will not fail a build.
 
 ## What makes the numbers
 

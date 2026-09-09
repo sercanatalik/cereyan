@@ -1,12 +1,5 @@
 # cereyan
 
-!!! warning "Under development"
-
-    The API is not final and is not yet released. The Python API, the HTTP API, the CLI,
-    the MCP surface and the on-disk format may all change without a deprecation period,
-    and version numbers do not yet imply stability. Pin an exact version, read the
-    [changelog](changelog.md) before upgrading, and expect to make changes when you do.
-
 Cereyan is a minimal, local-first orchestrator for Python data pipelines. A Rust core (SQLite store, state machine, scheduler, HTTP server) sits behind a thin layer of Python decorators, and the whole thing ships as one wheel with no runtime dependencies.
 
 ```python

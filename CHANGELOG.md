@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.7.0 (2026-09-09)
+
+- **Cereyan is production ready.** The Python API, the HTTP API, the CLI, the MCP surface and the database schema are settled; the under-development warning is gone from the README and the documentation, and the PyPI classifier moves from Beta to Production/Stable. The README also said the package was not yet published, which stopped being true at 1.4.0.
+
+- Benchmarks for the write path a served task run actually travels. `transition` on both tables and `apply_report` over the event sequence an engine child sends had no benchmark at all, so a change to the store showed up only once it was large enough to move an end-to-end number that also contains subprocess spawn, HTTP and the client's flush interval. `cargo bench -p cereyan-store --bench hot_path` now measures both directly, at three batch widths so per-batch cost that grows faster than the batch is visible as a shape. A second bench sizes the stream payload built for every transition. `just bench` gains `task_run_cost_us`, the orchestration cost of one completed task run, with a 200 µs target — the unit a fan-out workload is actually counted in.
+- The performance baseline is refreshed. It was last written at 1.3.0 and three of its numbers had drifted, `schedule_drift_ms` past the 20 percent gate. No code explains it: every file on the ingestion and dispatch paths — `writer.rs`, `read.rs`, `dispatch.rs`, `api/engine.rs`, `index.rs`, `scheduler.rs`, `timer.rs`, and the core state rules — is byte-identical to that commit, and `Cargo.lock` differs only in the version string. The repository pins no Rust toolchain, so a baseline does not survive a compiler upgrade; the numbers here were recorded on rustc 1.92.0. Every target is still met with room to spare.
+
 ## 1.6.1 (2026-09-09)
 
 - Internal refactoring.

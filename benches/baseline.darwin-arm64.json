@@ -1,10 +1,11 @@
 {
-  "server_start_1m_runs": 38.29187527298927,
-  "warm_pool_overhead_ms": 1.133,
-  "task_transitions_per_s": 40186.46519852114,
-  "log_lines_per_s": 297251.0225435176,
-  "runs_list_query_1m_ms": 0.4215895547531545,
-  "counts_ms": 0.1728300005197525,
-  "backfill_10k_create_ms": 161.09916707500815,
-  "schedule_drift_ms": 8.615
+  "server_start_1m_runs": 37.05620812252164,
+  "warm_pool_overhead_ms": 1.122,
+  "task_transitions_per_s": 34200.11628039535,
+  "task_run_cost_us": 87.719,
+  "log_lines_per_s": 283741.8743420735,
+  "runs_list_query_1m_ms": 0.3914812463335693,
+  "counts_ms": 0.17813750077039003,
+  "backfill_10k_create_ms": 163.1327501963824,
+  "schedule_drift_ms": 18.072
 }

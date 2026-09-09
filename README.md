@@ -4,15 +4,7 @@
 [![CI](https://github.com/sercanatalik/cereyan/actions/workflows/ci.yml/badge.svg)](https://github.com/sercanatalik/cereyan/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/pypi/pyversions/cereyan.svg)](https://pypi.org/project/cereyan/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sercanatalik/cereyan/blob/main/LICENSE)
-[![Status](https://img.shields.io/badge/status-under%20development-orange.svg)](#status)
-
-> [!WARNING]
-> **Under development. The API is not final and is not yet released.**
-> Anything here — the Python API, the HTTP API, the CLI, the MCP surface, the
-> on-disk format — may change without a deprecation period, and version numbers
-> do not yet imply stability. Pin an exact version if you depend on it, read the
-> [changelog](https://sercanatalik.github.io/cereyan/changelog/) before upgrading,
-> and expect to make changes when you do.
+[![Status](https://img.shields.io/badge/status-production%20ready-brightgreen.svg)](#status)
 
 Cereyan is a minimal, local-first orchestrator for Python data pipelines. A Rust core (SQLite store, state machine, scheduler, HTTP server) sits behind a thin layer of Python decorators, and the whole thing ships as one wheel with no runtime dependencies. Decorate functions as flows and tasks, run them as plain scripts, and every run is recorded locally; `cereyan serve` adds live monitoring, schedules, retries, backfills, rules, and a built-in MCP server for agents on top of the same store.
 
@@ -85,11 +77,11 @@ The site is at https://sercanatalik.github.io/cereyan/ (built from `docs/` with 
 
 ## Status
 
-Under development, and not yet published to PyPI. The pieces described here work and are
-tested on macOS, Linux and Windows, but nothing about the interfaces is settled: names,
-signatures, defaults, routes, event payloads and the database schema are all still open.
-There is no deprecation policy yet, and there will not be one until the API is declared
-stable. Issues and questions are welcome; production use is not advised yet.
+Production ready, and published to [PyPI](https://pypi.org/project/cereyan/). The pieces
+described here work and are tested on macOS, Linux and Windows, and the interfaces —
+names, signatures, defaults, routes, event payloads and the database schema — are settled.
+Read the [changelog](https://sercanatalik.github.io/cereyan/changelog/) before upgrading.
+Issues and questions are welcome.
 
 ## Development
 

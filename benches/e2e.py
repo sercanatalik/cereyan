@@ -38,6 +38,9 @@ TARGETS_MS = {
     "backfill_10k_create_ms": 1000.0,
     "warm_pool_overhead_ms": 5.0,
     "counts_ms": 5.0,
+    # Microseconds, not milliseconds: this dict is ceilings for lower-is-better
+    # numbers, and already mixes units via the _per_s keys above.
+    "task_run_cost_us": 200.0,
 }
 FLOORS = {"task_transitions_per_s": 20_000.0, "log_lines_per_s": 100_000.0}
 
@@ -178,6 +181,9 @@ def bench(quick: bool) -> dict:
         done = wait_run(url, r["id"])
         secs = (done["end_time"] - done["start_time"]) / 1e6
         results["task_transitions_per_s"] = (n_tasks * 3) / secs
+        # The same run in the unit the workload is counted in: orchestration
+        # cost for one short task run, Python task body included.
+        results["task_run_cost_us"] = (done["end_time"] - done["start_time"]) / n_tasks
         # Logs.
         n_logs = 100_000
         r = api(url, f"/api/flows/{flows['many_logs']['id']}/runs", {"parameters": {"n": n_logs}})
@@ -249,7 +255,7 @@ def main() -> int:
                 status = "REGRESSED >20%"
         if status not in ("ok", "misses target"):
             failed.append(name)
-        unit = "/s" if higher_better else " ms"
+        unit = "/s" if higher_better else (" µs" if name.endswith("_us") else " ms")
         print(f"{name:28} {value:14.2f}{unit:>0} {base if base is not None else float('nan'):14.2f} {ceiling if ceiling is not None else float('nan'):10.1f}  {status}")
     if args.update_baseline:
         json.dump(results, open(BASELINE, "w"), indent=2)
