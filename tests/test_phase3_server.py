@@ -305,6 +305,9 @@ def test_settings_persist_and_retention(obs, obs_dir):
     assert "retain_days = 7" in toml_text and "db = 4.0" in toml_text
     run = start(obs, "etl")
     obs.wait_run(run["id"])
+    # Wait for the engine to finish reporting: a log line that lands after the update
+    # below carries a fresh timestamp, and retention would rightly keep it forever.
+    obs.wait_idle()
     # Age the run's logs and events beyond retention and wait for the pass.
     old = int((time.time() - 40 * 86400) * 1_000_000)
     db = sqlite3.connect(os.path.join(obs.home, "db.sqlite"))

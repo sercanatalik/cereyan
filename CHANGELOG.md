@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- An engine still reporting a run it has just finished keeps retrying for up to ten minutes when its server disappears, so a restarted server records the outcome instead of seeing a crash. That is deliberate, and it is now on Engines and the home directory, where the thirty to forty second figure for an idle engine had been the only number given. `test_idle_engine_gives_up_when_the_server_is_killed` was killing the server inside that window — `wait_run` returns when the server records the terminal state, while the engine is still flushing — so on a slow runner it measured the ten minute path and failed against a bound meant for the idle one. It now waits for the engine to go idle first.
+- An engine still reporting a run it has just finished keeps retrying for up to ten minutes when its server disappears, so a restarted server records the outcome instead of seeing a crash. That is deliberate, and it is now on Engines and the home directory, where the thirty to forty second figure for an idle engine had been the only number given. Three CI failures came from tests that did not know it: `wait_run` returns when the server records the terminal state, while the engine is still flushing its last events and log lines. Two shutdown tests killed the server inside that window and measured the ten minute path; the retention test rewrote the timestamps of log rows the engine was still adding to, so a line landing afterwards carried a fresh one and was rightly never swept. `ServerProcess.wait_idle` gives all three the wait they were missing.
 
 ## 1.9.2 (2026-09-09)
 

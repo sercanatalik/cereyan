@@ -281,6 +281,26 @@ class ServerProcess:
         except OSError:
             return ""
 
+    def wait_idle(self, timeout: float = 30.0, settle: float = 2.0) -> None:
+        """Wait until no engine holds a run and the tail of its report has landed.
+
+        `wait_run` returns when the *server* records the terminal state. The engine is
+        still flushing its last events and log lines then, and that flush retries for
+        MAX_RETRY (600 s in crates/py/src/client.rs) so a restarted server does not lose
+        the outcome. A test that kills the server, or rewrites the rows the engine is
+        about to add to, has to let it finish first.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                engines = self.client.server()["engines"]
+            except Exception:  # noqa: BLE001 - the server may be mid-restart
+                engines = []
+            if engines and not any(e.get("current_run") for e in engines):
+                break
+            time.sleep(0.1)
+        time.sleep(settle)
+
     def engine_pids(self) -> list[int]:
         try:
             return [e["pid"] for e in self.client.server()["engines"] if e.get("pid")]
