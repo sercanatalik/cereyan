@@ -13,6 +13,7 @@ pub mod schedules;
 pub mod settings;
 pub mod stream;
 pub mod task_runs;
+pub mod vocabulary;
 
 use std::sync::Arc;
 
@@ -112,6 +113,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         backfills::cancel_backfill,
         settings::get_settings,
         settings::patch_settings,
+        vocabulary::get_vocabulary,
         observability::list_events,
         observability::get_event,
         observability::emit_event,
@@ -180,6 +182,9 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         backfills::PrefilterBody,
         settings::Settings,
         settings::SettingsPatch,
+        vocabulary::Vocabulary,
+        vocabulary::EventEntry,
+        vocabulary::StateEntry,
         engine::AcquireRequest,
         engine::ReleaseRequest,
         cereyan_core::Resource,
@@ -260,6 +265,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/settings",
             get(settings::get_settings).patch(settings::patch_settings),
         )
+        .route("/api/vocabulary", get(vocabulary::get_vocabulary))
         .route(
             "/api/events",
             get(observability::list_events).post(observability::emit_event),

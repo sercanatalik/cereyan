@@ -89,6 +89,12 @@ assert report().endswith("/record-0")   # "report#1: <run name>/record-0"
 
 ::: cereyan.emit_event
 
+::: cereyan.events.EventName
+
+::: cereyan.events.EventGroup
+
+::: cereyan.states.StateName
+
 ::: cereyan.artifacts.create_markdown
 
 ::: cereyan.artifacts.create_table

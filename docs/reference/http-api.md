@@ -57,6 +57,12 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 |---|---|
 | 200 | text/event-stream of hello, run.updated, task_run.updated, log.appended, event.created, flow.registered, rule.updated, variable.updated, artifact.updated, schedule.updated, backfill.created, backfill.updated, expectation.armed, expectation.met, expectation.lapsed, and resync |
 
+### `GET /api/vocabulary`
+
+| Status | Body |
+|---|---|
+| 200 | [`Vocabulary`](#vocabulary) (application/json) |
+
 ## Flows
 
 ### `GET /api/flows`
@@ -916,6 +922,15 @@ know it yet (offline handoff from another project).
 | `run_id` | integer or null (int64) | no |  |
 | `seq` | integer (int64) | yes | Sequence number: the writer assigns ids in commit order. |
 
+### `EventEntry`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The name a rule matches on, e.g. `run.failed`. |
+| `payload_fields` | array of string | yes | The payload keys the emit site sets. |
+| `resource` | string | yes | The resource kind the event hangs off. |
+| `when` | string | yes | One sentence on when the engine records it. |
+
 ### `EventsPage`
 
 | Field | Type | Required | Description |
@@ -1357,6 +1372,14 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `timestamp` | [`i64`](#i64) | yes |  |
 | `type` | [`StateType`](#statetype) | yes |  |
 
+### `StateEntry`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `is_sub_state` | boolean | yes |  |
+| `name` | string | yes |  |
+| `state_type` | string | yes | For a sub-state, the type it belongs to; for a type, itself. |
+
 ### `StateType`
 
 One of: `Scheduled`, `Pending`, `Running`, `Completed`, `Failed`, `Cancelled`, `Crashed`, `Paused`, `Cancelling`.
@@ -1441,6 +1464,14 @@ One of: `Scheduled`, `Pending`, `Running`, `Completed`, `Failed`, `Cancelled`, `
 ### `VariableWithRaw`
 
 Type: any.
+
+### `Vocabulary`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `events` | [`EventEntry`](#evententry)[] | yes | Every engine-emitted event, in catalogue order. |
+| `reserved_prefixes` | array of string | yes | Prefixes the engine owns. A name under one of these must be an entry in `events`; any other name is a custom event and is never checked. |
+| `states` | [`StateEntry`](#stateentry)[] | yes | Every value a rule's `states` accepts: the types then the sub-states. A rule naming a type also matches that type's sub-states. |
 
 ### `WorkItem`
 

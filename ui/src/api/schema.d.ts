@@ -821,6 +821,22 @@ export interface paths {
         patch: operations["patch_variable"];
         trace?: never;
     };
+    "/api/vocabulary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_vocabulary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -991,6 +1007,16 @@ export interface components {
              * @description Sequence number: the writer assigns ids in commit order.
              */
             seq: number;
+        };
+        EventEntry: {
+            /** @description The name a rule matches on, e.g. `run.failed`. */
+            name: string;
+            /** @description The payload keys the emit site sets. */
+            payload_fields: string[];
+            /** @description The resource kind the event hangs off. */
+            resource: string;
+            /** @description One sentence on when the engine records it. */
+            when: string;
         };
         EventsPage: {
             items: components["schemas"]["Event"][];
@@ -1555,6 +1581,12 @@ export interface components {
             timestamp: components["schemas"]["i64"];
             type: components["schemas"]["StateType"];
         };
+        StateEntry: {
+            is_sub_state: boolean;
+            name: string;
+            /** @description For a sub-state, the type it belongs to; for a type, itself. */
+            state_type: string;
+        };
         /** @enum {string} */
         StateType: "Scheduled" | "Pending" | "Running" | "Completed" | "Failed" | "Cancelled" | "Crashed" | "Paused" | "Cancelling";
         TaskRun: {
@@ -1624,6 +1656,20 @@ export interface components {
         VariableWithRaw: components["schemas"]["VariableRow"] & {
             /** @description Ciphertext of a secret, present only when `raw=true` was requested. */
             raw?: string | null;
+        };
+        Vocabulary: {
+            /** @description Every engine-emitted event, in catalogue order. */
+            events: components["schemas"]["EventEntry"][];
+            /**
+             * @description Prefixes the engine owns. A name under one of these must be an entry in
+             *     `events`; any other name is a custom event and is never checked.
+             */
+            reserved_prefixes: string[];
+            /**
+             * @description Every value a rule's `states` accepts: the types then the sub-states. A
+             *     rule naming a type also matches that type's sub-states.
+             */
+            states: components["schemas"]["StateEntry"][];
         };
         /** @description Work handed to an engine. */
         WorkItem: {
@@ -3349,6 +3395,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_vocabulary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vocabulary"];
+                };
             };
         };
     };

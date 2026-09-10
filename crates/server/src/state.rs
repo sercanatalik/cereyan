@@ -257,6 +257,20 @@ impl AppState {
 
     /// Append an event to the store, publish it on the stream, and hand it to
     /// the rules engine. The resource defaults to the run or the flow.
+    /// Record an event the engine owns. Taking [`EventName`] rather than a
+    /// string is what keeps the catalogue in `cereyan-core` the only place an
+    /// engine event is named; the `&str` form below is for custom events,
+    /// whose names the engine does not own.
+    pub fn record_engine_event(
+        &self,
+        name: cereyan_core::EventName,
+        run_id: Option<i64>,
+        flow_id: Option<i64>,
+        payload: serde_json::Value,
+    ) -> Result<i64, StoreError> {
+        self.record_event(name.as_str(), run_id, flow_id, payload)
+    }
+
     pub fn record_event(
         &self,
         name: &str,

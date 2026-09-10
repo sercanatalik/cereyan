@@ -18,6 +18,8 @@ Runs and task runs move through the same states, and the same rules accept or re
 
 A state carries a `type`, a `name` (equal to the type unless it is a sub-state), an optional `message`, a `details` object, and a `timestamp` in microseconds.
 
+A rule's `states` clause matches either: `states=["Scheduled"]` covers every scheduled run including `Late` and `AwaitingRetry`, and `states=["Late"]` narrows to that sub-state. `cereyan.states` exposes both sets as constants.
+
 ## Named sub-states
 
 | Name | Type | When |

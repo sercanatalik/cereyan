@@ -3,7 +3,10 @@
 
 use std::collections::HashMap;
 
-use cereyan_core::{Event, Flow, RuleAction, RuleMatch, RuleRow, RuleSpec, Run};
+use cereyan_core::{
+    check_event_name, check_state_name, Event, Flow, RuleAction, RuleMatch, RuleRow, RuleSpec, Run,
+    StateName, StateType,
+};
 use minijinja::{Environment, UndefinedBehavior};
 use serde_json::{json, Map, Value};
 
@@ -26,6 +29,14 @@ pub fn name_matches(pattern: &str, name: &str) -> bool {
 pub struct RunContext {
     pub run: Option<Run>,
     pub flow: Option<Flow>,
+}
+
+fn payload_str(event: &Event, key: &str) -> Option<String> {
+    event
+        .payload
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Does the rule's match clause accept this event?
@@ -82,16 +93,36 @@ pub fn matches(m: &RuleMatch, event: &Event, ctx: &RunContext) -> bool {
         }
     }
     if !m.states.is_empty() {
-        let state = ctx.run.as_ref().map(|r| r.state.name.clone()).or_else(|| {
-            event
-                .payload
-                .get("state")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-        });
-        match state {
-            Some(s) if m.states.iter().any(|x| x.eq_ignore_ascii_case(&s)) => {}
-            _ => return false,
+        // A value matches the state's type or its name. Naming a type therefore
+        // also catches that type's sub-states — a run in Scheduled/Late is a
+        // scheduled run — while naming the sub-state still narrows to it, since
+        // no type and sub-state name collide.
+        let (name, mut type_name) = match ctx.run.as_ref() {
+            Some(r) => (
+                Some(r.state.name.clone()),
+                Some(r.state.state_type.as_str().to_string()),
+            ),
+            None => (
+                payload_str(event, "state"),
+                payload_str(event, "state_type"),
+            ),
+        };
+        // Offline events carry the state name and no type; recover the type
+        // from the name so those events match a rule naming a type too.
+        if type_name.is_none() {
+            type_name = name.as_deref().and_then(|n| {
+                StateName::parse(n)
+                    .map(|sub| sub.state_type())
+                    .or_else(|| StateType::parse(n))
+                    .map(|t| t.as_str().to_string())
+            });
+        }
+        let matched = [name.as_deref(), type_name.as_deref()]
+            .into_iter()
+            .flatten()
+            .any(|s| m.states.iter().any(|x| x.eq_ignore_ascii_case(s)));
+        if !matched {
+            return false;
         }
     }
     true
@@ -379,10 +410,28 @@ impl RuleIndex {
     }
 }
 
+/// Check the event and state names in one match clause.
+///
+/// `where` names the clause so a rejected proactive rule says which half of it
+/// is wrong.
+fn validate_match(m: &RuleMatch, clause: &str) -> Result<(), String> {
+    for name in &m.events {
+        check_event_name(name).map_err(|e| format!("{clause}: {e}"))?;
+    }
+    for name in &m.states {
+        check_state_name(name).map_err(|e| format!("{clause}: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Validate a spec before storing it.
 pub fn validate_spec(spec: &RuleSpec) -> Result<(), String> {
     if spec.actions.is_empty() {
         return Err("a rule needs at least one action".into());
+    }
+    validate_match(&spec.when, "when")?;
+    if let Some(unless) = &spec.unless {
+        validate_match(unless, "unless")?;
     }
     if !matches!(spec.once.as_str(), "per_run" | "never") {
         return Err("once must be per_run or never".into());
@@ -546,6 +595,148 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         }
+    }
+
+    /// A run in `state_type` named `name`, e.g. Scheduled/Late.
+    fn run_in(state_type: StateType, name: &str) -> Run {
+        let mut r = run("api");
+        r.state = State::from_parts(state_type, Some(name), None, Map::new());
+        r
+    }
+
+    fn states_match(states: &[&str], run: Run) -> bool {
+        let m = RuleMatch {
+            states: states.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        matches(
+            &m,
+            &event("run.scheduled"),
+            &RunContext {
+                run: Some(run),
+                flow: None,
+            },
+        )
+    }
+
+    #[test]
+    fn state_type_matches_its_sub_states() {
+        assert!(states_match(
+            &["Scheduled"],
+            run_in(StateType::Scheduled, "Late")
+        ));
+        assert!(states_match(
+            &["Scheduled"],
+            run_in(StateType::Scheduled, "AwaitingRetry")
+        ));
+        assert!(states_match(
+            &["Scheduled"],
+            run_in(StateType::Scheduled, "AwaitingResource")
+        ));
+        assert!(states_match(
+            &["Scheduled"],
+            run_in(StateType::Scheduled, "Scheduled")
+        ));
+    }
+
+    #[test]
+    fn sub_state_still_narrows() {
+        assert!(states_match(
+            &["Late"],
+            run_in(StateType::Scheduled, "Late")
+        ));
+        assert!(!states_match(
+            &["Late"],
+            run_in(StateType::Scheduled, "AwaitingRetry")
+        ));
+    }
+
+    #[test]
+    fn unrelated_type_does_not_match() {
+        // Completed/Skipped is not a failure, however the sub-state reads.
+        assert!(!states_match(
+            &["Failed"],
+            run_in(StateType::Completed, "Skipped")
+        ));
+        assert!(states_match(
+            &["Completed"],
+            run_in(StateType::Completed, "Skipped")
+        ));
+    }
+
+    /// Offline events carry the state name and no `state_type`, so the type has
+    /// to be recovered from the name for those to match a rule naming a type.
+    #[test]
+    fn state_type_recovered_from_an_event_payload() {
+        let m = RuleMatch {
+            states: vec!["Scheduled".into()],
+            ..Default::default()
+        };
+        let mut e = event("run.late");
+        e.payload.insert("state".into(), json!("Late"));
+        let ctx = RunContext {
+            run: None,
+            flow: None,
+        };
+        assert!(matches(&m, &e, &ctx));
+
+        let mut unrelated = event("run.completed");
+        unrelated.payload.insert("state".into(), json!("Completed"));
+        assert!(!matches(&m, &unrelated, &ctx));
+    }
+
+    #[test]
+    fn validate_spec_rejects_unknown_names() {
+        let bad_event = RuleSpec {
+            when: RuleMatch {
+                events: vec!["run.failure".into()],
+                ..Default::default()
+            },
+            actions: vec![RuleAction {
+                kind: "cancel_run".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let err = validate_spec(&bad_event).unwrap_err();
+        assert!(err.starts_with("when:"), "{err}");
+        assert!(err.contains("run.failed"), "{err}");
+
+        let bad_state = RuleSpec {
+            when: RuleMatch {
+                events: vec!["run.failed".into()],
+                states: vec!["Faild".into()],
+                ..Default::default()
+            },
+            actions: vec![RuleAction {
+                kind: "cancel_run".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let err = validate_spec(&bad_state).unwrap_err();
+        assert!(err.contains("Failed"), "{err}");
+    }
+
+    #[test]
+    fn validate_spec_accepts_custom_and_wildcard_names() {
+        let spec = RuleSpec {
+            when: RuleMatch {
+                events: vec![
+                    "orders.table_empty".into(),
+                    "run.*".into(),
+                    "run.failed".into(),
+                ],
+                states: vec!["Failed".into(), "TimedOut".into()],
+                ..Default::default()
+            },
+            actions: vec![RuleAction {
+                kind: "cancel_run".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(validate_spec(&spec).is_ok());
     }
 
     #[test]

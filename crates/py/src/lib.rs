@@ -609,6 +609,43 @@ fn state_names() -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// Every engine-emitted event as `(name, resource, when, payload_fields)`.
+/// `cereyan.events` builds its namespaces from this, and the reference
+/// generator its table, so neither restates the catalogue.
+#[pyfunction]
+fn event_names() -> Vec<(&'static str, &'static str, &'static str, Vec<&'static str>)> {
+    cereyan_core::EventName::ALL
+        .iter()
+        .map(|e| {
+            (
+                e.as_str(),
+                e.resource(),
+                e.when(),
+                e.payload_fields().to_vec(),
+            )
+        })
+        .collect()
+}
+
+/// The prefixes the engine owns; a name under one of these must be a
+/// catalogue entry, and anything else is a custom event.
+#[pyfunction]
+fn reserved_prefixes() -> Vec<&'static str> {
+    cereyan_core::RESERVED_PREFIXES.to_vec()
+}
+
+/// Raise `ValueError` when a rule could never match this event name.
+#[pyfunction]
+fn check_event_name(name: &str) -> PyResult<()> {
+    cereyan_core::check_event_name(name).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+/// Raise `ValueError` when `name` is neither a state type nor a sub-state.
+#[pyfunction]
+fn check_state_name(name: &str) -> PyResult<()> {
+    cereyan_core::check_state_name(name).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 #[pyfunction]
 fn is_terminal(state_type: &str) -> PyResult<bool> {
     StateType::parse(state_type)
@@ -625,6 +662,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(new_id, m)?)?;
     m.add_function(wrap_pyfunction!(state_types, m)?)?;
     m.add_function(wrap_pyfunction!(state_names, m)?)?;
+    m.add_function(wrap_pyfunction!(event_names, m)?)?;
+    m.add_function(wrap_pyfunction!(reserved_prefixes, m)?)?;
+    m.add_function(wrap_pyfunction!(check_event_name, m)?)?;
+    m.add_function(wrap_pyfunction!(check_state_name, m)?)?;
     m.add_function(wrap_pyfunction!(is_terminal, m)?)?;
     m.add_function(wrap_pyfunction!(decrypt_secret, m)?)?;
     m.add_function(wrap_pyfunction!(render_rule_action, m)?)?;

@@ -8,7 +8,7 @@ from .apps import App, get_default_app
 from .exceptions import CereyanError, ParameterError
 from .flows import Flow, flow
 from .logging import get_run_logger
-from . import artifacts
+from . import artifacts, events, states
 from .events import emit_event
 from .inputs import wait_for_input
 from .results import INPUTS, SOURCE, CachePolicy
@@ -39,6 +39,7 @@ __all__ = [
     "Variable",
     "artifacts",
     "emit_event",
+    "events",
     "exponential",
     "Flow",
     "HTTPError",
@@ -53,6 +54,7 @@ __all__ = [
     "get_default_app",
     "get_run_logger",
     "runtime",
+    "states",
     "task",
 ]
 

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use cereyan_core::schedule::{from_micros, to_micros, CatchupPolicy, Schedule};
 use cereyan_core::{
-    now_micros, Flow, FlowOptions, Run, ScheduleDecl, ScheduleRow, State, StateType,
+    now_micros, EventName, Flow, FlowOptions, Run, ScheduleDecl, ScheduleRow, State, StateType,
 };
 use cereyan_store::{CreateRun, ScheduleWrite};
 use chrono::Utc;
@@ -234,8 +234,8 @@ fn catch_up(state: &Arc<AppState>, row: &ScheduleRow, last: i64, now: i64) {
             crate::dispatch::enqueue_run(state, &run, &flow, None);
         }
     }
-    let _ = state.record_event(
-        "schedule.catchup",
+    let _ = state.record_engine_event(
+        EventName::ScheduleCatchup,
         None,
         Some(row.flow_id),
         json!({
@@ -420,8 +420,8 @@ pub fn pause(state: &Arc<AppState>, schedule_id: i64, reason: Option<&str>, unti
     drop_unstarted(state, schedule_id);
     state.publish_schedule(schedule_id);
     if let Some(row) = state.scheduler.get(schedule_id) {
-        let _ = state.record_event(
-            "schedule.paused",
+        let _ = state.record_engine_event(
+            EventName::SchedulePaused,
             None,
             Some(row.flow_id),
             json!({"schedule_id": schedule_id, "reason": reason}),
@@ -442,8 +442,8 @@ pub fn resume(state: &Arc<AppState>, schedule_id: i64) {
     rebuild(state, schedule_id);
     state.publish_schedule(schedule_id);
     if let Some(row) = state.scheduler.get(schedule_id) {
-        let _ = state.record_event(
-            "schedule.resumed",
+        let _ = state.record_engine_event(
+            EventName::ScheduleResumed,
             None,
             Some(row.flow_id),
             json!({"schedule_id": schedule_id}),
@@ -532,8 +532,8 @@ fn handle(state: &Arc<AppState>, event: TimerEvent) {
                 if let Ok(crate::state::TransitionResult::Accepted(_)) =
                     state.transition_run(run_id, late, false)
                 {
-                    let _ = state.record_event(
-                        "run.late",
+                    let _ = state.record_engine_event(
+                        EventName::RunLate,
                         Some(run_id),
                         Some(run.flow_id),
                         json!({"scheduled_time": run.scheduled_time, "name": run.name}),
@@ -549,7 +549,8 @@ fn handle(state: &Arc<AppState>, event: TimerEvent) {
                     resume(state, row.id);
                 }
             }
-            let _ = state.record_event("flow.enabled", None, Some(flow_id), json!({}));
+            let _ =
+                state.record_engine_event(EventName::FlowEnabled, None, Some(flow_id), json!({}));
         }
         TimerEvent::Persist => {
             let now = now_micros();

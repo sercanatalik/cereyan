@@ -49,5 +49,6 @@
   "/api/task-runs/{id}/artifacts",
   "/api/task-runs/{id}/logs",
   "/api/variables",
-  "/api/variables/{name}"
+  "/api/variables/{name}",
+  "/api/vocabulary"
 ]

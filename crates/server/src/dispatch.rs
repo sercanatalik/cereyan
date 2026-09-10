@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use cereyan_core::{now_micros, Flow, FlowOptions, Run, State, StateName, StateType};
+use cereyan_core::{now_micros, EventName, Flow, FlowOptions, Run, State, StateName, StateType};
 use cereyan_store::CreateRun;
 use serde_json::{json, Map, Value};
 
@@ -69,8 +69,8 @@ pub fn enqueue_run(state: &Arc<AppState>, run: &Run, flow: &Flow, not_before: Op
                         let mut s = State::named(StateName::Skipped);
                         s.message = Some("previous run still active".into());
                         let _ = state.transition_run(run.id, s, false);
-                        let _ = state.record_event(
-                            "run.skipped",
+                        let _ = state.record_engine_event(
+                            EventName::RunSkipped,
                             Some(run.id),
                             Some(flow.id),
                             json!({"reason": "previous run still active"}),
@@ -281,8 +281,8 @@ fn disable_window(state: &Arc<AppState>, flow: &Flow, options: &FlowOptions, run
         }
         if paused_any {
             state.timer.push(until, TimerEvent::ResumeFlow(flow.id));
-            let _ = state.record_event(
-                "flow.disabled",
+            let _ = state.record_engine_event(
+                EventName::FlowDisabled,
                 Some(run.id),
                 Some(flow.id),
                 json!({"failures": failures, "window_seconds": window, "until": until}),
@@ -436,8 +436,12 @@ fn trigger_dependents(state: &Arc<AppState>, upstream: &Flow, run: &Run) {
                     if let Some(obj) = ev.as_object_mut() {
                         obj.insert("run_id".into(), json!(run_id));
                     }
-                    let _ =
-                        state.record_event("flow.fan_in", Some(run_id), Some(downstream.id), ev);
+                    let _ = state.record_engine_event(
+                        EventName::FlowFanIn,
+                        Some(run_id),
+                        Some(downstream.id),
+                        ev,
+                    );
                 }
                 enqueue_run(state, &new_run, &downstream, None);
             }

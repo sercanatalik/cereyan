@@ -13,6 +13,10 @@ from . import _core
 
 _registry: dict[str, "CodeRule"] = {}
 
+#: Keyword guards `@app.rule` accepts. Anything else is a typo, and silently
+#: dropping it is how a rule ends up running with defaults nobody asked for.
+GUARD_NAMES = frozenset({"name", "once", "cooldown_seconds", "max_per_minute", "allow_self"})
+
 
 @dataclass
 class CodeRule:
@@ -38,7 +42,6 @@ class CodeRule:
     tz: str | None = None
     module: str = ""
     source_file: str = ""
-    extra_actions: list[dict] = field(default_factory=list)
     _fired_runs: set = field(default_factory=set)
     _recent: list = field(default_factory=list)
 
@@ -56,7 +59,7 @@ class CodeRule:
         """The rule as the server stores it: ``when``, ``do``, guards, and the ``unless`` clause."""
         spec = {
             "when": {"events": self.on, "flows": self.flows, "tags": self.tags, "states": self.states, "project": self.project},
-            "do": [{"kind": "call", "callable": self.callable_name}, *self.extra_actions],
+            "do": [{"kind": "call", "callable": self.callable_name}],
             "once": self.once,
             "cooldown_seconds": self.cooldown_seconds,
             "max_per_minute": self.max_per_minute,
@@ -78,26 +81,41 @@ def register(app, fn: Callable, on=None, flow=None, tags=None, states=None, proj
     Args:
         app: The App owning the rule, or ``None`` for a rule outside any App.
         fn: Called as ``fn(event, run)`` when the rule fires.
-        on: Event name or names, with ``*`` prefixes such as ``run.*``.
+        on: Event name or names, with ``*`` prefixes such as ``run.*``. Use the
+            constants in `cereyan.events` for the engine's own events.
         flow: Flow name or names the rule applies to.
         tags: Run tags the rule requires.
-        states: State types the run must be in.
+        states: States the run must be in, from `cereyan.states`. A state type
+            also matches its sub-states, so ``"Scheduled"`` covers a run that
+            is Late or AwaitingRetry; naming the sub-state narrows to it.
         project: Project scope; defaults to the App's name.
         unless: Expected event name or names for a proactive rule.
         within: Seconds after the ``on`` event by which ``unless`` must happen.
         at: Cron expression for a clock-armed proactive rule.
         tz: IANA timezone for ``at``.
-        **guards: ``name``, ``once`` (``"per_run"``), ``cooldown_seconds``,
-            ``max_per_minute``, ``allow_self``.
+        **guards: ``name``, ``once`` (``"per_run"``, the default, or ``"never"``),
+            ``cooldown_seconds``, ``max_per_minute``, ``allow_self``.
 
     Raises:
-        ValueError: When the combination of ``on``, ``unless``, ``within``, and ``at``
-            is not one of the reactive, event-armed, or clock-armed forms.
+        ValueError: When an event or state name could never match, when a guard
+            keyword is not recognised, or when the combination of ``on``,
+            ``unless``, ``within``, and ``at`` is not one of the reactive,
+            event-armed, or clock-armed forms.
     """
     if isinstance(on, str):
         on = [on]
     if isinstance(unless, str):
         unless = [unless]
+    unknown = set(guards) - GUARD_NAMES
+    if unknown:
+        raise ValueError(
+            f"unknown rule guard {', '.join(repr(g) for g in sorted(unknown))}; "
+            f"expected one of {', '.join(sorted(GUARD_NAMES))}"
+        )
+    for name in list(on or []) + list(unless or []):
+        _core.check_event_name(name)
+    for name in list(states or []):
+        _core.check_state_name(name)
     if unless and not at and (not on or within is None):
         raise ValueError("a rule with unless= needs on= and within= (event-armed) or at= (clock-armed)")
     if at and not unless:
@@ -121,7 +139,7 @@ def register(app, fn: Callable, on=None, flow=None, tags=None, states=None, proj
         tz=tz,
         module=fn.__module__ if fn.__module__ != "__main__" else _main_stem(),
         source_file=getattr(sys.modules.get(fn.__module__), "__file__", "") or "",
-        **{k: v for k, v in guards.items() if k in ("once", "cooldown_seconds", "max_per_minute", "allow_self")},
+        **guards,
     )
     _registry[rule.callable_name] = rule
     if app is not None:

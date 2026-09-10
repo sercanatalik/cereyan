@@ -8,7 +8,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use cereyan_core::{Flow, Run, State, StateType};
+use cereyan_core::{EventName, Flow, Run, State, StateType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::{watch, Notify};
@@ -849,8 +849,8 @@ fn supervise_once(state: &Arc<AppState>) {
                     state.transition_run(run_id, s, false)
                 {
                     if reason != "no engine slot" {
-                        let _ = state.record_event(
-                            "resource.exhausted",
+                        let _ = state.record_engine_event(
+                            EventName::ResourceExhausted,
                             Some(run_id),
                             Some(active.flow_id),
                             json!({"resource": reason}),

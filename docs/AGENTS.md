@@ -11,7 +11,7 @@ This page is the authoring contract for `docs/`: the rules below are the ones `j
 | `docs/get-started/` | Install, quickstart, tour of the UI |
 | `docs/concepts/` | One page per idea in the vocabulary |
 | `docs/guides/` | One page per goal, grouped in `mkdocs.yml` under Reliability, Running work, Reacting, Extending, Operating |
-| `docs/reference/` | Complete catalogues; four generated, four hand-authored |
+| `docs/reference/` | Complete catalogues; five generated, three hand-authored |
 | `docs/examples/` | Generated from `examples/*.py`; edit the Python file, never the page |
 | `docs/design/` | Architecture, limitations, performance targets |
 | `docs/images/` | Screenshots; see `docs/images/README.md` for how they are captured |
@@ -26,6 +26,7 @@ Edit the source of truth and run `just docs`. `just lint` fails when a committed
 |---|---|---|
 | `docs/reference/cli.md` | `scripts/gen_cli_reference.py` | The argparse parser in `python/cereyan/cli.py` |
 | `docs/reference/http-api.md` | `scripts/gen_http_reference.py` | `ui/openapi.snapshot.json` |
+| `docs/reference/events.md` | `scripts/gen_events_reference.py` | The catalogue in `crates/core/src/events.rs` |
 | `docs/reference/mcp.md` | `scripts/gen_mcp_reference.py` | `tests/mcp_snapshot.json` and `scripts/mcp_reference_template.md` |
 | `docs/examples/*.md` | `scripts/gen_examples.py` | `examples/*.py` |
 

@@ -1,4 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { api, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -84,6 +86,92 @@ function list(text: string): string[] {
     .filter(Boolean);
 }
 
+/** The event and state names the server validates against; static, so fetched once. */
+export function useVocabulary() {
+  return useQuery({
+    queryKey: ["vocabulary"],
+    queryFn: async () => unwrap(await api.GET("/api/vocabulary")),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+/** The catalogue entries worth offering for what the user is part-way through
+ *  typing: the token after the last comma, matched anywhere in the name. */
+function suggestionsFor(text: string, options: string[], chosen: string[]): string[] {
+  const token = text.split(",").pop()?.trim().toLowerCase() ?? "";
+  return options
+    .filter((o) => !chosen.includes(o))
+    .filter((o) => !token || o.toLowerCase().includes(token))
+    .slice(0, 8);
+}
+
+/** Replace the token being typed with `pick`, keeping the earlier ones. */
+function appendToken(text: string, pick: string): string {
+  const parts = text.split(",");
+  parts[parts.length - 1] = ` ${pick}`;
+  return `${parts.join(",").replace(/^\s+/, "")}, `;
+}
+
+/** A comma-separated field that offers the catalogue but accepts any name.
+ *  The suggestions are a shortcut, never a constraint: a custom event name is
+ *  typed in the same box. */
+function TokenField({
+  id,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string[];
+  options: string[];
+  onChange: (names: string[]) => void;
+}) {
+  const [text, setText] = useState(value.join(", "));
+  const [focused, setFocused] = useState(false);
+  const picks = focused ? suggestionsFor(text, options, list(text)) : [];
+  const commit = (next: string) => {
+    setText(next);
+    onChange(list(next));
+  };
+  return (
+    <div className="relative">
+      <label className="block text-xs text-muted-foreground" htmlFor={id}>
+        {label}
+        <Input
+          id={id}
+          className="mt-1"
+          autoComplete="off"
+          value={text}
+          onChange={(e) => commit(e.target.value)}
+          onFocus={() => setFocused(true)}
+          // Blur fires before a suggestion's click; let the click land first.
+          onBlur={() => window.setTimeout(() => setFocused(false), 150)}
+        />
+      </label>
+      {picks.length > 0 && (
+        <div
+          className="absolute z-10 mt-1 flex w-full flex-wrap gap-1 rounded-md border bg-popover p-1 shadow-md"
+          data-testid={`${id}-suggestions`}
+        >
+          {picks.map((p) => (
+            <button
+              key={p}
+              type="button"
+              className="rounded bg-muted px-1.5 py-0.5 text-xs hover:bg-accent"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => commit(appendToken(text, p))}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RuleForm({
   initial,
   onSave,
@@ -98,6 +186,12 @@ export function RuleForm({
   error?: string | null;
 }) {
   const [rule, setRule] = useState(initial ?? emptyRule());
+  const vocabulary = useVocabulary();
+  const eventOptions = [
+    ...(vocabulary.data?.reserved_prefixes ?? []).map((p) => `${p}*`),
+    ...(vocabulary.data?.events ?? []).map((e) => e.name),
+  ];
+  const stateOptions = (vocabulary.data?.states ?? []).map((s) => s.name);
   const setWhen = (patch: Partial<RuleSpec["when"]>) =>
     setRule({ ...rule, when: { ...rule.when, ...patch } });
   const setAction = (i: number, patch: Partial<RuleAction>) => {
@@ -125,15 +219,13 @@ export function RuleForm({
       </label>
       <fieldset className="space-y-2 rounded-md border p-3">
         <legend className="px-1 text-xs font-medium">When</legend>
-        <label className="block text-xs text-muted-foreground" htmlFor="rule-events">
-          Events (names or prefixes like run.*, comma separated)
-          <Input
-            id="rule-events"
-            className="mt-1"
-            value={(rule.when.events ?? []).join(", ")}
-            onChange={(e) => setWhen({ events: list(e.target.value) })}
-          />
-        </label>
+        <TokenField
+          id="rule-events"
+          label="Events (names or prefixes like run.*, comma separated)"
+          value={rule.when.events ?? []}
+          options={eventOptions}
+          onChange={(events) => setWhen({ events })}
+        />
         <div className="grid grid-cols-2 gap-2">
           <label className="block text-xs text-muted-foreground" htmlFor="rule-flows">
             Flows
@@ -153,15 +245,13 @@ export function RuleForm({
               onChange={(e) => setWhen({ tags: list(e.target.value) })}
             />
           </label>
-          <label className="block text-xs text-muted-foreground" htmlFor="rule-states">
-            States
-            <Input
-              id="rule-states"
-              className="mt-1"
-              value={(rule.when.states ?? []).join(", ")}
-              onChange={(e) => setWhen({ states: list(e.target.value) })}
-            />
-          </label>
+          <TokenField
+            id="rule-states"
+            label="States (a type also matches its sub-states)"
+            value={rule.when.states ?? []}
+            options={stateOptions}
+            onChange={(states) => setWhen({ states })}
+          />
           <label className="block text-xs text-muted-foreground" htmlFor="rule-project">
             Project
             <Input
@@ -312,23 +402,20 @@ export function RuleForm({
       </fieldset>
       <fieldset className="space-y-2 rounded-md border p-3" data-testid="rule-unless">
         <legend className="px-1 text-xs font-medium">Unless (proactive)</legend>
-        <label className="block text-xs text-muted-foreground" htmlFor="rule-unless-events">
-          Expected events (leave empty for a reactive rule)
-          <Input
-            id="rule-unless-events"
-            className="mt-1"
-            value={(rule.unless?.events ?? []).join(", ")}
-            onChange={(e) => {
-              const events = list(e.target.value);
-              setRule({
-                ...rule,
-                unless: events.length
-                  ? { events, flows: rule.when.flows, tags: [], states: [], project: rule.when.project }
-                  : null,
-              });
-            }}
-          />
-        </label>
+        <TokenField
+          id="rule-unless-events"
+          label="Expected events (leave empty for a reactive rule)"
+          value={rule.unless?.events ?? []}
+          options={eventOptions}
+          onChange={(events) =>
+            setRule({
+              ...rule,
+              unless: events.length
+                ? { events, flows: rule.when.flows, tags: [], states: [], project: rule.when.project }
+                : null,
+            })
+          }
+        />
         <div className="grid grid-cols-3 gap-2">
           <label className="block text-xs text-muted-foreground" htmlFor="rule-within">
             Within (seconds)

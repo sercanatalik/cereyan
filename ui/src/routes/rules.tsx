@@ -166,7 +166,22 @@ function RulesPage() {
                   ) : null}
                 </Td>
                 <Td className="text-xs text-muted-foreground">{summarizeDo(r.do)}</Td>
-                <Td>{formatTime(r.last_fired)}</Td>
+                <Td>
+                  {r.fire_count === 0 ? (
+                    // Validation catches a misspelled name; nothing catches a
+                    // rule that is spelled plausibly and matches nothing. This
+                    // does.
+                    <span
+                      className="text-xs italic text-muted-foreground"
+                      data-testid="rule-never-fired"
+                      title="This rule has not matched an event yet"
+                    >
+                      never fired
+                    </span>
+                  ) : (
+                    formatTime(r.last_fired)
+                  )}
+                </Td>
                 <Td>{r.fire_count}</Td>
               </Tr>
             ))}

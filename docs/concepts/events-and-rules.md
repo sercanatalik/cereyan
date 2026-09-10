@@ -1,13 +1,17 @@
 # Events and rules
 
 ```python
-from cereyan import App, emit_event
+from cereyan import App, emit_event, events, states
 
 app = App("shop")
 
 @app.rule(on="orders.*", flow="check_orders", once="per_run")
 def alert(event, run):
     print("empty table:", event["payload"]["table"], "in run", run["name"])
+
+@app.rule(on=events.run.failed, states=[states.Failed])
+def on_failure(event, run):
+    print("failed:", run["name"])
 
 @app.flow
 def check_orders() -> None:
@@ -16,6 +20,7 @@ def check_orders() -> None:
 spec = app.rules[0].spec()
 assert spec["when"]["events"] == ["orders.*"]
 assert spec["do"][0]["kind"] == "call"
+assert events.run.failed == "run.failed"
 ```
 
 An **event** is a recorded fact: a name such as `run.failed`, a resource it is about, related resources, a payload, and a sequence number. The engine records one for every meaningful change (run and task-run transitions, schedule changes, rule firings, flow registration, resource exhaustion, expectations), and `emit_event` records custom ones. The [events catalogue](../reference/events.md) lists them all.
@@ -25,6 +30,25 @@ A **rule** is `when` plus `do`: a match clause over events and an ordered list o
 ## Matching
 
 `when` names event names or prefixes (`run.*`), flows, tags, states, and a project. A rule fires for an event that matches every clause it sets.
+
+A value in `states` matches the run's state *type* or its sub-state *name*, so `states=["Scheduled"]` covers a run that is `Late` or `AwaitingRetry` and `states=["Late"]` narrows to just that one. See [States and transitions](../reference/states.md).
+
+### Names are checked
+
+The engine owns the prefixes `run.`, `task_run.`, `flow.`, `schedule.`, `resource.`, `rule.`, and `expectation.`. A name under one of them that the engine never emits — `run.failure` for `run.failed` — is rejected when the rule is declared, rather than sitting silent forever:
+
+```python
+import pytest
+from cereyan import App
+
+with pytest.raises(ValueError, match='did you mean "run.failed"'):
+
+    @App("typo").rule(on="run.failure")
+    def never(event, run):
+        ...
+```
+
+Every other name is yours and is never checked, so `on="orders.table_empty"` needs no registration. `cereyan.events` and `cereyan.states` carry the catalogue if you would rather not type the strings: `events.run.failed` *is* `"run.failed"`, and `events.run.any` is `"run.*"`.
 
 ## Actions
 
@@ -42,7 +66,7 @@ Templates use Jinja syntax rendered in Rust with `event`, `run`, `flow`, `state`
 
 ## Guards
 
-Disabled rules never fire. `once=per_run` fires at most once per run; `cooldown_seconds` and `max_per_minute` throttle; and a rule never fires on events of runs it created unless `allow_self` is set, so a rule that runs a flow cannot trigger itself forever.
+Disabled rules never fire. `once=per_run` (the default) fires at most once per run and `once=never` drops that limit; `cooldown_seconds` and `max_per_minute` throttle; and a rule never fires on events of runs it created unless `allow_self` is set, so a rule that runs a flow cannot trigger itself forever. A keyword that is not one of these is rejected rather than ignored, so a misspelled guard cannot leave a rule running on defaults.
 
 ## Two kinds of rule
 

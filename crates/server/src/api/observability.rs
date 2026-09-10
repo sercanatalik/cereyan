@@ -64,6 +64,10 @@ pub async fn emit_event(
     if body.name.trim().is_empty() {
         return Err(ApiError::Unprocessable("event name is required".into()));
     }
+    // The endpoint is for custom events; it may not mint one under a name the
+    // engine owns, which would let a mistyped rule look as though it worked.
+    cereyan_core::check_event_name(body.name.trim())
+        .map_err(|e| ApiError::Unprocessable(e.to_string()))?;
     let st = state.clone();
     let id = tokio::task::spawn_blocking(move || {
         if let Some(resource) = body.resource {

@@ -38,6 +38,7 @@ lint:
     uv run python scripts/check_test_process_calls.py
     uv run python scripts/gen_cli_reference.py --check
     uv run python scripts/gen_http_reference.py --check
+    uv run python scripts/gen_events_reference.py --check
     uv run python scripts/gen_mcp_reference.py --check
     uv run python scripts/gen_examples.py --check
     uv run python scripts/docs_blocks.py
@@ -52,6 +53,7 @@ docs:
     uv run python scripts/check_docstrings.py
     uv run python scripts/gen_cli_reference.py
     uv run python scripts/gen_http_reference.py
+    uv run python scripts/gen_events_reference.py
     uv run python scripts/gen_mcp_reference.py
     uv run python scripts/gen_examples.py
     uv run --group docs mkdocs build --strict

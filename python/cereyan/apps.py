@@ -140,6 +140,15 @@ class App:
         happen: either ``within`` seconds of the ``on`` event (event-armed),
         or by each tick of the cron expression ``at`` in timezone ``tz``
         (clock-armed, no ``on``).
+
+        Event and state names are checked here, so a rule that could never fire
+        raises at import rather than sitting silent. Use the constants in
+        `cereyan.events` and `cereyan.states` to get them right the first time;
+        a custom event name outside the reserved prefixes is always accepted.
+        A value in ``states`` matches the run's state type or its sub-state
+        name, so ``states=["Scheduled"]`` also covers Late and AwaitingRetry.
+
+        See `cereyan.rules.register` for the full argument list.
         """
         from .rules import register
 

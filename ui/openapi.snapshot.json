@@ -570,6 +570,36 @@
         ],
         "type": "object"
       },
+      "EventEntry": {
+        "properties": {
+          "name": {
+            "description": "The name a rule matches on, e.g. `run.failed`.",
+            "type": "string"
+          },
+          "payload_fields": {
+            "description": "The payload keys the emit site sets.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "resource": {
+            "description": "The resource kind the event hangs off.",
+            "type": "string"
+          },
+          "when": {
+            "description": "One sentence on when the engine records it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "resource",
+          "when",
+          "payload_fields"
+        ],
+        "type": "object"
+      },
       "EventsPage": {
         "properties": {
           "items": {
@@ -2423,6 +2453,26 @@
         ],
         "type": "object"
       },
+      "StateEntry": {
+        "properties": {
+          "is_sub_state": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state_type": {
+            "description": "For a sub-state, the type it belongs to; for a type, itself.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "state_type",
+          "is_sub_state"
+        ],
+        "type": "object"
+      },
       "StateType": {
         "enum": [
           "Scheduled",
@@ -2717,6 +2767,37 @@
             "type": "object"
           }
         ]
+      },
+      "Vocabulary": {
+        "properties": {
+          "events": {
+            "description": "Every engine-emitted event, in catalogue order.",
+            "items": {
+              "$ref": "#/components/schemas/EventEntry"
+            },
+            "type": "array"
+          },
+          "reserved_prefixes": {
+            "description": "Prefixes the engine owns. A name under one of these must be an entry in\n`events`; any other name is a custom event and is never checked.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "states": {
+            "description": "Every value a rule's `states` accepts: the types then the sub-states. A\nrule naming a type also matches that type's sub-states.",
+            "items": {
+              "$ref": "#/components/schemas/StateEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "events",
+          "reserved_prefixes",
+          "states"
+        ],
+        "type": "object"
       },
       "WorkItem": {
         "description": "Work handed to an engine.",
@@ -5470,6 +5551,26 @@
         },
         "tags": [
           "observability"
+        ]
+      }
+    },
+    "/api/vocabulary": {
+      "get": {
+        "operationId": "get_vocabulary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vocabulary"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "vocabulary"
         ]
       }
     }

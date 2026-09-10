@@ -21,6 +21,24 @@ assert any(r["id"] == rule["id"] for r in served.client.rules())
 
 `when` takes `events` (names or prefixes such as `run.*`), `flows`, `tags`, `states`, and `project`; a rule fires for an event that matches every clause it sets.
 
+A `states` value matches the run's state type or its sub-state name, so `["Completed"]` above also covers a run that ended `Skipped`, and `["Skipped"]` would narrow to just those.
+
+Event and state names are checked against the [catalogue](../reference/events.md) before the rule is stored. A name under one of the engine's prefixes (`run.`, `task_run.`, `flow.`, `schedule.`, `resource.`, `rule.`, `expectation.`) that nothing emits is refused with the nearest match, so a rule cannot be saved dead:
+
+```{.python fixture:served}
+from cereyan.client import ApiError
+
+try:
+    served.client.create_rule({
+        "name": "typo", "when": {"events": ["run.failure"]},
+        "do": [{"kind": "cancel_run"}],
+    })
+except ApiError as exc:
+    assert "run.failed" in str(exc)
+```
+
+Any name outside those prefixes is a custom event of yours and is accepted as typed.
+
 ## Actions
 
 | Kind | Fields | Effect |
@@ -68,25 +86,30 @@ Email needs `[email]` configured; see [Configuration](../reference/configuration
 ## Write a code rule
 
 ```python
-from cereyan import App
+from cereyan import App, events
 
 app = App("ops")
 
-@app.rule(on="run.failed", flow="nightly", once="per_run", cooldown_seconds=60)
+@app.rule(on=events.run.failed, flow="nightly", once="per_run", cooldown_seconds=60)
 def on_nightly_failure(event, run):
     print(f"{run['name']} failed: {event['payload'].get('message')}")
 
 assert app.rules[0].spec()["when"]["flows"] == ["nightly"]
+assert app.rules[0].spec()["when"]["events"] == ["run.failed"]
 ```
 
-The function receives the event and the run as dicts and its return value is recorded with the firing. Code rules are re-registered on every server start, show read-only on the Rules page with a `code` badge, and fire on the offline path for a script's own events once a server has registered them. Guards are keyword arguments: `once`, `cooldown_seconds`, `max_per_minute`, `allow_self`, and `name`.
+`events.run.failed` is the string `"run.failed"`, so the constants and the literals are interchangeable; the constants just autocomplete and catch a typo at the point you write it. `events.run.any` is `"run.*"`, and `cereyan.states` does the same for `states=`.
+
+The function receives the event and the run as dicts and its return value is recorded with the firing. Code rules are re-registered on every server start, show read-only on the Rules page with a `code` badge, and fire on the offline path for a script's own events once a server has registered them. Guards are keyword arguments: `once`, `cooldown_seconds`, `max_per_minute`, `allow_self`, and `name` — anything else raises, so a misspelled guard cannot silently leave the rule on its defaults.
 
 ## Guards
 
-- `once="per_run"` fires at most once per run, so a run that retries three times alerts once.
+- `once="per_run"` (the default) fires at most once per run, so a run that retries three times alerts once. `once="never"` lifts the limit and fires on every matching event.
 - `cooldown_seconds` and `max_per_minute` throttle noisy rules.
 - A rule never fires on events of runs it created, unless `allow_self` is set; this is what stops a `run_flow` rule looping.
 - Disabled rules never fire. Toggle them on the Rules page or with `PATCH /api/rules/{id}`.
+
+A rule whose names are all valid can still match nothing — the wrong flow, a tag that is never set. The Rules page marks any rule that has never fired, which is the one thing name checking cannot tell you.
 
 ## See what fired
 

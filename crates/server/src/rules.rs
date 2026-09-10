@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use cereyan_core::schedule::{from_micros, to_micros, Schedule};
 use cereyan_core::{
-    now_micros, Event, Expectation, Flow, FlowOptions, RuleAction, RuleRow, Run, State, StateType,
+    now_micros, Event, EventName, Expectation, Flow, FlowOptions, RuleAction, RuleRow, Run, State,
+    StateType,
 };
 use cereyan_rules::{GuardDecision, GuardState, RuleIndex, RunContext};
 use cereyan_store::{ArmExpectation, CreateRun};
@@ -161,7 +162,7 @@ fn track_expectations(state: &Arc<AppState>, event: &Event, ctx: &RunContext, ca
             {
                 for id in met {
                     state.stream.publish(
-                        "expectation.met",
+                        EventName::ExpectationMet.as_str(),
                         id.to_string(),
                         json!({"id": id, "rule_id": rule.id, "key": key}),
                     );
@@ -189,7 +190,7 @@ fn track_expectations(state: &Arc<AppState>, event: &Event, ctx: &RunContext, ca
             }) {
                 state.timer.push(deadline, TimerEvent::Expectation(id));
                 state.stream.publish(
-                    "expectation.armed",
+                    EventName::ExpectationArmed.as_str(),
                     id.to_string(),
                     json!({"id": id, "rule_id": rule.id, "key": key, "run_id": run_id, "deadline": deadline}),
                 );
@@ -315,7 +316,7 @@ fn lapse(state: &Arc<AppState>, rule: &RuleRow, ctx: RunContext, exp: Option<&Ex
             id: 0,
             seq: 0,
             external_id: cereyan_core::new_id(),
-            name: "expectation.lapsed".into(),
+            name: EventName::ExpectationLapsed.as_str().into(),
             occurred: now,
             resource: cereyan_core::Resource {
                 kind: "rule".into(),
@@ -349,7 +350,7 @@ fn lapse(state: &Arc<AppState>, rule: &RuleRow, ctx: RunContext, exp: Option<&Ex
         });
     }
     let event = cereyan_store::NewEvent {
-        name: "expectation.lapsed".into(),
+        name: EventName::ExpectationLapsed.as_str().into(),
         run_id: ctx.run.as_ref().map(|r| r.id),
         flow_id: ctx.flow.as_ref().map(|f| f.id),
         payload: json!({
@@ -384,7 +385,7 @@ fn lapse(state: &Arc<AppState>, rule: &RuleRow, ctx: RunContext, exp: Option<&Ex
     );
     if let Some(e) = exp {
         state.stream.publish(
-            "expectation.lapsed",
+            EventName::ExpectationLapsed.as_str(),
             e.id.to_string(),
             json!({"id": e.id, "rule_id": rule.id, "event_id": id}),
         );
@@ -470,8 +471,8 @@ pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunConte
     let env = cereyan_rules::environment();
     let template_ctx = cereyan_rules::template_context(event, ctx);
     let mut outcomes: Vec<Value> = Vec::new();
-    let _ = state.record_event(
-        "rule.fired",
+    let _ = state.record_engine_event(
+        EventName::RuleFired,
         ctx.run.as_ref().map(|r| r.id),
         ctx.flow.as_ref().map(|f| f.id),
         json!({"rule_id": rule.id, "rule": rule.name, "event": event.name, "event_id": event.id}),
@@ -484,8 +485,8 @@ pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunConte
                 outcomes.push(
                     json!({"index": i, "kind": action.kind, "status": "failed", "error": msg}),
                 );
-                let _ = state.record_event(
-                    "rule.action.failed",
+                let _ = state.record_engine_event(
+                    EventName::RuleActionFailed,
                     ctx.run.as_ref().map(|r| r.id),
                     ctx.flow.as_ref().map(|f| f.id),
                     json!({"rule_id": rule.id, "action": action.kind, "index": i, "error": msg}),
@@ -503,8 +504,8 @@ pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunConte
         match result {
             Ok(detail) => {
                 outcomes.push(json!({"index": i, "kind": action.kind, "status": "completed", "detail": detail}));
-                let _ = state.record_event(
-                    "rule.action.completed",
+                let _ = state.record_engine_event(
+                    EventName::RuleActionCompleted,
                     ctx.run.as_ref().map(|r| r.id),
                     ctx.flow.as_ref().map(|f| f.id),
                     json!({"rule_id": rule.id, "action": action.kind, "index": i, "detail": detail}),
@@ -514,8 +515,8 @@ pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunConte
                 outcomes.push(
                     json!({"index": i, "kind": action.kind, "status": "failed", "error": msg}),
                 );
-                let _ = state.record_event(
-                    "rule.action.failed",
+                let _ = state.record_engine_event(
+                    EventName::RuleActionFailed,
                     ctx.run.as_ref().map(|r| r.id),
                     ctx.flow.as_ref().map(|f| f.id),
                     json!({"rule_id": rule.id, "action": action.kind, "index": i, "error": msg}),
@@ -802,7 +803,7 @@ fn test_proactive_rule(state: &Arc<AppState>, rule: &RuleRow) -> Result<Value, S
         id: 0,
         seq: 0,
         external_id: cereyan_core::new_id(),
-        name: "expectation.lapsed".into(),
+        name: EventName::ExpectationLapsed.as_str().into(),
         occurred: now,
         resource: cereyan_core::Resource {
             kind: "rule".into(),

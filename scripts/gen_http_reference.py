@@ -17,7 +17,7 @@ METHOD_ORDER = ["get", "post", "put", "patch", "delete"]
 TOKEN_EXEMPT = {"/api/health"}
 ENGINE_PREFIX = "/api/engine/"
 GROUPS = [
-    ("Health and server", ["/api/health", "/api/server", "/api/settings", "/api/counts", "/api/stream"]),
+    ("Health and server", ["/api/health", "/api/server", "/api/settings", "/api/counts", "/api/stream", "/api/vocabulary"]),
     ("Flows", ["/api/flows"]),
     ("Runs", ["/api/runs"]),
     ("Task runs", ["/api/task-runs"]),
