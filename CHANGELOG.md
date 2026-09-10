@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The schedule drift test no longer gates a release on a wall-clock ceiling. `test_schedule_fires_on_time_with_low_drift` asserted that a run starts within 250 ms of its scheduled time; a Windows runner measured 294 ms and failed the 1.11.0 build, which is the flake the repository already has a rule against — the correctness gate excludes wall-clock ceilings, because a bound calibrated on a developer machine says nothing about correctness on a shared runner. The 250 ms was also a loosened stand-in for a target that already has a home: `benches/e2e.py` measures `schedule_drift_ms` against the documented 50 ms, with a per-platform baseline and regression detection. The test is now `test_schedule_fires_at_its_scheduled_time` and asserts what does not depend on the hardware — the run is materialised at the anchor, it completes, and it does not fire early. No product behaviour changed.
+
 ## 1.11.0 (2026-09-09)
 
 - Documentation: `@flow(group=...)` shipped in 1.10.0 with a paragraph on App and projects and nothing a reader could copy. It now has a section of its own there with a snippet, and Flows and parameters lists it among what a flow declares, so the option is findable from the page a reader reaches for when choosing one. The README's screenshot captions describe the collapsible groups the recaptured Flows and Runs shots already show.
