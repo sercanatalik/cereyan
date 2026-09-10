@@ -19,7 +19,7 @@ from .targets import LocalTarget, Target
 from .tasks import Task, task
 from .variables import Variable
 
-__version__ = "1.11.0"
+__version__ = "1.12.0"
 
 __all__ = [
     "wait_for_input",
