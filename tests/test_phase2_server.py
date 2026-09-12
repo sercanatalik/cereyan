@@ -113,6 +113,10 @@ def typo():
 def fragile():
     raise RuntimeError("fail")
 
+@app.flow(disable_after=(2, 3600, 12), schedule=Interval(3600, key="dis"))
+def fragile_long():
+    raise RuntimeError("fail")
+
 @task
 def a():
     return 1
@@ -532,6 +536,56 @@ def test_disable_window_pauses_schedules_and_resumes(sched):
     assert c.events(kind="flow.disabled")
     resumed = wait_until(lambda: (s := c.schedules(flow_id)[0]) and s["active"] and s, timeout=15)
     assert resumed["paused_reason"] is None
+
+
+def _disable_then_stop(home, directory, name):
+    """Trip a flow's disable window, stop the server inside it, return the paused schedule."""
+    from cereyan import engine
+
+    engine.close_store()
+    srv = ServerProcess(str(home), str(directory))
+    try:
+        flow_id = fid(srv, name)
+        for _ in range(2):
+            srv.wait_run(start(srv, name)["id"], timeout=20)
+        paused = wait_until(lambda: (s := srv.client.schedules(flow_id)[0]) and not s["active"] and s, timeout=10)
+    finally:
+        srv.stop()
+    # The in-memory resume timer must not have fired before the stop.
+    assert paused["paused_until"] / 1e6 > time.time()
+    return flow_id, paused
+
+
+def test_disable_window_survives_a_restart_inside_it(isolated_home, sched_dir):
+    flow_id, paused = _disable_then_stop(isolated_home, sched_dir, "fragile_long")
+    srv = ServerProcess(str(isolated_home), str(sched_dir))
+    try:
+        c = srv.client
+        assert paused["paused_until"] / 1e6 > time.time()
+        after = c.schedules(flow_id)[0]
+        assert after["active"] is False
+        assert after["paused_reason"] == "disabled"
+        resumed = wait_until(lambda: (s := c.schedules(flow_id)[0]) and s["active"] and s, timeout=30)
+        assert resumed["paused_reason"] is None
+        # Recorded just after the resume, through the writer.
+        assert wait_until(lambda: c.events(kind="flow.enabled"), timeout=5)
+    finally:
+        srv.stop()
+
+
+def test_disable_window_ended_while_stopped_resumes_at_start(isolated_home, sched_dir):
+    flow_id, paused = _disable_then_stop(isolated_home, sched_dir, "fragile_long")
+    time.sleep(max(0.0, paused["paused_until"] / 1e6 - time.time()) + 0.5)
+    srv = ServerProcess(str(isolated_home), str(sched_dir))
+    try:
+        c = srv.client
+        # Start resumes before the server reports ready, with nothing to wait for.
+        after = c.schedules(flow_id)[0]
+        assert after["active"] is True
+        assert after["paused_reason"] is None
+        assert c.events(kind="flow.enabled")
+    finally:
+        srv.stop()
 
 
 def test_settings_saturation_risk(isolated_home, sched_dir):

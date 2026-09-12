@@ -35,7 +35,7 @@ Offline, a resource is a local semaphore of size one, which serialises tasks hol
 
 ## Disable windows
 
-`disable_after=(count, window_seconds, persist_seconds)` pauses every schedule of the flow for `persist_seconds` once it has failed `count` times within `window_seconds`, records `flow.disabled`, and resumes automatically with `flow.enabled`. Use it to stop a broken nightly flow from filling the run list until someone looks.
+`disable_after=(count, window_seconds, persist_seconds)` pauses every schedule of the flow for `persist_seconds` once it has failed `count` times within `window_seconds`, records `flow.disabled`, and resumes automatically with `flow.enabled`. Use it to stop a broken nightly flow from filling the run list until someone looks. The window survives a restart of the server: one still open when the server starts again ends on time, and one that ended while it was down resumes as it starts. Fires inside the window are never caught up; fires after it follow the schedule's `catchup` policy.
 
 ## Engines
 

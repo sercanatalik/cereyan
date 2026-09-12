@@ -175,15 +175,47 @@ pub fn start(state: &Arc<AppState>) {
         .flatten()
         .and_then(|v| v.parse().ok());
     let now = now_micros();
+    // A disable window's resume timer lives only in memory, so it is derived
+    // again from `paused_until`: ended windows resume now, open ones re-arm.
+    let mut ended: Vec<(ScheduleRow, i64)> = Vec::new();
+    let mut open: HashMap<i64, i64> = HashMap::new();
     for row in rows {
         state.scheduler.put(row.clone());
         if !row.active {
+            if let (Some("disabled"), Some(until)) =
+                (row.paused_reason.as_deref(), row.paused_until)
+            {
+                if until <= now {
+                    ended.push((row, until));
+                } else {
+                    let at = open.entry(row.flow_id).or_insert(until);
+                    *at = (*at).max(until);
+                }
+            }
             continue;
         }
         if let Some(last) = last_wakeup {
             catch_up(state, &row, last, now);
         }
         materialize(state, row.id);
+    }
+    let mut enabled: Vec<i64> = Vec::new();
+    for (row, until) in &ended {
+        resume(state, row.id);
+        // Fires inside the window were suppressed, not missed: catch up only
+        // what the outage missed after it ended.
+        if let Some(last) = last_wakeup {
+            catch_up(state, row, last.max(*until), now);
+        }
+        if !enabled.contains(&row.flow_id) {
+            enabled.push(row.flow_id);
+        }
+    }
+    for flow_id in enabled {
+        let _ = state.record_engine_event(EventName::FlowEnabled, None, Some(flow_id), json!({}));
+    }
+    for (flow_id, until) in open {
+        state.timer.push(until, TimerEvent::ResumeFlow(flow_id));
     }
     // Existing Scheduled runs with a scheduled time (materialized earlier) need timers.
     for run in state.index.active_runs() {
