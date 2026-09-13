@@ -67,7 +67,6 @@ jobs:
         # failure summary, which is what a first run on a new platform is for.
         run: uv run pytest -q -m "not performance" --timeout 300 -rf
       - name: Documentation tests
-        if: runner.os != 'Windows'
         run: |
           uv sync --group docs
           uv run --group docs pytest --markdown-docs --markdown-docs-syntax superfences --ignore=docs/examples --ignore-glob='*/conftest.py' docs tests/docs -q
