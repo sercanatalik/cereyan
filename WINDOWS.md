@@ -2,12 +2,9 @@
 
 Cereyan builds, installs and runs on Windows, and CI runs every suite there: it compiles
 the crates, runs the Rust, Python and documentation suites, builds the x86_64 wheel and
-smoke-tests it on every push, with no step skipped by platform. One thing is still open,
-and this file is where it is tracked, because the change proposal that describes it lives
-under `openspec/`, which is not committed.
-
-It is a pair of **shipped bugs that affect users**, not a test problem. They are marked in
-the suite so they cannot be forgotten, and the markers name the workstream that owns them.
+smoke-tests it on every push, with no step skipped by platform. Nothing is open. This file
+records what differs from Linux and macOS, and why, because the change proposals that
+explain it live under `openspec/`, which is not committed.
 
 ## Where it stands
 
@@ -18,8 +15,6 @@ the suite so they cannot be forgotten, and the markers name the workstream that 
 | Python suite in CI | yes | yes | yes |
 | Documentation suite in CI | yes | yes | yes |
 | Served flow `timeout_seconds` | yes | yes | yes |
-| Offline flow `timeout_seconds` (`python pipeline.py`, `cereyan run`) | yes | yes | **no** — accepted and ignored |
-| Cooperative cancel of a sleeping flow | yes | yes | **no** — waits for the supervisor to terminate the engine |
 
 ## Controlling processes in a test
 
@@ -30,51 +25,31 @@ any signal value**: the old liveness probe killed the process it asked about, an
 the Python suite first failed there. The server child is created with
 `CREATE_NEW_PROCESS_GROUP` so a control event aimed at it does not reach pytest.
 
-## Interrupting a running flow
-
-Two ways cereyan stops a flow from inside its own process do not work on Windows. The
-served timeout is not one of them: the server records `TimedOut` and ends the engine on
-every platform, and `test_flow_timeout_kills_engine` passes on Windows.
-
-**An offline flow's timeout is ignored.** `_FlowTimeout` in
-`python/cereyan/engine/runner.py` arms only when `signal.setitimer` exists, which it never
-does on Windows, so a flow run by `python pipeline.py` or `cereyan run` there runs
-unbounded. `docs/guides/retries-timeouts-crashes.md` says so and points readers at
-`cereyan serve`. Task-level `timeout_seconds` is unaffected: `ThreadRunner` waits on an
-`Event` and `ProcessRunner` polls a pipe, both portable.
-
-**Cooperative cancellation waits for the escalation.** `_CancelWatcher` in
-`python/cereyan/engine/child.py` falls back to `_thread.interrupt_main()` where
-`signal.pthread_kill` is missing. That only sets the flag CPython checks between bytecodes,
-so a flow in `time.sleep` ignores the cancel until the 10 second grace period ends and the
-supervisor terminates the engine.
-
-The planned fix, in `windows-interrupt-running-flow`, is `signal.raise_signal(SIGINT)` from
-a watcher thread. It goes through CPython's C-level handler, which on Windows also sets the
-event `time.sleep` waits on, so it wakes a sleeping main thread with no console involved. A
-console control event is not an option: `CTRL_C_EVENT` reaches every process on the
-console, the server included. Windows still cannot interrupt most blocking I/O, so a flow
-stuck there is timed out when the call returns, or ended by the supervisor when served.
-
 ## The markers that pin all of this
 
-Every one is gated on the platform, so none of them fires on Unix. The failures are `xfail`
-rather than `skip` so they still run and report XPASS the moment the bug is fixed.
+Every one is gated on the platform, so none of them fires on Unix.
 
 | Location | Kind | Covers |
 |---|---|---|
-| `tests/test_phase2_offline.py:247` | `xfail(strict)` | offline flow timeout |
-| `tests/test_vocabulary.py:228` | `xfail(strict)` | offline flow timeout, in the offline rule test |
-| `tests/test_supervisor.py:19` | `xfail(strict)` | cooperative cancel |
-| `tests/test_supervisor.py:53` | `skipif` | terminate-then-kill ladder, Unix-only by design |
+| `tests/test_supervisor.py:48` | `skipif` | terminate-then-kill ladder, Unix-only by design |
 | `tests/test_cli.py:112` | `skipif` | the user's home cannot be faked by environment |
 | `tests/test_release11_socket_routes.py:43` | `skipif` | Unix sockets |
 | `tests/test_release11_artifacts_nice.py:75` | `skipif` | engine niceness |
 
-The three `xfail` markers are the ones to watch: when a fix lands, a strict marker turns
-XPASS into a failure and forces itself to be removed. Two more tests branch inline rather
-than skip: `tests/test_offline.py:97` accepts `PID unknown` for the lock holder, and
+A bug gets a strict `xfail` rather than a `skip`, so it still runs and a fix turns XPASS
+into a failure that forces the marker's removal. None is left. Two more tests branch inline
+rather than skip: `tests/test_offline.py:97` accepts `PID unknown` for the lock holder, and
 `tests/test_phase3_offline.py:108` checks permission bits only on Unix.
+
+Three `xfail` markers covered interrupting a running flow until
+`windows-interrupt-running-flow`: an offline flow's `timeout_seconds` was accepted and
+ignored, because `_FlowTimeout` armed only where `signal.setitimer` exists, and a cancel
+could not interrupt a sleeping flow, because the fallback, `_thread.interrupt_main()`, only
+sets the flag CPython checks between bytecodes. Both now call `signal.raise_signal(SIGINT)`
+from a thread. It goes through CPython's C-level handler, which on Windows also sets the
+event `time.sleep` waits on, so it wakes a sleeping main thread with no console involved. A
+console control event was not an option: `CTRL_C_EVENT` reaches every process on the
+console, the server included.
 
 A marker used to sit on `test_clock_armed_rule_fires_only_when_window_is_empty`,
 blaming Windows for a clock-armed rule that lapsed while its events kept arriving. It was not
@@ -89,7 +64,7 @@ slower start delays that event. It fired on Linux in CI at 1.9.1, is fixed in
 ## Differences that are not bugs
 
 These are platform facts and will not change. `docs/design/limitations.md` states the
-first two for readers.
+first two and the last for readers.
 
 - **Unix sockets.** `bind_unix_socket` refuses on other platforms by design; the TCP
   listener and the API token are the way in.
@@ -103,3 +78,6 @@ first two for readers.
   matter hold everywhere, namely that the second opener is refused and no user code runs.
 - **The user's home.** `dirs::home_dir()` resolves through the Known Folder API on
   Windows, not `HOME` or `USERPROFILE`, so a test cannot redirect it by environment.
+- **Interrupting blocking I/O.** A timeout or a cancel reaches a flow in Python code or
+  `time.sleep` on every platform, but on Windows not one blocked in most I/O calls. Such a
+  flow is timed out when the call returns offline, and ended by the supervisor when served.

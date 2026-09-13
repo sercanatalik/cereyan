@@ -1,11 +1,12 @@
 """Targets, caching, retries, timeouts, hooks, futures, runners: offline path."""
 
 import json
+import logging
 import os
+import signal
+import threading
 import time
 from datetime import timedelta
-
-import sys
 
 import pytest
 
@@ -244,11 +245,6 @@ def test_task_timeout_thread_and_process(store):
     assert tasks[0]["state"]["name"] == "TimedOut" and tasks[0]["state"]["type"] == "Failed"
 
 
-@pytest.mark.xfail(
-    sys.platform == "win32",
-    reason="windows-interrupt-running-flow: timeout_seconds is a silent no-op on Windows, FlowTimeout needs signal.setitimer which the platform lacks",
-    strict=True,
-)
 def test_flow_timeout_offline(store):
     @flow(timeout_seconds=0.3)
     def f():
@@ -260,6 +256,87 @@ def test_flow_timeout_offline(store):
     assert time.time() - t0 < 3
     run, _ = last_run(store)
     assert run["state"]["name"] == "TimedOut"
+
+
+@pytest.fixture(params=["native", "portable"])
+def timeout_arm(request, monkeypatch):
+    """The platform's own flow timeout, and the portable one Windows uses,
+    forced everywhere by hiding setitimer."""
+    if request.param == "portable":
+        monkeypatch.delattr(signal, "setitimer", raising=False)
+    before = signal.getsignal(signal.SIGINT)
+    yield request.param
+    assert signal.getsignal(signal.SIGINT) is before
+
+
+def busy(seconds, started=None):
+    """Python code in short sleeps: off Windows, a SIGINT raised from another
+    thread wakes no sleep, and the main thread sees it between bytecodes."""
+    if started is not None:
+        started.set()
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        time.sleep(0.01)
+
+
+def test_flow_timeout_offline_on_either_arm(store, timeout_arm):
+    @flow(timeout_seconds=0.3)
+    def f():
+        busy(5)
+
+    t0 = time.time()
+    with pytest.raises(TimeoutError, match="flow exceeded"):
+        f()
+    assert time.time() - t0 < 3
+    run, _ = last_run(store)
+    assert run["state"]["name"] == "TimedOut"
+
+
+def test_ctrl_c_before_the_flow_timeout_is_a_keyboard_interrupt(store, timeout_arm):
+    started = threading.Event()
+
+    @flow(timeout_seconds=5)
+    def f():
+        busy(10, started)
+
+    def ctrl_c():
+        started.wait(10)
+        signal.raise_signal(signal.SIGINT)
+
+    threading.Thread(target=ctrl_c, daemon=True).start()
+    with pytest.raises(KeyboardInterrupt):
+        f()
+    run, _ = last_run(store)
+    assert run["state"]["name"] == "Failed"
+
+
+def test_flow_returning_just_under_its_timeout_completes(store, timeout_arm):
+    @flow(timeout_seconds=1)
+    def f():
+        busy(0.5)
+        return "done"
+
+    assert f() == "done"
+    busy(1)  # past the deadline: a timer that outlived the body would interrupt this
+    run, _ = last_run(store)
+    assert run["state"]["type"] == "Completed"
+
+
+def test_flow_timeout_off_the_main_thread_warns_and_completes(store, caplog):
+    @flow(timeout_seconds=0.1)
+    def f():
+        time.sleep(0.3)
+        return "done"
+
+    results = []
+    with caplog.at_level(logging.WARNING, logger="cereyan.run"):
+        worker = threading.Thread(target=lambda: results.append(f()))
+        worker.start()
+        worker.join(10)
+    assert results == ["done"]
+    assert "not enforced: the flow was called off the main thread" in caplog.text
+    run, _ = last_run(store)
+    assert run["state"]["type"] == "Completed"
 
 
 def test_hooks_run_after_state_and_errors_are_isolated(store):

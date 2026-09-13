@@ -143,26 +143,79 @@ def _run_dict(ctx: context.RunContext) -> dict:
 
 
 class _FlowTimeout:
-    """SIGALRM-based flow timeout for the main thread (offline path)."""
+    """Flow timeout for the main thread (offline path).
 
-    def __init__(self, seconds: float | None) -> None:
+    SIGALRM where the platform has it. Elsewhere (Windows) a timer thread
+    raises SIGINT, whose C handler also wakes a main thread in time.sleep, and
+    a SIGINT handler turns it into TimeoutError; a real Ctrl-C still reaches
+    the previous handler. Only the main thread can be interrupted, so a flow
+    called from another thread runs without a timeout, with a warning.
+    """
+
+    def __init__(self, seconds: float | None, logger=None) -> None:
         self.seconds = seconds
         self.previous = None
-        self.active = bool(seconds) and threading.current_thread() is threading.main_thread() and hasattr(signal, "setitimer")
+        on_main = threading.current_thread() is threading.main_thread()
+        self.active = bool(seconds) and on_main
+        self.alarm = self.active and hasattr(signal, "setitimer")
+        if seconds and not on_main and logger is not None:
+            logger.warning(
+                "timeout_seconds=%s is not enforced: the flow was called off the main thread, the only one a timeout can interrupt",
+                seconds,
+            )
+        self._lock = threading.Lock()
+        self._timer: threading.Timer | None = None
+        self._fired = False
+        self._finished = False
 
     def __enter__(self):
-        if self.active:
+        if self.alarm:
             def handler(signum, frame):
                 raise TimeoutError(f"flow exceeded {self.seconds} s")
 
             self.previous = signal.signal(signal.SIGALRM, handler)
             signal.setitimer(signal.ITIMER_REAL, self.seconds)
+        elif self.active:
+            self.previous = signal.signal(signal.SIGINT, self._on_sigint)
+            self._timer = threading.Timer(self.seconds, self._fire)
+            self._timer.daemon = True
+            self._timer.start()
         return self
 
+    def _fire(self) -> None:
+        with self._lock:
+            if not self._finished:
+                self._fired = True
+                signal.raise_signal(signal.SIGINT)
+
+    def _on_sigint(self, signum, frame):
+        if self._fired:
+            self._fired = False
+            raise TimeoutError(f"flow exceeded {self.seconds} s")
+        if callable(self.previous):
+            return self.previous(signum, frame)
+        if self.previous == signal.SIG_IGN:
+            return None
+        raise KeyboardInterrupt
+
     def __exit__(self, *exc):
-        if self.active:
+        if self.alarm:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, self.previous)
+        elif self.active:
+            try:
+                with self._lock:
+                    self._finished = True
+                self._timer.cancel()
+            finally:
+                try:
+                    signal.signal(signal.SIGINT, self.previous)
+                except BaseException:
+                    # signal.signal runs a pending handler before swapping, so a
+                    # timer that fired as the body returned raises here, with
+                    # this handler still installed: swap again, then raise.
+                    signal.signal(signal.SIGINT, self.previous)
+                    raise
         return False
 
 
@@ -211,7 +264,7 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
         attempt = 0
         while True:
             try:
-                with run_logging.capture_prints(flow.log_prints), _FlowTimeout(flow.timeout_seconds if backend.offline else None):
+                with run_logging.capture_prints(flow.log_prints), _FlowTimeout(flow.timeout_seconds if backend.offline else None, logger):
                     result = flow.fn(**values)
                 _wait_for_futures(ctx, logger)
                 break

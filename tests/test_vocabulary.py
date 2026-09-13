@@ -4,7 +4,6 @@ rejects a rule which could never fire."""
 from __future__ import annotations
 
 import json
-import sys
 import time
 
 import pytest
@@ -225,11 +224,6 @@ def test_emit_event_refuses_the_engine_namespace(store):
 # ---- offline matching -----------------------------------------------------
 
 
-@pytest.mark.xfail(
-    sys.platform == "win32",
-    reason="windows-interrupt-running-flow: timeout_seconds is a silent no-op on Windows",
-    strict=True,
-)
 def test_offline_rule_on_a_state_type_matches_its_sub_state(store):
     """Offline and served share one matcher, so the widening applies to both.
 

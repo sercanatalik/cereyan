@@ -69,7 +69,7 @@ except TimeoutError as exc:
 
 With the default thread runner a timed-out task's thread is abandoned; with a `ProcessRunner` the worker process is terminated.
 
-A flow's timeout is enforced by the server, which records `TimedOut` and ends the engine, and offline by an alarm in the running process. That alarm does not exist on Windows: a flow run by `python pipeline.py` or `cereyan run` there is not timed out at all, and `timeout_seconds` on it is accepted and ignored. Run the flow through `cereyan serve` for a timeout that holds on every platform. Task timeouts are unaffected.
+A flow's timeout is enforced by the server when the flow is served, which records `TimedOut` and ends the engine, and offline by interrupting the flow in its own process, which raises `TimeoutError`. The interrupt reaches Python code and `time.sleep` on every platform, and any blocking system call on Linux and macOS. A flow stuck in a call the platform cannot interrupt, such as a loop inside a C extension or most blocking I/O on Windows, is timed out when the call returns offline, and ended by the server when served. Only the main thread can be interrupted: a flow called from another thread runs without its timeout and logs a warning saying so.
 
 ## Survive a crash
 
