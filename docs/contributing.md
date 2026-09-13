@@ -1,6 +1,6 @@
 # Contributing
 
-Cereyan is a Cargo workspace (`crates/`) with a Python package (`python/cereyan`), a React UI (`ui/`), and this documentation (`docs/`), built as one wheel by maturin. Design decisions and the phased history live in `roadmap.md`.
+Cereyan is a Cargo workspace (`crates/`) with a Python package (`python/cereyan`), a React UI (`ui/`), and this documentation (`docs/`), built as one wheel by maturin. Design decisions are on the [Design](design/architecture.md) pages, and what is left to do is in `roadmap.md`.
 
 ## Set up
 
