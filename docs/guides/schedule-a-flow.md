@@ -49,7 +49,11 @@ Pause from the flow page, `POST /api/schedules/{id}/pause`, the MCP `pause_sched
 
 ## Skip a run
 
-To stop one run without pausing the schedule, open the flow's menu on the Flows page: **Skip next run** skips the next fire, and **Skip runs…** opens a checklist of upcoming fires filled by a *Skip the next N* stepper or an *Until a time* field. The flow page's **Upcoming** tab does the same row by row or for several rows at once, and lists fires past the materialised runs as projected so you can skip one days ahead. A skipped fire ends `Skipped` at its time without starting, and so do the runs of the flows declared `after=` it; **Undo** takes a skip back until its time. See [Skipping fires](../concepts/schedules.md#skipping-fires).
+To stop one run without pausing the schedule, open the flow's menu on the Flows page: **Skip next run** skips the next fire, and **Skip runs…** opens a checklist of upcoming fires filled by a *Skip the next N* stepper or an *Until a time* field, with the time the schedule resumes and the flows after this one that are skipped too.
+
+![The Skip upcoming runs dialog for daily_etl: the schedule, the Next runs and Until a time modes, a stepper set to the next three runs, a checklist of upcoming fires with one already skipped and three ticked, and the time the schedule resumes](../images/skip-dialog.png)
+
+The flow page's **Upcoming** tab does the same row by row, for several rows at once, or for all of them with the header checkbox, and lists fires past the materialised runs as projected so you can skip one days ahead. A skipped fire shows who skipped it and when; at its time it ends `Skipped` without starting, and so do the runs of the flows declared `after=` it. **Undo** takes a skip back until its time. See [Skipping fires](../concepts/schedules.md#skipping-fires).
 
 ## Inspect through the API
 
@@ -63,6 +67,10 @@ assert len(upcoming) >= 1
 
 ## Edit at runtime
 
-**Reschedule…**, in the Flows page menu and beside the schedule summary on the flow page, edits a cron schedule as a daily, weekly, or monthly time in a timezone, or as raw cron, with its catch-up options, and shows the coming week before and after the change with what saving replaces and the skips it would drop. Interval and RRule schedules open in the Schedules tab's editor, which previews the next fire times (`POST /api/schedules/preview`). An edit to a code-declared schedule lasts until the next restart re-applies the declaration, unless the request sets `persist: true`.
+**Reschedule…**, in the Flows page menu and beside the schedule summary on the flow page, edits a cron schedule as a daily, weekly, or monthly time in a timezone, or as raw cron, with its catch-up options, and shows the coming week before and after the change with what saving replaces and the skips it would drop.
+
+![The Reschedule dialog for daily_etl: the note that the schedule is declared in code, Repeats set to Daily with the time moved to 07:30 and the timezone beside it, the cron it produces, the week's current fires against the new ones with the skipped fire marked, and what saving replaces and drops](../images/reschedule-dialog.png)
+
+Interval and RRule schedules open in the Schedules tab's editor, which previews the next fire times (`POST /api/schedules/preview`). An edit to a code-declared schedule lasts until the next restart re-applies the declaration, unless the request sets `persist: true`.
 
 Related: [Schedules](../concepts/schedules.md), [Backfill a date range](backfill.md).

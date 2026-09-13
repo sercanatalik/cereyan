@@ -46,9 +46,9 @@ A group header is the same columns rolled up, so collapsing a group hides the de
 
 ## Flow detail
 
-![Flow detail on the Upcoming tab: a skipped fire struck through with Undo, the materialised runs each with Skip, and fires past the look-ahead listed as projected below a divider, under the schedule summary with its skipped count and the Run, Backfill, Skip next, and Pause actions](../images/flow-detail.png)
+![Flow detail on the Upcoming tab: a skipped fire struck through with a dashed Skipped badge, who skipped it and when, and Undo; the materialised runs with how far off each is; and the fires past the look-ahead listed as projected below a divider, under the schedule summary with its skipped count, Reschedule, and the Run, Backfill, Skip next, and Pause actions](../images/flow-detail.png)
 
-The flow's description (rendered from its docstring), its schedule summary with the next fire that will run and how many are skipped, chips for priority, concurrency cap, and overlap policy, the last ten runs as dots, and **Run**, **Backfill**, **Skip next…**, and **Pause** actions, with **Reschedule** beside the schedule summary. Tabs list the runs; the upcoming runs, each with **Skip** or **Undo**, several skippable at once, and the fires past the look-ahead listed as projected; the schedules with an editor and a preview of upcoming fire times; and the parameter schema.
+The flow's description (rendered from its docstring), its schedule summary with the next fire that will run and how many are skipped, chips for priority, concurrency cap, and overlap policy, the last ten runs as dots, and **Run**, **Backfill**, **Skip next…**, and **Pause** actions, with **Reschedule** beside the schedule summary. Tabs list the runs; the upcoming runs, each with how far off it is and **Skip** or **Undo**, a skipped one saying who skipped it and when, several skippable at once or all from the header checkbox, and the fires past the look-ahead listed as projected, ten more at a time; the schedules with an editor and a preview of upcoming fire times; and the parameter schema.
 
 ## Events
 
