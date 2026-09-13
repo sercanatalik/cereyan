@@ -312,8 +312,29 @@ fn render_template(template: &str, run: &Run) -> Value {
     Value::String(template.to_string())
 }
 
+/// A run skipped by a person, or skipped because its upstream was: the flows
+/// after it are skipped too. Every other Skipped run (`on_overlap="skip"`, a
+/// backfill value already done, a catch-up drop) means "nothing needed doing"
+/// and triggers its dependents like a Completed run.
+fn carries_skip(run: &Run) -> bool {
+    run.state.name == "Skipped"
+        && matches!(
+            run.state.details.get("reason").and_then(|v| v.as_str()),
+            Some("user") | Some("upstream")
+        )
+}
+
+/// How far a skip is carried down a chain in one go. `after=` does not forbid
+/// cycles, and a skipped downstream is created ended, so its dependents follow
+/// synchronously; this bounds that recursion.
+const MAX_SKIP_DEPTH: usize = 32;
+
 /// Create runs of flows declared `after=` this run's flow.
 fn trigger_dependents(state: &Arc<AppState>, upstream: &Flow, run: &Run) {
+    trigger_dependents_at(state, upstream, run, 0);
+}
+
+fn trigger_dependents_at(state: &Arc<AppState>, upstream: &Flow, run: &Run, depth: usize) {
     if run.created_by.starts_with("catchup") && run.state.name == "Skipped" {
         // Nothing ran; still counts as success per spec, so continue.
     }
@@ -330,6 +351,7 @@ fn trigger_dependents(state: &Arc<AppState>, upstream: &Flow, run: &Run) {
         }
         // Keyed fan-in: every upstream must have completed the same batch, once per key.
         let mut fan_in_event: Option<Value> = None;
+        let mut skip_down = carries_skip(run);
         if let Some(key) = after.key.as_deref() {
             let Some(value) = run.parameters.get(key) else {
                 continue;
@@ -350,6 +372,7 @@ fn trigger_dependents(state: &Arc<AppState>, upstream: &Flow, run: &Run) {
                         if latest.state.state_type == StateType::Completed
                             || latest.state.name == "Skipped" =>
                     {
+                        skip_down |= carries_skip(&latest);
                         upstream_runs.push(latest.id);
                     }
                     _ => {
@@ -416,13 +439,24 @@ fn trigger_dependents(state: &Arc<AppState>, upstream: &Flow, run: &Run) {
             ),
             _ => format!("{}-after-{}", downstream.name, run.name),
         };
+        // A skipped downstream is created already ended, with its parameters
+        // resolved as usual so its key value is right for anything after it.
+        let initial = if skip_down {
+            let mut s = State::named(StateName::Skipped);
+            s.message = Some(format!("upstream run {} was skipped", run.name));
+            s.details.insert("reason".into(), json!("upstream"));
+            s.details.insert("upstream_run".into(), json!(run.id));
+            s
+        } else {
+            State::new(StateType::Scheduled)
+        };
         let created = state.store.create_run_full(CreateRun {
             flow_id: downstream.id,
             name,
             parameters: serde_json::to_string(&params).unwrap_or_else(|_| "{}".into()),
             tags: serde_json::to_string(&downstream.tags).unwrap_or_else(|_| "[]".into()),
             created_by: format!("run:{}", run.id),
-            initial_state: Some(State::new(StateType::Scheduled)),
+            initial_state: Some(initial),
             priority: opts.priority,
             ..Default::default()
         });
@@ -443,7 +477,14 @@ fn trigger_dependents(state: &Arc<AppState>, upstream: &Flow, run: &Run) {
                         ev,
                     );
                 }
-                enqueue_run(state, &new_run, &downstream, None);
+                if skip_down {
+                    // Nothing to enqueue; the flows after this one follow now.
+                    if depth < MAX_SKIP_DEPTH {
+                        trigger_dependents_at(state, &downstream, &new_run, depth + 1);
+                    }
+                } else {
+                    enqueue_run(state, &new_run, &downstream, None);
+                }
             }
         }
     }

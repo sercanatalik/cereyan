@@ -21,7 +21,7 @@ Resource `run`; related `flow` and the run's tags. Offline the payload is `state
 | `run.cancelled` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run was cancelled |
 | `run.late` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by`, `scheduled_time`, `name` | The scheduled time passed 15 seconds ago and the run has not started |
 | `run.retrying` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | A retry attempt started |
-| `run.skipped` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by`, `reason` | The run ended Skipped: `on_overlap="skip"`, a backfill value already done, or a catch-up drop |
+| `run.skipped` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by`, `reason` | The run ended Skipped: `on_overlap="skip"`, a backfill value already done, a catch-up drop, a fire a person skipped (`reason` `user`), or an upstream run skipped that way (`reason` `upstream`) |
 | `run.paused` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run is waiting on `wait_for_input` |
 | `run.resumed` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run was answered and its next attempt scheduled |
 
@@ -60,6 +60,7 @@ Resource `schedule`, related `flow`.
 | `schedule.paused` | `schedule_id`, `reason` | A schedule was paused from the UI, the API, an MCP tool, a rule, or a disable window |
 | `schedule.resumed` | `schedule_id` | A schedule was resumed |
 | `schedule.catchup` | `schedule_id`, `policy`, `missed`, `created`, `dropped` | The server started and applied the catch-up policy to fires missed while it was down |
+| `schedule.skips_dropped` | `schedule_id`, `dropped` | An edit, or a restart that restored a code declaration, left skipped fires the schedule no longer produces, and they were forgotten |
 
 ## Resource events
 

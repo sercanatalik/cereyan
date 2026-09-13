@@ -32,6 +32,8 @@ A **dependency** makes one flow run after another. It is declared on the downstr
 
 `after="sales"` creates a downstream run whenever a `sales` run ends `Completed` or `Skipped`. A failed upstream creates nothing. Upstream parameters are copied to the downstream by name, and `after=("sales", {"for_day": "{{ run.parameters.day }}"})` renames or derives them with the same templates rules use.
 
+A run skipped by a person, a [skipped fire](schedules.md#skipping-fires) of its schedule, is carried down instead: the downstream run is created already `Skipped`, with `details.reason = "upstream"` and `details.upstream_run` naming the skipped run, and the flows after it follow the same way. Every other `Skipped` run (`on_overlap="skip"`, a backfill value already done, a catch-up drop) means nothing needed doing, and triggers the downstream like a `Completed` one.
+
 ## Fan-in with a key
 
 `after=["sales", "inventory"], batch_key="day"` runs the downstream once per value of `day`, after *every* listed upstream has a Completed or Skipped run for that value. The rules:
@@ -40,6 +42,7 @@ A **dependency** makes one flow run after another. It is declared on the downstr
 - The downstream run is created when the last upstream completes the batch, with the key value and the usual copied, templated, and default parameters, and a `flow.fan_in` event records the key, the value, and the upstream run ids.
 - At most one downstream run exists per key value: an existing run with that value, however it was created, blocks another. Rerunning an upstream for a day that already has a report creates nothing.
 - A failed upstream blocks the batch until a rerun of it completes.
+- When any upstream's latest run for the value was skipped by a person, or skipped because its own upstream was, the downstream run is created `Skipped` once the batch is complete.
 
 `batch_key` is required when `after` lists more than one flow; registration rejects the flow otherwise.
 

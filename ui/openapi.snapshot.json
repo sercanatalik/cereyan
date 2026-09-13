@@ -464,6 +464,31 @@
         },
         "type": "object"
       },
+      "DownstreamSkip": {
+        "description": "A flow that runs after the skipped one, directly or further down its chain.",
+        "properties": {
+          "fires": {
+            "description": "The skipped fires whose runs of this flow will be created Skipped.",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "flow": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "flow",
+          "project",
+          "fires"
+        ],
+        "type": "object"
+      },
       "EmitEventBody": {
         "properties": {
           "flow_id": {
@@ -1155,6 +1180,46 @@
         "required": [
           "next",
           "timezone"
+        ],
+        "type": "object"
+      },
+      "ProjectedFire": {
+        "description": "A fire past the look-ahead, computed from the schedule; no run exists for it yet.",
+        "properties": {
+          "projected": {
+            "description": "Always true.",
+            "type": "boolean"
+          },
+          "schedule_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "scheduled_time": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "boolean"
+          },
+          "skipped_at": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "skipped_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "schedule_id",
+          "scheduled_time",
+          "skipped",
+          "projected"
         ],
         "type": "object"
       },
@@ -2174,7 +2239,7 @@
               },
               {
                 "$ref": "#/components/schemas/i64",
-                "description": "Next fire time computed by the scheduler (not stored)."
+                "description": "Next fire that will run, computed by the scheduler (not stored)."
               }
             ]
           },
@@ -2199,6 +2264,11 @@
           },
           "schedule": {
             "$ref": "#/components/schemas/Schedule"
+          },
+          "skipped": {
+            "description": "Future fires skipped by a person, counted by the scheduler (not stored).",
+            "format": "int64",
+            "type": "integer"
           },
           "source": {
             "description": "`code` for schedules declared on the flow, `ui` for ones created in the\ninterface, `mcp` for ones created by an agent. Startup reconciliation\nsingles out `code` alone; every other value is left as it is.",
@@ -2423,6 +2493,61 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "SkipBody": {
+        "properties": {
+          "by": {
+            "description": "Who asked: `ui` or `api` (the default).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fires": {
+            "description": "Fire times to skip, in microseconds, as the upcoming list gives them.",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "next": {
+            "description": "Skip the next N fires not already skipped instead.",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "SkipResponse": {
+        "properties": {
+          "downstream": {
+            "items": {
+              "$ref": "#/components/schemas/DownstreamSkip"
+            },
+            "type": "array"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/ScheduleRow"
+          },
+          "skipped": {
+            "description": "The fires this request skipped.",
+            "items": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "schedule",
+          "skipped",
+          "downstream"
+        ],
         "type": "object"
       },
       "State": {
@@ -2664,6 +2789,57 @@
           "reason"
         ],
         "type": "object"
+      },
+      "UpcomingItem": {
+        "description": "One entry of the upcoming list: a run, or with `projected=N` a fire without one.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UpcomingRun"
+          },
+          {
+            "$ref": "#/components/schemas/ProjectedFire"
+          }
+        ]
+      },
+      "UpcomingRun": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Run"
+          },
+          {
+            "properties": {
+              "projected": {
+                "description": "Always false: this fire has a run.",
+                "type": "boolean"
+              },
+              "skipped": {
+                "description": "A person skipped this fire: the run ends Skipped at its time instead of starting.",
+                "type": "boolean"
+              },
+              "skipped_at": {
+                "description": "When it was skipped, in microseconds, when `skipped`.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "skipped_by": {
+                "description": "Who skipped it (`ui`, `api`), when `skipped`.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "skipped",
+              "projected"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "A materialized run in the upcoming list."
       },
       "VariableBody": {
         "properties": {
@@ -3852,6 +4028,19 @@
               "format": "int64",
               "type": "integer"
             }
+          },
+          {
+            "description": "Also list this many fires of each active schedule past its\nmaterialized runs, computed without creating runs (at most 100).",
+            "in": "query",
+            "name": "projected",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -3860,7 +4049,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/Run"
+                    "$ref": "#/components/schemas/UpcomingItem"
                   },
                   "type": "array"
                 }
@@ -5000,6 +5189,100 @@
                 }
               }
             },
+            "description": ""
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/schedules/{sid}/skips": {
+      "post": {
+        "operationId": "add_skips",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkipBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkipResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
+    "/api/schedules/{sid}/skips/{fire}": {
+      "delete": {
+        "operationId": "delete_skip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The skipped fire time, in microseconds",
+            "in": "path",
+            "name": "fire",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "422": {
             "description": ""
           }
         },

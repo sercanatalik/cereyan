@@ -53,6 +53,7 @@ pub enum EventName {
     SchedulePaused,
     ScheduleResumed,
     ScheduleCatchup,
+    ScheduleSkipsDropped,
     ResourceExhausted,
     RuleFired,
     RuleActionCompleted,
@@ -63,7 +64,7 @@ pub enum EventName {
 }
 
 impl EventName {
-    pub const ALL: [EventName; 32] = [
+    pub const ALL: [EventName; 33] = [
         EventName::RunScheduled,
         EventName::RunPending,
         EventName::RunRunning,
@@ -89,6 +90,7 @@ impl EventName {
         EventName::SchedulePaused,
         EventName::ScheduleResumed,
         EventName::ScheduleCatchup,
+        EventName::ScheduleSkipsDropped,
         EventName::ResourceExhausted,
         EventName::RuleFired,
         EventName::RuleActionCompleted,
@@ -125,6 +127,7 @@ impl EventName {
             EventName::SchedulePaused => "schedule.paused",
             EventName::ScheduleResumed => "schedule.resumed",
             EventName::ScheduleCatchup => "schedule.catchup",
+            EventName::ScheduleSkipsDropped => "schedule.skips_dropped",
             EventName::ResourceExhausted => "resource.exhausted",
             EventName::RuleFired => "rule.fired",
             EventName::RuleActionCompleted => "rule.action.completed",
@@ -161,9 +164,10 @@ impl EventName {
             | EventName::FlowDisabled
             | EventName::FlowEnabled
             | EventName::FlowFanIn => "flow",
-            EventName::SchedulePaused | EventName::ScheduleResumed | EventName::ScheduleCatchup => {
-                "schedule"
-            }
+            EventName::SchedulePaused
+            | EventName::ScheduleResumed
+            | EventName::ScheduleCatchup
+            | EventName::ScheduleSkipsDropped => "schedule",
             EventName::ResourceExhausted => "resource",
             EventName::RuleFired
             | EventName::RuleActionCompleted
@@ -187,7 +191,7 @@ impl EventName {
             EventName::RunCancelled => "The run was cancelled",
             EventName::RunLate => "The scheduled time passed 15 seconds ago and the run has not started",
             EventName::RunRetrying => "A retry attempt started",
-            EventName::RunSkipped => "The run ended Skipped: `on_overlap=\"skip\"`, a backfill value already done, or a catch-up drop",
+            EventName::RunSkipped => "The run ended Skipped: `on_overlap=\"skip\"`, a backfill value already done, a catch-up drop, a fire a person skipped (`reason` `user`), or an upstream run skipped that way (`reason` `upstream`)",
             EventName::RunPaused => "The run is waiting on `wait_for_input`",
             EventName::RunResumed => "The run was answered and its next attempt scheduled",
             EventName::TaskRunRunning => "The task started",
@@ -203,6 +207,7 @@ impl EventName {
             EventName::SchedulePaused => "A schedule was paused from the UI, the API, an MCP tool, a rule, or a disable window",
             EventName::ScheduleResumed => "A schedule was resumed",
             EventName::ScheduleCatchup => "The server started and applied the catch-up policy to fires missed while it was down",
+            EventName::ScheduleSkipsDropped => "An edit, or a restart that restored a code declaration, left skipped fires the schedule no longer produces, and they were forgotten",
             EventName::ResourceExhausted => "A run waited for a resource that had no capacity; recorded once per wait",
             EventName::RuleFired => "A rule matched an event and its actions started",
             EventName::RuleActionCompleted => "One action finished",
@@ -272,6 +277,7 @@ impl EventName {
             EventName::ScheduleCatchup => {
                 &["schedule_id", "policy", "missed", "created", "dropped"]
             }
+            EventName::ScheduleSkipsDropped => &["schedule_id", "dropped"],
             EventName::ResourceExhausted => &["resource"],
             EventName::RuleFired => &["rule_id", "rule", "event", "event_id"],
             EventName::RuleActionCompleted => &["rule_id", "action", "index", "detail"],
@@ -484,6 +490,7 @@ mod tests {
             "schedule.paused",
             "schedule.resumed",
             "schedule.catchup",
+            "schedule.skips_dropped",
             "resource.exhausted",
             "rule.fired",
             "rule.action.completed",

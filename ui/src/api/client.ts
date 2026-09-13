@@ -25,6 +25,14 @@ export type Counts = components["schemas"]["Counts"];
 export type RunsPage = components["schemas"]["RunsPage"];
 export type TaskRunsPage = components["schemas"]["TaskRunsPage"];
 export type LogsPage = components["schemas"]["LogsPage"];
+export type ScheduleRow = components["schemas"]["ScheduleRow"];
+export type UpcomingItem = components["schemas"]["UpcomingItem"];
+export type UpcomingRun = components["schemas"]["UpcomingRun"];
+
+/** A materialized run, as opposed to a fire projected past the look-ahead. */
+export function isUpcomingRun(item: UpcomingItem): item is UpcomingRun {
+  return "id" in item;
+}
 
 export class ApiError extends Error {
   status: number;

@@ -13,9 +13,12 @@ import {
   useGroupOpen,
 } from "@/components/grouped-rows";
 import { DOT_COLORS, StateBadge } from "@/components/ported/state-badge";
+import { RescheduleDialog } from "@/components/reschedule-dialog";
 import { RunForm } from "@/components/run-form";
 import { Tags } from "@/components/run-table";
+import { describeSchedule } from "@/components/schedule-editor";
 import { Page } from "@/components/shell";
+import { nextSchedule, SkipDialog } from "@/components/skip-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -30,8 +33,7 @@ import { Modal } from "@/components/ui/modal";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { type Group, groupBy, groupOf } from "@/lib/groups";
 import { useProject } from "@/lib/project";
-import { cn, relativeTime } from "@/lib/utils";
-import { describeSchedule } from "./flows.$flowId";
+import { cn, formatFire, relativeTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/flows/")({ component: FlowsPage });
 
@@ -73,12 +75,15 @@ function scheduleSummary(f: Flow): { words: string; next: string } {
       ? `${describeSchedule(first)} and ${f.schedules.length - 1} more`
       : describeSchedule(first);
   const nexts = active.map((s) => s.next_fire).filter((n): n is number => n != null);
-  if (nexts.length === 0) return { words, next: active.length ? "" : "paused" };
+  const skipped = active.reduce((n, s) => n + (s.skipped ?? 0), 0);
+  const note = skipped ? `${skipped} skipped` : "";
+  if (nexts.length === 0) return { words, next: active.length ? note : "paused" };
+  // next_fire is the next fire that will run, so a skipped one never shows here.
   return {
     words,
     next: `next ${relativeTime(Math.min(...nexts))
       .replace(" ago", " late")
-      .replace(" from now", "")}`,
+      .replace(" from now", "")}${note ? ` · ${note}` : ""}`,
   };
 }
 
@@ -89,6 +94,8 @@ function FlowsPage() {
   const [q, setQ] = useState("");
   const [target, setTarget] = useState<Flow | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [skipTarget, setSkipTarget] = useState<Flow | null>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<Flow | null>(null);
   const flows = useQuery({ queryKey: ["flows"], queryFn: async () => unwrap(await api.GET("/api/flows")) });
   const settings = useQuery({
     queryKey: ["settings"],
@@ -116,6 +123,22 @@ function FlowsPage() {
       if (!result.response.ok) throw new ApiError(result.response.status, result.error);
     },
     onSuccess: () => client.invalidateQueries({ queryKey: ["flows"] }),
+  });
+  const skipNext = useMutation({
+    mutationFn: async (flow: Flow) => {
+      const schedule = nextSchedule(flow);
+      if (!schedule) return;
+      unwrap(
+        await api.POST("/api/schedules/{sid}/skips", {
+          params: { path: { sid: schedule.id } },
+          body: { next: 1, by: "ui" },
+        }),
+      );
+    },
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["flows"] });
+      client.invalidateQueries({ queryKey: ["upcoming"] });
+    },
   });
   const lower = q.trim().toLowerCase();
   const list = (flows.data ?? []).filter(
@@ -180,6 +203,11 @@ function FlowsPage() {
           </Link>
         </div>
       ) : null}
+      {skipNext.error ? (
+        <div className="text-xs text-red-600" data-testid="skip-next-error">
+          {skipNext.error instanceof ApiError ? skipNext.error.message : String(skipNext.error)}
+        </div>
+      ) : null}
       <FlowGraph flows={list} />
       <Card className="gap-0 overflow-hidden py-0">
         <Table>
@@ -211,6 +239,9 @@ function FlowsPage() {
                 onDelete={(f) =>
                   window.confirm(`Delete flow ${f.project}/${f.name} and its runs?`) && remove.mutate(f)
                 }
+                onSkipNext={(f) => skipNext.mutate(f)}
+                onSkip={setSkipTarget}
+                onReschedule={setRescheduleTarget}
               />
             </GroupSection>
           ))}
@@ -241,6 +272,17 @@ function FlowsPage() {
           />
         ) : null}
       </Modal>
+      {skipTarget ? (
+        <SkipDialog key={skipTarget.id} flow={skipTarget} open onClose={() => setSkipTarget(null)} />
+      ) : null}
+      {rescheduleTarget ? (
+        <RescheduleDialog
+          key={rescheduleTarget.id}
+          flow={rescheduleTarget}
+          open
+          onClose={() => setRescheduleTarget(null)}
+        />
+      ) : null}
     </Page>
   );
 }
@@ -307,10 +349,16 @@ function GroupRows({
   flows,
   onRun,
   onDelete,
+  onSkipNext,
+  onSkip,
+  onReschedule,
 }: {
   flows: Flow[];
   onRun: (f: Flow) => void;
   onDelete: (f: Flow) => void;
+  onSkipNext: (f: Flow) => void;
+  onSkip: (f: Flow) => void;
+  onReschedule: (f: Flow) => void;
 }) {
   const navigate = useNavigate();
   return (
@@ -318,6 +366,7 @@ function GroupRows({
       {flows.map((f) => {
         const sched = scheduleSummary(f);
         const last = f.recent_runs[0];
+        const soonest = nextSchedule(f)?.next_fire ?? null;
         return (
           <Tr key={f.id} className={cn(!f.live && "text-muted-foreground")} data-flow-live={f.live}>
             <Td className="h-14">
@@ -397,6 +446,21 @@ function GroupRows({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    {f.schedules.length ? (
+                      <>
+                        <DropdownMenuItem disabled={soonest === null} onSelect={() => onSkipNext(f)}>
+                          Skip next run
+                          {soonest !== null ? (
+                            <span className="ml-auto pl-4 text-xs text-muted-foreground">
+                              {formatFire(soonest)}
+                            </span>
+                          ) : null}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => onSkip(f)}>Skip runs…</DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => onReschedule(f)}>Reschedule…</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                      </>
+                    ) : null}
                     <DropdownMenuItem
                       onSelect={() => navigate({ to: "/flows/$flowId", params: { flowId: String(f.id) } })}
                     >

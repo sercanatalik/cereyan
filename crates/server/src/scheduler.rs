@@ -1,7 +1,7 @@
 //! Schedules: materialize upcoming runs, dispatch them when due, mark late
 //! runs, apply catch-up on start, and persist the wake-up time.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -25,6 +25,16 @@ pub const PERSIST_EVERY_SECS: i64 = 60;
 pub const LAST_WAKEUP_KEY: &str = "scheduler.last_wakeup";
 /// Engines are warmed this long before a scheduled run is due.
 pub const PREWARM_SECS: i64 = 5;
+/// The mark a waiting run carries in its state details when a person skipped
+/// its fire: `details.skip = "user"`. `schedule_skip` is the durable record;
+/// the mark only saves the Due handler a lookup and never outlives the table.
+pub const SKIP_MARK: &str = "skip";
+const SKIP_BY_PERSON: &str = "user";
+
+/// Whether a waiting run belongs to a fire a person skipped.
+pub fn is_marked(run: &Run) -> bool {
+    run.state.details.get(SKIP_MARK).and_then(|v| v.as_str()) == Some(SKIP_BY_PERSON)
+}
 
 #[derive(Default)]
 pub struct Scheduler {
@@ -197,6 +207,7 @@ pub fn start(state: &Arc<AppState>) {
         if let Some(last) = last_wakeup {
             catch_up(state, &row, last, now);
         }
+        drop_lost_skips(state, &row);
         materialize(state, row.id);
     }
     let mut enabled: Vec<i64> = Vec::new();
@@ -220,14 +231,10 @@ pub fn start(state: &Arc<AppState>) {
     // Existing Scheduled runs with a scheduled time (materialized earlier) need timers.
     for run in state.index.active_runs() {
         if run.state.state_type == StateType::Scheduled {
-            if let Some(due) = state
-                .store
-                .get_run(run.id)
-                .ok()
-                .flatten()
-                .and_then(|r| r.scheduled_time)
-            {
-                arm_run(state, run.id, due);
+            if let Some(stored) = state.store.get_run(run.id).ok().flatten() {
+                if let Some(due) = stored.scheduled_time {
+                    arm_run(state, run.id, due, is_marked(&stored));
+                }
             }
         }
     }
@@ -245,6 +252,17 @@ fn catch_up(state: &Arc<AppState>, row: &ScheduleRow, last: i64, now: i64) {
         Ok(f) => f,
         Err(_) => return,
     };
+    // A skipped fire stays skipped whatever the policy.
+    let skips: HashSet<i64> = state
+        .store
+        .list_skips(row.id)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let fires: Vec<_> = fires
+        .into_iter()
+        .filter(|f| !skips.contains(&to_micros(*f)))
+        .collect();
     if fires.is_empty() {
         return;
     }
@@ -262,7 +280,7 @@ fn catch_up(state: &Arc<AppState>, row: &ScheduleRow, last: i64, now: i64) {
     };
     for fire in &chosen {
         let scheduled = to_micros(*fire);
-        if let Some(run) = create_scheduled_run(state, &flow, row, scheduled, "catchup") {
+        if let Some(run) = create_scheduled_run(state, &flow, row, scheduled, "catchup", false) {
             crate::dispatch::enqueue_run(state, &run, &flow, None);
         }
     }
@@ -283,6 +301,7 @@ fn create_scheduled_run(
     row: &ScheduleRow,
     scheduled: i64,
     created_by: &str,
+    skip: bool,
 ) -> Option<Run> {
     let options = FlowOptions::from_map(&flow.options);
     let mut params = serde_json::Map::new();
@@ -307,6 +326,12 @@ fn create_scheduled_run(
     } else {
         name
     };
+    let mut initial = State::new(StateType::Scheduled).with_timestamp(now_micros());
+    if skip {
+        initial
+            .details
+            .insert(SKIP_MARK.into(), json!(SKIP_BY_PERSON));
+    }
     let (run_id, _) = state
         .store
         .create_run_full(CreateRun {
@@ -315,7 +340,7 @@ fn create_scheduled_run(
             parameters: serde_json::to_string(&params).unwrap_or_else(|_| "{}".into()),
             tags: serde_json::to_string(&flow.tags).unwrap_or_else(|_| "[]".into()),
             created_by: created_by.into(),
-            initial_state: Some(State::new(StateType::Scheduled).with_timestamp(now_micros())),
+            initial_state: Some(initial),
             schedule_id: Some(row.id),
             scheduled_time: Some(scheduled),
             priority: options.priority,
@@ -342,6 +367,12 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
         return;
     };
     let now = now_micros();
+    let all_skips = state.store.list_skips(row.id).unwrap_or_default();
+    if all_skips.first().is_some_and(|t| *t <= now) {
+        // A passed skip is history: its run, if one was made, already ended Skipped.
+        let _ = state.store.delete_skips_before(row.id, now);
+    }
+    let skips: HashSet<i64> = all_skips.into_iter().filter(|t| *t > now).collect();
     let mut existing = state
         .store
         .future_runs_of_schedule(row.id, now)
@@ -353,8 +384,11 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
         .map(from_micros)
         .unwrap_or_else(Utc::now);
     let horizon = Utc::now() + chrono::Duration::seconds(LOOKAHEAD_MIN_SECS);
+    // Skipped fires do not count: the look-ahead keeps LOOKAHEAD_RUNS runs that
+    // will start and extends past skips, bounded by LOOKAHEAD_MAX in all.
+    let mut starting = existing.iter().filter(|r| !is_marked(r)).count();
     let mut created = 0;
-    while existing.len() < LOOKAHEAD_MAX && (existing.len() < LOOKAHEAD_RUNS || cursor < horizon) {
+    while existing.len() < LOOKAHEAD_MAX && (starting < LOOKAHEAD_RUNS || cursor < horizon) {
         let next = match row.schedule.next_after(cursor) {
             Ok(Some(n)) => n,
             _ => break,
@@ -364,7 +398,11 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
         }
         cursor = next;
         let scheduled = to_micros(next);
-        if let Some(run) = create_scheduled_run(state, &flow, &row, scheduled, "schedule") {
+        let skip = skips.contains(&scheduled);
+        if let Some(run) = create_scheduled_run(state, &flow, &row, scheduled, "schedule", skip) {
+            if !skip {
+                starting += 1;
+            }
             existing.push(run);
             created += 1;
         } else {
@@ -376,7 +414,7 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
     }
     for run in &existing {
         if let Some(due) = run.scheduled_time {
-            arm_run(state, run.id, due);
+            arm_run(state, run.id, due, is_marked(run));
         }
     }
     // Wake again when the earliest future run fires so the look-ahead is kept.
@@ -384,15 +422,24 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
         state.timer.remove_schedule_events(row.id);
         state.timer.push(first + 1_000, TimerEvent::Fire(row.id));
     }
-    let next_fire = existing.iter().filter_map(|r| r.scheduled_time).min();
+    let next_fire = existing
+        .iter()
+        .filter(|r| !is_marked(r))
+        .filter_map(|r| r.scheduled_time)
+        .min();
     let mut updated = row.clone();
     updated.next_fire = next_fire;
+    updated.skipped = skips.len() as i64;
     state.scheduler.put(updated);
 }
 
-fn arm_run(state: &Arc<AppState>, run_id: i64, due: i64) {
+fn arm_run(state: &Arc<AppState>, run_id: i64, due: i64, skipped: bool) {
     state.timer.remove_run_events(run_id);
     state.timer.push(due, TimerEvent::Due(run_id));
+    // A skipped fire's run never starts: nothing to mark late, no engine to warm.
+    if skipped {
+        return;
+    }
     state.timer.push(
         due + LATE_AFTER_SECS * 1_000_000,
         TimerEvent::LateCheck(run_id),
@@ -414,7 +461,194 @@ pub fn rebuild(state: &Arc<AppState>, schedule_id: i64) {
         return;
     }
     drop_unstarted(state, schedule_id);
+    if let Some(row) = state.scheduler.get(schedule_id) {
+        drop_lost_skips(state, &row);
+    }
     materialize(state, schedule_id);
+}
+
+/// The first `count` fire times of a schedule after `after`, in microseconds.
+pub fn fires_after(schedule: &Schedule, after: i64, count: usize) -> Vec<i64> {
+    let mut out = Vec::new();
+    let mut cursor = from_micros(after);
+    while out.len() < count {
+        match schedule.next_after(cursor) {
+            Ok(Some(next)) if next > cursor => {
+                out.push(to_micros(next));
+                cursor = next;
+            }
+            _ => break,
+        }
+    }
+    out
+}
+
+/// Forget skips whose fire time the schedule no longer produces, as after an
+/// edit or a restart that restored a code declaration, and record which.
+fn drop_lost_skips(state: &Arc<AppState>, row: &ScheduleRow) {
+    let now = now_micros();
+    let skips: Vec<i64> = state
+        .store
+        .list_skips(row.id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|t| *t > now)
+        .collect();
+    if skips.is_empty() {
+        return;
+    }
+    let produced: HashSet<i64> = fires_after(&row.schedule, now, LOOKAHEAD_MAX)
+        .into_iter()
+        .collect();
+    let lost: Vec<i64> = skips
+        .into_iter()
+        .filter(|t| !produced.contains(t))
+        .collect();
+    if lost.is_empty() {
+        return;
+    }
+    let _ = state.store.delete_skips(row.id, lost.clone());
+    let _ = state.record_engine_event(
+        EventName::ScheduleSkipsDropped,
+        None,
+        Some(row.flow_id),
+        json!({"schedule_id": row.id, "dropped": lost}),
+    );
+}
+
+fn describe_fire(fire: i64) -> String {
+    from_micros(fire).format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// Skip fires of a schedule: the ones listed, or the next `next` not yet
+/// skipped. Refuses past fires, times the schedule does not produce, and
+/// anything more than LOOKAHEAD_MAX fires ahead. Returns the fires skipped.
+pub fn skip_fires(
+    state: &Arc<AppState>,
+    row: &ScheduleRow,
+    fires: &[i64],
+    next: Option<usize>,
+    created_by: &str,
+) -> Result<Vec<i64>, String> {
+    let now = now_micros();
+    let ahead = fires_after(&row.schedule, now, LOOKAHEAD_MAX);
+    let chosen: Vec<i64> = match next {
+        Some(0) => return Err("next must be at least 1".into()),
+        Some(n) => {
+            let skipped: HashSet<i64> = state
+                .store
+                .list_skips(row.id)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .collect();
+            let open: Vec<i64> = ahead
+                .iter()
+                .copied()
+                .filter(|t| !skipped.contains(t))
+                .take(n)
+                .collect();
+            if open.len() < n {
+                return Err(format!(
+                    "only {} of the next {LOOKAHEAD_MAX} fires can still be skipped",
+                    open.len()
+                ));
+            }
+            open
+        }
+        None => {
+            if fires.is_empty() {
+                return Err("name the fires to skip, or pass next".into());
+            }
+            let produced: HashSet<i64> = ahead.iter().copied().collect();
+            for &fire in fires {
+                if fire <= now {
+                    return Err(format!("{} has passed", describe_fire(fire)));
+                }
+                if !produced.contains(&fire) {
+                    return Err(match ahead.last() {
+                        Some(last) if fire > *last => format!(
+                            "{} is more than {LOOKAHEAD_MAX} fires ahead",
+                            describe_fire(fire)
+                        ),
+                        _ => format!("{} is not a fire of this schedule", describe_fire(fire)),
+                    });
+                }
+            }
+            let mut chosen = fires.to_vec();
+            chosen.sort_unstable();
+            chosen.dedup();
+            chosen
+        }
+    };
+    state
+        .store
+        .add_skips(row.id, chosen.clone(), created_by)
+        .map_err(|e| e.to_string())?;
+    apply_skips(state, row.id);
+    Ok(chosen)
+}
+
+/// Undo a skip before its fire time. `Ok(false)` when there was no such skip.
+pub fn unskip_fire(state: &Arc<AppState>, schedule_id: i64, fire: i64) -> Result<bool, String> {
+    if fire <= now_micros() {
+        return Err(format!(
+            "{} has passed; its Skipped run is history",
+            describe_fire(fire)
+        ));
+    }
+    let removed = state
+        .store
+        .delete_skips(schedule_id, vec![fire])
+        .map_err(|e| e.to_string())?;
+    if removed == 0 {
+        return Ok(false);
+    }
+    apply_skips(state, schedule_id);
+    Ok(true)
+}
+
+/// Bring the waiting runs of a schedule in line with its skips after a change,
+/// then top the look-ahead up past any new ones.
+fn apply_skips(state: &Arc<AppState>, schedule_id: i64) {
+    if let Ok(changed) = state.store.sync_skip_marks(schedule_id) {
+        for id in changed {
+            if let Ok(Some(run)) = state.store.get_run(id) {
+                let st = run.state.clone();
+                state.index.update(id, |r| r.state = st);
+                if is_marked(&run) {
+                    // Due already enqueued it: take it back before an engine does.
+                    state.supervisor.dequeue(id);
+                }
+                if let Some(due) = run.scheduled_time {
+                    arm_run(state, id, due, is_marked(&run));
+                }
+                state.publish_run(&run);
+            }
+        }
+    }
+    materialize(state, schedule_id);
+    // A paused schedule is not materialized; its count still changes.
+    if let (Some(mut cached), Ok(Some(stored))) = (
+        state.scheduler.get(schedule_id),
+        state.store.get_schedule(schedule_id),
+    ) {
+        cached.skipped = stored.skipped;
+        state.scheduler.put(cached);
+    }
+    state.publish_schedule(schedule_id);
+}
+
+/// The time of a skipped fire arrived: its run ends Skipped without starting.
+fn end_skipped(state: &Arc<AppState>, run: &Run) {
+    let mut skipped = State::named(cereyan_core::StateName::Skipped);
+    skipped.message = Some("skipped by a person".into());
+    skipped
+        .details
+        .insert("reason".into(), json!(SKIP_BY_PERSON));
+    let _ = state.transition_run(run.id, skipped, false);
+    if let (Some(schedule_id), Some(fire)) = (run.schedule_id, run.scheduled_time) {
+        let _ = state.store.delete_skips(schedule_id, vec![fire]);
+    }
 }
 
 pub fn drop_unstarted(state: &Arc<AppState>, schedule_id: i64) {
@@ -546,6 +780,10 @@ fn handle(state: &Arc<AppState>, event: TimerEvent) {
             if run.state.state_type != StateType::Scheduled || run.engine_pid.is_some() {
                 return;
             }
+            if is_marked(&run) {
+                end_skipped(state, &run);
+                return;
+            }
             let Some(flow) = state.store.get_flow(run.flow_id).ok().flatten() else {
                 return;
             };
@@ -558,6 +796,7 @@ fn handle(state: &Arc<AppState>, event: TimerEvent) {
             if run.state.state_type == StateType::Scheduled
                 && run.engine_pid.is_none()
                 && run.state.name != "Late"
+                && !is_marked(&run)
             {
                 let mut late = State::named(cereyan_core::StateName::Late);
                 late.message = run.state.message.clone();

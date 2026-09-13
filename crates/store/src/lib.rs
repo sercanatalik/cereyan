@@ -225,6 +225,38 @@ impl Store {
         self.write(|reply| WriteCommand::DeleteUnstartedRuns { schedule_id, reply })
     }
 
+    /// Record skipped fires of a schedule; returns how many were new.
+    pub fn add_skips(&self, schedule_id: i64, fires: Vec<i64>, created_by: &str) -> Result<usize> {
+        self.write(|reply| WriteCommand::AddSkips {
+            schedule_id,
+            fires,
+            created_by: created_by.into(),
+            reply,
+        })
+    }
+
+    /// Forget skipped fires of a schedule; returns how many existed.
+    pub fn delete_skips(&self, schedule_id: i64, fires: Vec<i64>) -> Result<usize> {
+        self.write(|reply| WriteCommand::DeleteSkips {
+            schedule_id,
+            fires,
+            reply,
+        })
+    }
+
+    pub fn delete_skips_before(&self, schedule_id: i64, before: i64) -> Result<usize> {
+        self.write(|reply| WriteCommand::DeleteSkipsBefore {
+            schedule_id,
+            before,
+            reply,
+        })
+    }
+
+    /// Mark the unstarted runs of skipped fires and unmark the others.
+    pub fn sync_skip_marks(&self, schedule_id: i64) -> Result<Vec<i64>> {
+        self.write(|reply| WriteCommand::SyncSkipMarks { schedule_id, reply })
+    }
+
     pub fn create_backfill(&self, b: writer::CreateBackfill) -> Result<(i64, Id)> {
         self.write(|reply| WriteCommand::CreateBackfill(b, reply))
     }

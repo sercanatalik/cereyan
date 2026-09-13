@@ -1,13 +1,14 @@
 //! Schedule CRUD, pause and resume, upcoming runs, and previews.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use cereyan_core::schedule::{CatchupPolicy, Schedule};
-use cereyan_core::{now_micros, Run, ScheduleRow};
-use cereyan_store::{ListRunsFilter, SchedulePatch, ScheduleWrite};
+use cereyan_core::{now_micros, Flow, FlowOptions, Run, ScheduleRow};
+use cereyan_store::{ListRunsFilter, SchedulePatch, ScheduleWrite, StoreError};
 use serde::{Deserialize, Serialize};
 
 use super::error::{ApiError, ApiResult};
@@ -164,9 +165,10 @@ pub async fn patch_schedule(
     Ok(Json(patch_schedule_inner(&state, sid, body).await?))
 }
 
-/// Retime a schedule. A spec change marks the row `persist`, after which the
-/// flow's own declaration no longer governs it: `scheduler::register` skips
-/// every persisted row. Callers that can explain that to a person should.
+/// Retime a schedule. The row keeps its `persist` flag unless the body sets
+/// it, so an edit to a code-declared schedule lasts until the next start, when
+/// `sync_code_schedules` applies the declaration again; `persist: true` keeps
+/// the edit and detaches the row from the declaration for good.
 pub async fn patch_schedule_inner(
     state: &Arc<AppState>,
     sid: i64,
@@ -211,7 +213,7 @@ pub async fn patch_schedule_inner(
                 spec: Some(serde_json::to_string(&schedule).unwrap_or_default()),
                 catchup: body.catchup.map(|c| c.as_str().to_string()),
                 catchup_max: body.catchup_max,
-                persist: body.persist.or(Some(true)),
+                persist: body.persist,
                 ..Default::default()
             },
         )?;
@@ -284,20 +286,249 @@ pub async fn resume_schedule(
     Ok(Json(decorate(&state, row)))
 }
 
-#[utoipa::path(get, path = "/api/flows/{id}/upcoming", params(("id" = i64, Path)), responses((status = 200, body = Vec<Run>)))]
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct UpcomingQuery {
+    /// Also list this many fires of each active schedule past its
+    /// materialized runs, computed without creating runs (at most 100).
+    #[serde(default)]
+    pub projected: Option<usize>,
+}
+
+/// A materialized run in the upcoming list.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct UpcomingRun {
+    #[serde(flatten)]
+    pub run: Run,
+    /// A person skipped this fire: the run ends Skipped at its time instead of starting.
+    pub skipped: bool,
+    /// Who skipped it (`ui`, `api`), when `skipped`.
+    pub skipped_by: Option<String>,
+    /// When it was skipped, in microseconds, when `skipped`.
+    pub skipped_at: Option<i64>,
+    /// Always false: this fire has a run.
+    pub projected: bool,
+}
+
+/// A fire past the look-ahead, computed from the schedule; no run exists for it yet.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ProjectedFire {
+    pub schedule_id: i64,
+    pub scheduled_time: i64,
+    pub skipped: bool,
+    pub skipped_by: Option<String>,
+    pub skipped_at: Option<i64>,
+    /// Always true.
+    pub projected: bool,
+}
+
+/// One entry of the upcoming list: a run, or with `projected=N` a fire without one.
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(untagged)]
+pub enum UpcomingItem {
+    Run(Box<UpcomingRun>),
+    Projected(ProjectedFire),
+}
+
+impl UpcomingItem {
+    fn scheduled_time(&self) -> i64 {
+        match self {
+            UpcomingItem::Run(r) => r.run.scheduled_time.unwrap_or(r.run.created_at),
+            UpcomingItem::Projected(p) => p.scheduled_time,
+        }
+    }
+}
+
+#[utoipa::path(get, path = "/api/flows/{id}/upcoming", params(("id" = i64, Path), UpcomingQuery), responses((status = 200, body = Vec<UpcomingItem>)))]
 pub async fn upcoming_runs(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
-) -> ApiResult<Json<Vec<Run>>> {
+    Query(q): Query<UpcomingQuery>,
+) -> ApiResult<Json<Vec<UpcomingItem>>> {
+    let now = now_micros();
     let page = state.store.list_runs(&ListRunsFilter {
         flow_id: Some(id),
         state_type: Some("Scheduled".into()),
-        scheduled_after: Some(now_micros()),
+        scheduled_after: Some(now),
         sort: Some("scheduled_asc".into()),
         limit: Some(200),
         ..Default::default()
     })?;
-    Ok(Json(page.items))
+    let schedules = state.scheduler.for_flow(id);
+    // (schedule, fire) -> (when it was skipped, by whom)
+    let mut skips: HashMap<(i64, i64), (i64, String)> = HashMap::new();
+    for row in &schedules {
+        for (fire, at, by) in state.store.list_skip_rows(row.id)? {
+            skips.insert((row.id, fire), (at, by));
+        }
+    }
+    let mut last: HashMap<i64, i64> = HashMap::new();
+    let mut out: Vec<UpcomingItem> = Vec::with_capacity(page.items.len());
+    for run in page.items {
+        if let (Some(sid), Some(at)) = (run.schedule_id, run.scheduled_time) {
+            let latest = last.entry(sid).or_insert(at);
+            *latest = (*latest).max(at);
+        }
+        let skipped = scheduler::is_marked(&run);
+        let made = run
+            .schedule_id
+            .zip(run.scheduled_time)
+            .and_then(|key| skips.get(&key))
+            .filter(|_| skipped);
+        out.push(UpcomingItem::Run(Box::new(UpcomingRun {
+            skipped_by: made.map(|(_, by)| by.clone()),
+            skipped_at: made.map(|(at, _)| *at),
+            run,
+            skipped,
+            projected: false,
+        })));
+    }
+    let count = q.projected.unwrap_or(0).min(scheduler::LOOKAHEAD_MAX);
+    if count > 0 {
+        for row in state
+            .scheduler
+            .for_flow(id)
+            .into_iter()
+            .filter(|r| r.active)
+        {
+            let from = last.get(&row.id).copied().unwrap_or(now).max(now);
+            for fire in scheduler::fires_after(&row.schedule, from, count) {
+                let made = skips.get(&(row.id, fire));
+                out.push(UpcomingItem::Projected(ProjectedFire {
+                    schedule_id: row.id,
+                    scheduled_time: fire,
+                    skipped: made.is_some(),
+                    skipped_by: made.map(|(_, by)| by.clone()),
+                    skipped_at: made.map(|(at, _)| *at),
+                    projected: true,
+                }));
+            }
+        }
+        out.sort_by_key(UpcomingItem::scheduled_time);
+    }
+    Ok(Json(out))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct SkipBody {
+    /// Fire times to skip, in microseconds, as the upcoming list gives them.
+    #[serde(default)]
+    pub fires: Vec<i64>,
+    /// Skip the next N fires not already skipped instead.
+    #[serde(default)]
+    pub next: Option<usize>,
+    /// Who asked: `ui` or `api` (the default).
+    #[serde(default)]
+    pub by: Option<String>,
+}
+
+/// A flow that runs after the skipped one, directly or further down its chain.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct DownstreamSkip {
+    pub flow: String,
+    pub project: String,
+    /// The skipped fires whose runs of this flow will be created Skipped.
+    pub fires: Vec<i64>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct SkipResponse {
+    pub schedule: ScheduleRow,
+    /// The fires this request skipped.
+    pub skipped: Vec<i64>,
+    pub downstream: Vec<DownstreamSkip>,
+}
+
+/// Flows that run after `flow`, directly or further down, within its project.
+fn downstream_of(state: &AppState, flow: &Flow) -> Result<Vec<Flow>, StoreError> {
+    let flows = state.store.list_flows(Some(&flow.project))?;
+    let mut out: Vec<Flow> = Vec::new();
+    let mut frontier = vec![flow.name.clone()];
+    while let Some(name) = frontier.pop() {
+        for f in &flows {
+            let after_it = FlowOptions::from_map(&f.options)
+                .after
+                .map(|a| a.depends_on(&name))
+                .unwrap_or(false);
+            if after_it && f.id != flow.id && !out.iter().any(|o| o.id == f.id) {
+                frontier.push(f.name.clone());
+                out.push(f.clone());
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[utoipa::path(post, path = "/api/schedules/{sid}/skips", params(("sid" = i64, Path)), request_body = SkipBody, responses((status = 200, body = SkipResponse), (status = 404), (status = 422)))]
+pub async fn add_skips(
+    State(state): State<Arc<AppState>>,
+    Path(sid): Path<i64>,
+    Json(body): Json<SkipBody>,
+) -> ApiResult<Json<SkipResponse>> {
+    let row = state
+        .store
+        .get_schedule(sid)?
+        .ok_or_else(|| ApiError::NotFound("schedule not found".into()))?;
+    let by = match body.by.as_deref() {
+        None | Some("api") => "api",
+        Some("ui") => "ui",
+        Some(other) => {
+            return Err(ApiError::Unprocessable(format!(
+                "by must be ui or api, not {other}"
+            )))
+        }
+    };
+    let st = state.clone();
+    let target = row.clone();
+    let skipped = tokio::task::spawn_blocking(move || {
+        scheduler::skip_fires(&st, &target, &body.fires, body.next, by)
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?
+    .map_err(ApiError::Unprocessable)?;
+    let downstream = match state.store.get_flow(row.flow_id)? {
+        Some(flow) => downstream_of(&state, &flow)?
+            .into_iter()
+            .map(|f| DownstreamSkip {
+                flow: f.name,
+                project: f.project,
+                fires: skipped.clone(),
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    let row = state
+        .store
+        .get_schedule(sid)?
+        .ok_or_else(|| ApiError::NotFound("schedule not found".into()))?;
+    Ok(Json(SkipResponse {
+        schedule: decorate(&state, row),
+        skipped,
+        downstream,
+    }))
+}
+
+#[utoipa::path(delete, path = "/api/schedules/{sid}/skips/{fire}", params(("sid" = i64, Path), ("fire" = i64, Path, description = "The skipped fire time, in microseconds")), responses((status = 200, body = ScheduleRow), (status = 404), (status = 422)))]
+pub async fn delete_skip(
+    State(state): State<Arc<AppState>>,
+    Path((sid, fire)): Path<(i64, i64)>,
+) -> ApiResult<Json<ScheduleRow>> {
+    state
+        .store
+        .get_schedule(sid)?
+        .ok_or_else(|| ApiError::NotFound("schedule not found".into()))?;
+    let st = state.clone();
+    let found = tokio::task::spawn_blocking(move || scheduler::unskip_fire(&st, sid, fire))
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .map_err(ApiError::Unprocessable)?;
+    if !found {
+        return Err(ApiError::NotFound("no skip at that time".into()));
+    }
+    let row = state
+        .store
+        .get_schedule(sid)?
+        .ok_or_else(|| ApiError::NotFound("schedule not found".into()))?;
+    Ok(Json(decorate(&state, row)))
 }
 
 #[utoipa::path(post, path = "/api/flows/{id}/pause", params(("id" = i64, Path)), responses((status = 200, description = "All schedules paused")))]

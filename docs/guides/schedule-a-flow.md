@@ -47,6 +47,10 @@ A slow flow on a fast schedule needs a policy. `max_concurrent=1` with `on_overl
 
 Pause from the flow page, `POST /api/schedules/{id}/pause`, the MCP `pause_schedule` tool, or a rule's `pause_schedule` action. Pausing removes the schedule's not-yet-started runs; resuming materialises them again. `disable_after=(count, window, persist)` pauses automatically after repeated failures.
 
+## Skip a run
+
+To stop one run without pausing the schedule, open the flow's menu on the Flows page: **Skip next run** skips the next fire, and **Skip runs…** opens a checklist of upcoming fires filled by a *Skip the next N* stepper or an *Until a time* field. The flow page's **Upcoming** tab does the same row by row or for several rows at once, and lists fires past the materialised runs as projected so you can skip one days ahead. A skipped fire ends `Skipped` at its time without starting, and so do the runs of the flows declared `after=` it; **Undo** takes a skip back until its time. See [Skipping fires](../concepts/schedules.md#skipping-fires).
+
 ## Inspect through the API
 
 ```{.python fixture:served}
@@ -59,6 +63,6 @@ assert len(upcoming) >= 1
 
 ## Edit at runtime
 
-The flow page's schedule editor changes a code-declared schedule in place and previews the next fire times (`POST /api/schedules/preview`). Edits last until the next restart re-applies the code declaration, unless marked *persist*.
+**Reschedule…**, in the Flows page menu and beside the schedule summary on the flow page, edits a cron schedule as a daily, weekly, or monthly time in a timezone, or as raw cron, with its catch-up options, and shows the coming week before and after the change with what saving replaces and the skips it would drop. Interval and RRule schedules open in the Schedules tab's editor, which previews the next fire times (`POST /api/schedules/preview`). An edit to a code-declared schedule lasts until the next restart re-applies the declaration, unless the request sets `persist: true`.
 
 Related: [Schedules](../concepts/schedules.md), [Backfill a date range](backfill.md).

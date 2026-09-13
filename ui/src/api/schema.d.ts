@@ -661,6 +661,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/schedules/{sid}/skips": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["add_skips"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/schedules/{sid}/skips/{fire}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete_skip"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedules/preview": {
         parameters: {
             query?: never;
@@ -977,6 +1009,13 @@ export interface components {
             parameters?: Record<string, never>;
             tags?: string[];
         };
+        /** @description A flow that runs after the skipped one, directly or further down its chain. */
+        DownstreamSkip: {
+            /** @description The skipped fires whose runs of this flow will be created Skipped. */
+            fires: number[];
+            flow: string;
+            project: string;
+        };
         EmitEventBody: {
             /** Format: int64 */
             flow_id?: number | null;
@@ -1206,6 +1245,19 @@ export interface components {
         PreviewResponse: {
             next: number[];
             timezone: string;
+        };
+        /** @description A fire past the look-ahead, computed from the schedule; no run exists for it yet. */
+        ProjectedFire: {
+            /** @description Always true. */
+            projected: boolean;
+            /** Format: int64 */
+            schedule_id: number;
+            /** Format: int64 */
+            scheduled_time: number;
+            skipped: boolean;
+            /** Format: int64 */
+            skipped_at?: number | null;
+            skipped_by?: string | null;
         };
         ReleaseRequest: {
             /** Format: int64 */
@@ -1513,6 +1565,11 @@ export interface components {
             persist: boolean;
             schedule: components["schemas"]["Schedule"];
             /**
+             * Format: int64
+             * @description Future fires skipped by a person, counted by the scheduler (not stored).
+             */
+            skipped?: number;
+            /**
              * @description `code` for schedules declared on the flow, `ui` for ones created in the
              *     interface, `mcp` for ones created by an agent. Startup reconciliation
              *     singles out `code` alone; every other value is left as it is.
@@ -1574,6 +1631,20 @@ export interface components {
             /** Format: int64 */
             retain_days?: number | null;
         };
+        SkipBody: {
+            /** @description Who asked: `ui` or `api` (the default). */
+            by?: string | null;
+            /** @description Fire times to skip, in microseconds, as the upcoming list gives them. */
+            fires?: number[];
+            /** @description Skip the next N fires not already skipped instead. */
+            next?: number | null;
+        };
+        SkipResponse: {
+            downstream: components["schemas"]["DownstreamSkip"][];
+            schedule: components["schemas"]["ScheduleRow"];
+            /** @description The fires this request skipped. */
+            skipped: number[];
+        };
         State: {
             details?: Record<string, never>;
             message?: string | null;
@@ -1631,6 +1702,22 @@ export interface components {
             current?: null | components["schemas"]["State"];
             error: string;
             reason: string;
+        };
+        /** @description One entry of the upcoming list: a run, or with `projected=N` a fire without one. */
+        UpcomingItem: components["schemas"]["UpcomingRun"] | components["schemas"]["ProjectedFire"];
+        /** @description A materialized run in the upcoming list. */
+        UpcomingRun: components["schemas"]["Run"] & {
+            /** @description Always false: this fire has a run. */
+            projected: boolean;
+            /** @description A person skipped this fire: the run ends Skipped at its time instead of starting. */
+            skipped: boolean;
+            /**
+             * Format: int64
+             * @description When it was skipped, in microseconds, when `skipped`.
+             */
+            skipped_at?: number | null;
+            /** @description Who skipped it (`ui`, `api`), when `skipped`. */
+            skipped_by?: string | null;
         };
         VariableBody: {
             name: string;
@@ -2300,7 +2387,13 @@ export interface operations {
     };
     upcoming_runs: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description Also list this many fires of each active schedule past its
+                 *     materialized runs, computed without creating runs (at most 100).
+                 */
+                projected?: number | null;
+            };
             header?: never;
             path: {
                 id: number;
@@ -2314,7 +2407,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Run"][];
+                    "application/json": components["schemas"]["UpcomingItem"][];
                 };
             };
         };
@@ -3038,6 +3131,78 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ScheduleRow"];
                 };
+            };
+        };
+    };
+    add_skips: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sid: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkipBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkipResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_skip: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The skipped fire time, in microseconds */
+                fire: number;
+                sid: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRow"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

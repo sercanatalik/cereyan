@@ -102,6 +102,8 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         schedules::delete_schedule,
         schedules::pause_schedule,
         schedules::resume_schedule,
+        schedules::add_skips,
+        schedules::delete_skip,
         schedules::upcoming_runs,
         schedules::pause_flow,
         schedules::resume_flow,
@@ -177,6 +179,12 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         schedules::SchedulePatchBody,
         schedules::PreviewBody,
         schedules::PreviewResponse,
+        schedules::SkipBody,
+        schedules::SkipResponse,
+        schedules::DownstreamSkip,
+        schedules::UpcomingItem,
+        schedules::UpcomingRun,
+        schedules::ProjectedFire,
         backfills::BackfillBody,
         backfills::BackfillStatus,
         backfills::PrefilterBody,
@@ -251,6 +259,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/api/schedules/{sid}/resume",
             post(schedules::resume_schedule),
+        )
+        .route("/api/schedules/{sid}/skips", post(schedules::add_skips))
+        .route(
+            "/api/schedules/{sid}/skips/{fire}",
+            axum::routing::delete(schedules::delete_skip),
         )
         .route("/api/backfills/{id}", get(backfills::get_backfill))
         .route(

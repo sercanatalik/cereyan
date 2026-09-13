@@ -591,6 +591,34 @@ impl Store {
         self.with_reader(|conn| Ok(conn.query_row(&sql, [id], schedule_from_row).optional()?))
     }
 
+    /// Skipped fire times of a schedule, ascending.
+    pub fn list_skips(&self, schedule_id: i64) -> Result<Vec<i64>> {
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT fire_time FROM schedule_skip WHERE schedule_id = ?1 ORDER BY fire_time",
+            )?;
+            let rows = stmt
+                .query_map([schedule_id], |r| r.get::<_, i64>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Skips of a schedule with when and by whom each was made:
+    /// `(fire_time, created_at, created_by)`, ascending by fire time.
+    pub fn list_skip_rows(&self, schedule_id: i64) -> Result<Vec<(i64, i64, String)>> {
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT fire_time, created_at, created_by FROM schedule_skip
+                 WHERE schedule_id = ?1 ORDER BY fire_time",
+            )?;
+            let rows = stmt
+                .query_map([schedule_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
     /// Scheduled runs of a schedule with a scheduled time after `after`, ascending.
     pub fn future_runs_of_schedule(&self, schedule_id: i64, after: i64) -> Result<Vec<Run>> {
         let sql = format!(

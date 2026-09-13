@@ -738,7 +738,7 @@
       "name": "create_schedule"
     },
     {
-      "description": "Retime an existing schedule. Editing one that was declared in the flow's code detaches it permanently: the declaration in the Python source stops governing it, and the result says so. Returns the schedule and the next few times it will fire.",
+      "description": "Retime an existing schedule. Editing one that was declared in the flow's code lasts until the server restarts, when the declaration in the Python source applies again, and the result says so. Returns the schedule and the next few times it will fire.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

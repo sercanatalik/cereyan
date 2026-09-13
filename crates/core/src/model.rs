@@ -171,9 +171,12 @@ pub struct ScheduleRow {
     pub persist: bool,
     pub created_at: Micros,
     pub updated_at: Micros,
-    /// Next fire time computed by the scheduler (not stored).
+    /// Next fire that will run, computed by the scheduler (not stored).
     #[serde(default)]
     pub next_fire: Option<Micros>,
+    /// Future fires skipped by a person, counted by the scheduler (not stored).
+    #[serde(default)]
+    pub skipped: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

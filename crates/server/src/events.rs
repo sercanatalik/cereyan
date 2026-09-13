@@ -31,20 +31,22 @@ pub fn emit_run_event(state: &AppState, run: &Run) {
     let Some(name) = run_event_name(run) else {
         return;
     };
-    let _ = state.record_engine_event(
-        name,
-        Some(run.id),
-        Some(run.flow_id),
-        json!({
-            "state": run.state.name,
-            "state_type": run.state.state_type,
-            "message": run.state.message,
-            "flow": run.flow_name,
-            "project": run.project,
-            "parameters": run.parameters,
-            "created_by": run.created_by,
-        }),
-    );
+    let mut payload = json!({
+        "state": run.state.name,
+        "state_type": run.state.state_type,
+        "message": run.state.message,
+        "flow": run.flow_name,
+        "project": run.project,
+        "parameters": run.parameters,
+        "created_by": run.created_by,
+    });
+    // A skip by a person, or one carried down from an upstream, says so.
+    if name == EventName::RunSkipped {
+        if let Some(reason) = run.state.details.get("reason") {
+            payload["reason"] = reason.clone();
+        }
+    }
+    let _ = state.record_engine_event(name, Some(run.id), Some(run.flow_id), payload);
 }
 
 pub fn task_run_event_name(t: &TaskRun) -> Option<EventName> {

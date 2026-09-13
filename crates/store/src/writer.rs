@@ -256,6 +256,29 @@ pub enum WriteCommand {
         schedule_id: i64,
         reply: Reply<bool>,
     },
+    /// Record skipped fires of a schedule; existing ones are left as they are.
+    AddSkips {
+        schedule_id: i64,
+        fires: Vec<i64>,
+        created_by: String,
+        reply: Reply<usize>,
+    },
+    DeleteSkips {
+        schedule_id: i64,
+        fires: Vec<i64>,
+        reply: Reply<usize>,
+    },
+    /// Forget skips whose fire time is at or before `before`.
+    DeleteSkipsBefore {
+        schedule_id: i64,
+        before: i64,
+        reply: Reply<usize>,
+    },
+    /// Mark unstarted runs of skipped fires and unmark the rest; returns the runs changed.
+    SyncSkipMarks {
+        schedule_id: i64,
+        reply: Reply<Vec<i64>>,
+    },
     /// Delete Scheduled runs of a schedule that were never picked up; returns their ids.
     DeleteUnstartedRuns {
         schedule_id: i64,
@@ -505,6 +528,32 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
             patch,
             reply,
         } => ack(reply, patch_schedule(conn, schedule_id, &patch)),
+        WriteCommand::AddSkips {
+            schedule_id,
+            fires,
+            created_by,
+            reply,
+        } => ack(reply, add_skips(conn, schedule_id, &fires, &created_by)),
+        WriteCommand::DeleteSkips {
+            schedule_id,
+            fires,
+            reply,
+        } => ack(reply, delete_skips(conn, schedule_id, &fires)),
+        WriteCommand::DeleteSkipsBefore {
+            schedule_id,
+            before,
+            reply,
+        } => ack(
+            reply,
+            conn.execute(
+                "DELETE FROM schedule_skip WHERE schedule_id = ?1 AND fire_time <= ?2",
+                params![schedule_id, before],
+            )
+            .map_err(Into::into),
+        ),
+        WriteCommand::SyncSkipMarks { schedule_id, reply } => {
+            ack(reply, sync_skip_marks(conn, schedule_id))
+        }
         WriteCommand::DeleteSchedule { schedule_id, reply } => ack(reply, {
             let _ = conn.execute(
                 "DELETE FROM run WHERE schedule_id = ?1 AND state_type = 'Scheduled' AND engine_pid IS NULL",
@@ -1333,6 +1382,60 @@ fn patch_schedule(conn: &Connection, id: i64, p: &SchedulePatch) -> Result<bool>
     );
     let n = conn.execute(&sql, rusqlite::params_from_iter(args.iter()))?;
     Ok(n > 0)
+}
+
+fn add_skips(
+    conn: &Connection,
+    schedule_id: i64,
+    fires: &[i64],
+    created_by: &str,
+) -> Result<usize> {
+    let now = now_micros();
+    let mut stmt = conn.prepare_cached(
+        "INSERT OR IGNORE INTO schedule_skip (schedule_id, fire_time, created_at, created_by)
+         VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    let mut added = 0;
+    for fire in fires {
+        added += stmt.execute(params![schedule_id, fire, now, created_by])?;
+    }
+    Ok(added)
+}
+
+fn delete_skips(conn: &Connection, schedule_id: i64, fires: &[i64]) -> Result<usize> {
+    let mut stmt =
+        conn.prepare_cached("DELETE FROM schedule_skip WHERE schedule_id = ?1 AND fire_time = ?2")?;
+    let mut deleted = 0;
+    for fire in fires {
+        deleted += stmt.execute(params![schedule_id, fire])?;
+    }
+    Ok(deleted)
+}
+
+/// The mark is `state_details.skip = "user"` on a run still waiting in Scheduled.
+/// A mark is only ever derived from `schedule_skip`, so this is the one place
+/// that sets or clears it.
+fn sync_skip_marks(conn: &Connection, schedule_id: i64) -> Result<Vec<i64>> {
+    let mut changed = Vec::new();
+    for sql in [
+        "UPDATE run SET state_details = json_set(state_details, '$.skip', 'user')
+         WHERE schedule_id = ?1 AND state_type = 'Scheduled' AND engine_pid IS NULL
+           AND json_extract(state_details, '$.skip') IS NULL
+           AND scheduled_time IN (SELECT fire_time FROM schedule_skip WHERE schedule_id = ?1)
+         RETURNING id",
+        "UPDATE run SET state_details = json_remove(state_details, '$.skip')
+         WHERE schedule_id = ?1 AND state_type = 'Scheduled'
+           AND json_extract(state_details, '$.skip') IS NOT NULL
+           AND scheduled_time NOT IN (SELECT fire_time FROM schedule_skip WHERE schedule_id = ?1)
+         RETURNING id",
+    ] {
+        let mut stmt = conn.prepare_cached(sql)?;
+        let ids = stmt
+            .query_map(params![schedule_id], |r| r.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        changed.extend(ids);
+    }
+    Ok(changed)
 }
 
 fn append_event(conn: &Connection, e: &NewEvent) -> Result<(i64, Id)> {

@@ -182,10 +182,11 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
 | `id` | path | integer (int64) | yes |  |
+| `projected` | query | integer or null | no | Also list this many fires of each active schedule past its materialized runs, computed without creating runs (at most 100). |
 
 | Status | Body |
 |---|---|
-| 200 | [`Run`](#run)[] (application/json) |
+| 200 | [`UpcomingItem`](#upcomingitem)[] (application/json) |
 
 ## Runs
 
@@ -449,6 +450,33 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | Status | Body |
 |---|---|
 | 200 | [`ScheduleRow`](#schedulerow) (application/json) |
+
+### `POST /api/schedules/{sid}/skips`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `sid` | path | integer (int64) | yes |  |
+
+**Request body** (application/json): [`SkipBody`](#skipbody)
+
+| Status | Body |
+|---|---|
+| 200 | [`SkipResponse`](#skipresponse) (application/json) |
+| 404 | no body |
+| 422 | no body |
+
+### `DELETE /api/schedules/{sid}/skips/{fire}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `sid` | path | integer (int64) | yes |  |
+| `fire` | path | integer (int64) | yes | The skipped fire time, in microseconds |
+
+| Status | Body |
+|---|---|
+| 200 | [`ScheduleRow`](#schedulerow) (application/json) |
+| 404 | no body |
+| 422 | no body |
 
 ## Backfills
 
@@ -891,6 +919,16 @@ know it yet (offline handoff from another project).
 | `parameters` | object | no |  |
 | `tags` | array of string | no |  |
 
+### `DownstreamSkip`
+
+A flow that runs after the skipped one, directly or further down its chain.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `fires` | array of integer (int64) | yes | The skipped fires whose runs of this flow will be created Skipped. |
+| `flow` | string | yes |  |
+| `project` | string | yes |  |
+
 ### `EmitEventBody`
 
 | Field | Type | Required | Description |
@@ -1077,6 +1115,19 @@ Type: any.
 |---|---|---|---|
 | `next` | array of integer (int64) | yes |  |
 | `timezone` | string | yes |  |
+
+### `ProjectedFire`
+
+A fire past the look-ahead, computed from the schedule; no run exists for it yet.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `projected` | boolean | yes | Always true. |
+| `schedule_id` | integer (int64) | yes |  |
+| `scheduled_time` | integer (int64) | yes |  |
+| `skipped` | boolean | yes |  |
+| `skipped_at` | integer or null (int64) | no |  |
+| `skipped_by` | string or null | no |  |
 
 ### `ReleaseRequest`
 
@@ -1310,6 +1361,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `paused_until` | null or [`i64`](#i64) | no |  |
 | `persist` | boolean | yes |  |
 | `schedule` | [`Schedule`](#schedule) | yes |  |
+| `skipped` | integer (int64) | no | Future fires skipped by a person, counted by the scheduler (not stored). |
 | `source` | string | yes | `code` for schedules declared on the flow, `ui` for ones created in the interface, `mcp` for ones created by an agent. Startup reconciliation singles out `code` alone; every other value is left as it is. |
 | `updated_at` | [`i64`](#i64) | yes |  |
 
@@ -1361,6 +1413,22 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `crash_retries` | integer or null (int64) | no |  |
 | `resources` | object or null | no |  |
 | `retain_days` | integer or null (int64) | no |  |
+
+### `SkipBody`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `by` | string or null | no | Who asked: `ui` or `api` (the default). |
+| `fires` | array of integer (int64) | no | Fire times to skip, in microseconds, as the upcoming list gives them. |
+| `next` | integer or null | no | Skip the next N fires not already skipped instead. |
+
+### `SkipResponse`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `downstream` | [`DownstreamSkip`](#downstreamskip)[] | yes |  |
+| `schedule` | [`ScheduleRow`](#schedulerow) | yes |  |
+| `skipped` | array of integer (int64) | yes | The fires this request skipped. |
 
 ### `State`
 
@@ -1431,6 +1499,18 @@ One of: `Scheduled`, `Pending`, `Running`, `Completed`, `Failed`, `Cancelled`, `
 | `current` | null or [`State`](#state) | no |  |
 | `error` | string | yes |  |
 | `reason` | string | yes |  |
+
+### `UpcomingItem`
+
+One entry of the upcoming list: a run, or with `projected=N` a fire without one.
+
+One of: [`UpcomingRun`](#upcomingrun), [`ProjectedFire`](#projectedfire).
+
+### `UpcomingRun`
+
+A materialized run in the upcoming list.
+
+Type: any.
 
 ### `VariableBody`
 

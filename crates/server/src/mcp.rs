@@ -322,7 +322,7 @@ pub fn tool_list() -> Vec<Value> {
                 "catchup": {"type": "string", "enum": ["skip", "latest", "all"], "default": "skip"},
                 "catchup_max": {"type": "integer", "default": 100}
             }), &["flow", "kind"]),
-        tool("edit_schedule", "Retime an existing schedule. Editing one that was declared in the flow's code detaches it permanently: the declaration in the Python source stops governing it, and the result says so. Returns the schedule and the next few times it will fire.",
+        tool("edit_schedule", "Retime an existing schedule. Editing one that was declared in the flow's code lasts until the server restarts, when the declaration in the Python source applies again, and the result says so. Returns the schedule and the next few times it will fire.",
             json!({
                 "schedule_id": {"type": "integer"},
                 "cron": {"type": "string"}, "interval": {"type": "number"}, "anchor": {"type": "integer"},
@@ -669,8 +669,8 @@ async fn call_tool(
             let mut out = json!({"schedule": row, "next_fires": preview_of(&row)});
             if before.source == "code" {
                 out["note"] = json!(
-                    "This schedule was declared in the flow's code. That declaration no longer \
-                     governs it: the edit is permanent and re-registering the flow will not undo it."
+                    "This schedule is declared in the flow's code. The change lasts until the \
+                     server restarts; then the flow's declaration applies again."
                 );
             }
             Ok(out)

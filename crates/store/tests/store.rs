@@ -659,8 +659,11 @@ fn flows_written_before_the_group_column_read_as_their_project() {
     // Wind the schema back to before 0007, as an older release left it.
     {
         let conn = rusqlite::Connection::open(dir.path().join("db.sqlite")).unwrap();
-        conn.execute_batch("ALTER TABLE flow DROP COLUMN flow_group; PRAGMA user_version = 6;")
-            .unwrap();
+        conn.execute_batch(
+            "DROP TABLE schedule_skip; ALTER TABLE flow DROP COLUMN flow_group; \
+             PRAGMA user_version = 6;",
+        )
+        .unwrap();
     }
     let store = open(&dir);
     let flows = store.list_flows(None).unwrap();

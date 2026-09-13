@@ -332,11 +332,11 @@ def test_schedule_tools_reach_and_guard(agent):
     assert "already has a schedule declared in its code" in second["data"]["note"]
     call(agent, "delete_schedule", schedule_id=second["data"]["schedule"]["id"])
 
-    # Editing a code-declared schedule detaches it from its declaration, which a
-    # human sees in the UI and an agent has to be told.
+    # Editing a code-declared schedule lasts only until the declaration applies
+    # again at the next restart, which an agent has to be told.
     edited = call(agent, "edit_schedule", schedule_id=nightly["id"], cron="0 5 1 1 *")
-    assert "no longer" in edited["data"]["note"]
-    # Editing one the agent made says nothing, because nothing was detached.
+    assert "until the server restarts" in edited["data"]["note"]
+    # Editing one the agent made says nothing, because it has no declaration.
     quiet = call(agent, "edit_schedule", schedule_id=made_id, cron="0 6 1 1 *")
     assert "note" not in quiet["data"]
 

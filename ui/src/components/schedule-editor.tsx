@@ -1,6 +1,6 @@
 import cronstrue from "cronstrue";
 import { useEffect, useState } from "react";
-import { api } from "@/api/client";
+import { api, type ScheduleRow } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input, Select } from "@/components/ui/input";
@@ -36,6 +36,29 @@ export function cronDescription(cron: string): string | null {
   }
 }
 
+export function describeSchedule(s: ScheduleRow): string {
+  const sc = s.schedule as any;
+  if (sc.kind === "cron") return `${cronDescription(sc.cron) ?? sc.cron} (${sc.timezone ?? "local"})`;
+  if (sc.kind === "interval")
+    return `every ${sc.interval >= 86400 ? `${sc.interval / 86400} d` : sc.interval >= 3600 ? `${sc.interval / 3600} h` : `${sc.interval} s`}`;
+  return `rrule ${String(sc.rrule).split("\n").pop()}`;
+}
+
+/** A schedule's words and its timezone, for places that show them apart. */
+export function scheduleParts(s: ScheduleRow): { what: string; zone: string | null } {
+  const sc = s.schedule as any;
+  if (sc.kind === "cron") return { what: cronDescription(sc.cron) ?? sc.cron, zone: sc.timezone ?? "local" };
+  return { what: describeSchedule(s), zone: sc.timezone ?? null };
+}
+
+export function rowToDraft(s: ScheduleRow): ScheduleDraft {
+  const sc = s.schedule as any;
+  const common = { timezone: sc.timezone ?? "local", catchup: s.catchup, catchup_max: s.catchup_max };
+  if (sc.kind === "cron") return { kind: "cron", cron: sc.cron, day_or: sc.day_or ?? true, ...common };
+  if (sc.kind === "interval") return { kind: "interval", interval: sc.interval, ...common };
+  return { kind: "rrule", rrule: sc.rrule, ...common };
+}
+
 export function draftToBody(d: ScheduleDraft): Record<string, unknown> {
   const tz = d.timezone === "local" ? null : d.timezone;
   const base = { catchup: d.catchup, catchup_max: d.catchup_max, timezone: tz };
@@ -46,8 +69,9 @@ export function draftToBody(d: ScheduleDraft): Record<string, unknown> {
 
 export async function previewSchedule(
   body: Record<string, unknown>,
+  count = 3,
 ): Promise<{ next: number[]; error?: string }> {
-  const r = await api.POST("/api/schedules/preview", { body: { ...body, count: 3 } as any });
+  const r = await api.POST("/api/schedules/preview", { body: { ...body, count } as any });
   if (r.response.ok && r.data) return { next: r.data.next };
   return { next: [], error: (r.error as any)?.error ?? "invalid schedule" };
 }
