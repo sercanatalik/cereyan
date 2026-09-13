@@ -533,7 +533,9 @@ def test_disable_window_pauses_schedules_and_resumes(sched):
         sched.wait_run(r["id"], timeout=20)
     paused = wait_until(lambda: (s := c.schedules(flow_id)[0]) and not s["active"] and s, timeout=10)
     assert paused["paused_reason"] == "disabled"
-    assert c.events(kind="flow.disabled")
+    # disable_window pauses the schedules before it records the event, so the
+    # pause can be visible a moment before flow.disabled is.
+    wait_until(lambda: c.events(kind="flow.disabled"), timeout=5)
     resumed = wait_until(lambda: (s := c.schedules(flow_id)[0]) and s["active"] and s, timeout=15)
     assert resumed["paused_reason"] is None
 
