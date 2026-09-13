@@ -50,12 +50,14 @@ class _CancelWatcher(threading.Thread):
                 self.fired = True
                 # A real signal to the main thread interrupts blocking calls
                 # such as time.sleep; the default handler raises KeyboardInterrupt.
+                # Windows has no pthread_kill. There raise_signal runs CPython's C
+                # handler in this thread, which also sets the event a main thread in
+                # time.sleep waits on; _thread.interrupt_main only sets the flag
+                # checked between bytecodes, which a sleeping flow never reaches.
                 try:
                     signal.pthread_kill(main, signal.SIGINT)
                 except (AttributeError, OSError):
-                    import _thread
-
-                    _thread.interrupt_main()
+                    signal.raise_signal(signal.SIGINT)
                 return
 
     def stop(self) -> None:
