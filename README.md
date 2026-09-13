@@ -80,12 +80,15 @@ The site is at https://sercanatalik.github.io/cereyan/ (built from `docs/` with 
 Production ready, and published to [PyPI](https://pypi.org/project/cereyan/). The pieces
 described here work and are tested on macOS, Linux and Windows, and the interfaces —
 names, signatures, defaults, routes, event payloads and the database schema — are settled.
+Windows lacks the Unix socket and engine niceness, and cannot interrupt a flow blocked in
+most I/O; [Install](https://sercanatalik.github.io/cereyan/get-started/install/#windows)
+lists what that changes.
 Read the [changelog](https://sercanatalik.github.io/cereyan/changelog/) before upgrading.
 Issues and questions are welcome.
 
 ## Development
 
-Rust stable, Python 3.11 or newer with uv, Node 22, and just. `just ui` builds the UI, `just dev` builds the extension in place, `just test` and `just lint` run everything, `just demo` serves the examples. Details, the repository layout, and the release checklist are in the [contributing guide](https://sercanatalik.github.io/cereyan/contributing/). Design decisions are on the [Design](https://sercanatalik.github.io/cereyan/design/architecture/) pages, and what is left to do is in `roadmap.md`.
+Rust stable, Python 3.11 or newer with uv, Node 22, and just. `just ui` builds the UI, `just dev` builds the extension in place, `just test` and `just lint` run everything, `just demo` serves the examples. Details, the repository layout, and the release checklist are in the [contributing guide](https://sercanatalik.github.io/cereyan/contributing/). Design decisions are on the [Design](https://sercanatalik.github.io/cereyan/design/architecture/) pages, and changes not yet released are under Unreleased in `CHANGELOG.md`.
 
 ## Credits
 
@@ -93,7 +96,8 @@ Cereyan owes its shape to two projects that came first.
 
 [**Luigi**](https://github.com/spotify/luigi) contributed the idea the data-pipeline semantics rest on: a task declares the target it produces, and work is skipped when that target already exists. `Target` and `LocalTarget` keep Luigi's names because they are Luigi's concept, and idempotent reruns and backfills follow from it.
 
-[**Prefect**](https://github.com/PrefectHQ/prefect) contributed the authoring model — flows and tasks as decorated functions, runs carrying explicit states, a server watching them — and the look of the UI. Six UI components were adapted from Prefect's, rewritten in React from the Vue originals; they are marked in `ui/src/components/ported/` and listed in `NOTICE`, and remain under the Apache License 2.0 of their origin.
+[**Prefect**](https://github.com/PrefectHQ/prefect) contributed the authoring model — flows and tasks as decorated functions, runs carrying explicit states, a server watching them — and the look of the UI. Six UI components were adapted from Prefect's, rewritten in React from the Vue originals
+
 
 Neither is a dependency, and cereyan deliberately does far less than either: one machine, one process, one wheel, no remote workers and no database to run. If you need what they do, use them. [Migrating from Prefect or Luigi](https://sercanatalik.github.io/cereyan/guides/migrate/) says what carries over and what does not.
 
