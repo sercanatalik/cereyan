@@ -181,14 +181,16 @@ def test_cooldown_across_lapses_and_disable_cancels(pro):
     # A data rule (code rules are read-only): lapse cancels the run.
     created = pro.client._request("POST", "/api/rules", body={
         "name": "cancel-overrun", "when": {"events": ["run.running"], "flows": ["slow"]},
-        "unless": {"events": ["run.completed"]}, "within": 0.6, "cooldown_seconds": 60,
+        "unless": {"events": ["run.completed"]}, "within": 2.0, "cooldown_seconds": 60,
         "do": [{"kind": "cancel_run"}],
     })
     rid = created["id"]
-    # Long enough that the server can lapse and cancel the first run well before
-    # it ends; a cancel that lands after the run completed finds nothing to cancel.
-    a = start(pro, "slow", seconds=3.0)
-    b = start(pro, "slow", seconds=3.0)
+    # The rule lapses 2 s after a run starts, and each run outlasts that by a margin
+    # a slow runner does not use up: A and B so the cancel lands before they end (a
+    # cancel after completion finds nothing to cancel), C so the rule is disabled
+    # while C's expectation is still open.
+    a = start(pro, "slow", seconds=5.0)
+    b = start(pro, "slow", seconds=5.0)
     done_a = pro.wait_run(a["id"])
     done_b = pro.wait_run(b["id"])
     time.sleep(0.5)
@@ -198,7 +200,7 @@ def test_cooldown_across_lapses_and_disable_cancels(pro):
     assert states == ["Cancelled", "Completed"]
     # Disable: open expectations are cancelled and nothing fires.
     pro.client._request("PATCH", f"/api/rules/{rid}", body={"cooldown_seconds": 0})
-    c = start(pro, "slow", seconds=1.2)
+    c = start(pro, "slow", seconds=4.0)
     wait_for(lambda: pro.client._request("GET", f"/api/rules/{rid}/expectations"))
     pro.client._request("PATCH", f"/api/rules/{rid}", body={"enabled": False})
     done_c = pro.wait_run(c["id"])
