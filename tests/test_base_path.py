@@ -76,7 +76,8 @@ def _wait_discovery(home, proc, timeout=30.0):
         try:
             with open(path) as fh:
                 info = json.load(fh)
-            if info.get("pid") == proc.pid:
+            # On Windows a venv's python.exe is a launcher, so the server's PID is its child's.
+            if info.get("pid") == proc.pid or ServerProcess._alive(info):
                 return info
         except (OSError, ValueError):
             pass
