@@ -230,6 +230,7 @@ dependencies = [
  "lettre",
  "libc",
  "mime_guess",
+ "rand",
  "rust-embed",
  "serde",
  "serde_json",

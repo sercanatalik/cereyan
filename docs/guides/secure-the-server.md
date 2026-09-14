@@ -62,12 +62,16 @@ socket = "/tmp/cereyan.sock"
 
 Or `--socket`, `CEREYAN_SOCKET`, or `app.serve(socket=...)`. The server also listens on the Unix socket, created with mode 0600 and removed on shutdown; a stale file from a crashed server is replaced. Requests over the socket skip the token check, because the file permissions are the authentication. `server.json` records the path, the Python client uses it when the server needs a token the client does not have (`Client(socket_path=...)` selects it explicitly), and `cereyan mcp --socket` connects through it. Keep the path short; the OS limits socket paths to about 100 bytes. Not available on Windows.
 
+## Sign in with your identity provider
+
+To accept your organisation's single sign-on instead of, or beside, the token, register an `@app.authenticator` and set `enable_auth`; see [How to sign in with your identity provider](sign-in-with-your-identity-provider.md). The token keeps working, and engines keep using it.
+
 ## What a token holder can do
 
-Everything the API allows, including starting runs, backfilling, setting variables, and, through MCP, the same for an agent. There is one permission level; there are no read-only tokens.
+Everything the API allows, including starting runs, backfilling, setting variables, and, through MCP, the same for an agent. A user the authenticator signs in can do the same. There is one permission level; there are no read-only tokens.
 
 ## Custom routes
 
-Routes registered with `@app.get` and friends under `/api/` are behind the token like the built-in API; routes outside `/api/` are open. Put anything that changes state under `/api/`.
+Routes registered with `@app.get` and friends under `/api/` are behind the token like the built-in API; routes outside `/api/` are open unless `auth_scope = "all"`, which needs the authenticator. Put anything that changes state under `/api/`.
 
 Related: [Configuration](../reference/configuration.md), [Use cereyan with an AI agent](agents.md).

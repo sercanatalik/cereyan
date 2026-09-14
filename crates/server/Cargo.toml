@@ -29,6 +29,7 @@ utoipa = { workspace = true }
 rust-embed = { workspace = true }
 mime_guess = { workspace = true }
 chrono = { workspace = true }
+rand = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

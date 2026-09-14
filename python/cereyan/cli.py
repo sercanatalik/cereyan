@@ -46,6 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--token", help="require this API token (also CEREYAN_TOKEN or [server] token)")
     serve.add_argument("--socket", help="also listen on this Unix socket path (also CEREYAN_SOCKET or [server] socket)")
     serve.add_argument("--base-path", help="serve everything under this URL path, e.g. /cereyan (also CEREYAN_BASE_PATH or [server] base_path; default: the root)")
+    serve.add_argument("--enable-auth", action="store_true", default=None, help="validate credentials with the registered @app.authenticator (also CEREYAN_ENABLE_AUTH or [server] enable_auth)")
+    serve.add_argument("--auth-cookie", help="cookie the authenticator reads the credential from when there is no bearer header (also CEREYAN_AUTH_COOKIE or [server] auth_cookie)")
+    serve.add_argument("--auth-scope", help="api checks /api/* and /mcp; all also checks the UI and custom routes, and needs --enable-auth (also CEREYAN_AUTH_SCOPE or [server] auth_scope; default api)")
+    serve.add_argument("--login-url", help="sign-in page linked from 401 responses and the UI (also CEREYAN_LOGIN_URL or [server] login_url)")
     serve.set_defaults(func=cmd_serve)
 
     backfill = sub.add_parser("backfill", help="create runs over a date range (requires a running server)")
@@ -167,6 +171,10 @@ def cmd_serve(args) -> int:
             token=args.token,
             socket=args.socket,
             base_path=args.base_path,
+            enable_auth=args.enable_auth,
+            auth_cookie=args.auth_cookie,
+            auth_scope=args.auth_scope,
+            login_url=args.login_url,
         )
     except CereyanError as exc:
         print(f"error: {exc}", file=sys.stderr)

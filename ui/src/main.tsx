@@ -3,6 +3,7 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
+import { SignInRequired } from "./components/sign-in-required";
 import { TokenPrompt } from "./components/token-prompt";
 import { basePath } from "./lib/base";
 import { LiveProvider } from "./lib/live";
@@ -30,6 +31,7 @@ if (root) {
           <ProjectProvider>
             <RouterProvider router={router} />
             <TokenPrompt />
+            <SignInRequired />
           </ProjectProvider>
         </LiveProvider>
       </QueryClientProvider>

@@ -18,7 +18,7 @@ Everything below is importable from `cereyan` unless a module path is shown. Thi
 
 ::: cereyan.App
     options:
-      members: [flow, task, register, route, get, post, put, delete, patch, rule, serve]
+      members: [flow, task, register, route, get, post, put, delete, patch, rule, authenticator, serve]
 
 ::: cereyan.get_default_app
 

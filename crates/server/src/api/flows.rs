@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::Json;
+use axum::{Extension, Json};
 use cereyan_core::{Flow, Run};
 use serde::{Deserialize, Serialize};
 
 use super::error::{ApiError, ApiResult};
 use super::runs::{create_run_inner, CreateRunForFlowBody};
+use crate::auth::{run_creator, AuthenticatedUser};
 use crate::state::AppState;
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -138,12 +139,22 @@ pub async fn delete_flow(
 pub async fn create_run_for_flow(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
+    user: Option<Extension<AuthenticatedUser>>,
     Json(body): Json<CreateRunForFlowBody>,
 ) -> ApiResult<(StatusCode, Json<Run>)> {
     let flow = state
         .store
         .get_flow(id)?
         .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
-    let run = create_run_inner(&state, &flow, body.parameters, body.name, body.tags, "api").await?;
+    let created_by = run_creator(user.as_ref().map(|Extension(u)| u), "api");
+    let run = create_run_inner(
+        &state,
+        &flow,
+        body.parameters,
+        body.name,
+        body.tags,
+        &created_by,
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(run)))
 }

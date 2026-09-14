@@ -33,7 +33,7 @@ cereyan run [-h] [--param NAME=VALUE] [--quiet] target
 ## `cereyan serve`
 
 ```text
-cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--engine-max-runs ENGINE_MAX_RUNS] [--no-open] [--crash-retries CRASH_RETRIES] [--token TOKEN] [--socket SOCKET] [--base-path BASE_PATH] [dir]
+cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--engine-max-runs ENGINE_MAX_RUNS] [--no-open] [--crash-retries CRASH_RETRIES] [--token TOKEN] [--socket SOCKET] [--base-path BASE_PATH] [--enable-auth] [--auth-cookie AUTH_COOKIE] [--auth-scope AUTH_SCOPE] [--login-url LOGIN_URL] [dir]
 ```
 
 | Argument | Meaning |
@@ -51,6 +51,10 @@ cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--en
 | `--token` `TOKEN` | require this API token (also CEREYAN_TOKEN or [server] token). |
 | `--socket` `SOCKET` | also listen on this Unix socket path (also CEREYAN_SOCKET or [server] socket). |
 | `--base-path` `BASE_PATH` | serve everything under this URL path, e.g. /cereyan (also CEREYAN_BASE_PATH or [server] base_path; default: the root). |
+| `--enable-auth` | validate credentials with the registered @app.authenticator (also CEREYAN_ENABLE_AUTH or [server] enable_auth). |
+| `--auth-cookie` `AUTH_COOKIE` | cookie the authenticator reads the credential from when there is no bearer header (also CEREYAN_AUTH_COOKIE or [server] auth_cookie). |
+| `--auth-scope` `AUTH_SCOPE` | api checks /api/* and /mcp; all also checks the UI and custom routes, and needs --enable-auth (also CEREYAN_AUTH_SCOPE or [server] auth_scope; default api). |
+| `--login-url` `LOGIN_URL` | sign-in page linked from 401 responses and the UI (also CEREYAN_LOGIN_URL or [server] login_url). |
 
 ## `cereyan backfill`
 

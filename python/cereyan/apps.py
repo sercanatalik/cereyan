@@ -61,6 +61,7 @@ class App:
         self.flows: dict[str, Flow] = {}
         self.routes: list[Route] = []
         self.rules: list = []
+        self.authenticators: list[Callable] = []
         self.source_file = source_file or _caller_file()
         _all_apps.append(self)
 
@@ -158,22 +159,41 @@ class App:
 
         return decorate
 
+    # -- authentication ---------------------------------------------------
+
+    def authenticator(self, fn: Callable) -> Callable:
+        """Register the function that validates credentials when auth is enabled.
+
+        ``fn(credential)`` receives the bearer token, or else the value of the
+        cookie named by ``auth_cookie``, and returns the user's name, or ``None``
+        to reject the credential; an exception rejects it too. It runs only when
+        ``enable_auth`` is true, on a server thread, for each request that does
+        not carry the static token, so cache anything slow such as a key set.
+        One authenticator may be registered per process.
+        """
+        self.authenticators.append(fn)
+        return fn
+
     # -- serving ----------------------------------------------------------
 
     def serve(self, host: str | None = None, port: int | None = None, **options) -> int:
         """Serve the flows and routes registered so far, blocking until stopped.
 
-        Host, port, ``token``, ``socket``, and ``base_path`` given here rank below
+        Host, port, ``token``, ``socket``, ``base_path``, ``enable_auth``,
+        ``auth_cookie``, ``auth_scope``, and ``login_url`` given here rank below
         the CLI flags and environment and above ``cereyan.toml``.
+
+        ``ready`` is called with the running server once it accepts requests.
+        Called from a thread other than the main thread, ``serve`` installs no
+        signal handlers: call ``stop()`` on the server ``ready`` received to shut
+        it down, and ``serve`` returns once it has.
         """
         from .serve import serve
 
         directory = os.path.dirname(os.path.abspath(self.source_file)) if self.source_file else os.getcwd()
-        token = options.pop("token", None)
-        socket = options.pop("socket", None)
-        base_path = options.pop("base_path", None)
-        return serve(directory, app_host=host, app_port=port, app_token=token, app_socket=socket,
-                     app_base_path=base_path, discover=False, **options)
+        keys = ("token", "socket", "base_path", "enable_auth", "auth_cookie", "auth_scope", "login_url")
+        app_options = {f"app_{key}": options.pop(key, None) for key in keys}
+        return serve(directory, app_host=host, app_port=port, discover=False, **app_options, **options)
 
 
 def all_apps() -> list[App]:

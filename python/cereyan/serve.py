@@ -9,8 +9,10 @@ import os
 import re
 import signal
 import sys
+import threading
 import traceback
 import webbrowser
+from urllib.parse import urlsplit
 
 from . import _core, apps, engine
 from .config import defaults as project_defaults
@@ -125,15 +127,138 @@ def resolve_base_path(directory: str, base_path: str | None = None, app_base_pat
     return ""
 
 
+_TRUE = {"true", "1", "yes"}
+_FALSE = {"false", "0", "no"}
+
+
+def resolve_enable_auth(directory: str, enable_auth: bool | None = None,
+                        app_enable_auth: bool | None = None) -> bool:
+    """Flag, environment, app.serve(), cereyan.toml. False unless one of them turns auth on."""
+    if enable_auth:
+        return True
+    env = os.environ.get("CEREYAN_ENABLE_AUTH")
+    if env is not None and env.strip():
+        value = env.strip().lower()
+        if value in _TRUE:
+            return True
+        if value in _FALSE:
+            return False
+        raise CereyanError(f"invalid CEREYAN_ENABLE_AUTH {env!r}: expected true, false, 1, 0, yes, or no")
+    if app_enable_auth is not None:
+        if not isinstance(app_enable_auth, bool):
+            raise CereyanError(f"invalid app.serve(enable_auth={app_enable_auth!r}): expected True or False")
+        return app_enable_auth
+    value = server_settings(directory).get("enable_auth")
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise CereyanError(f"invalid [server] enable_auth {value!r} in cereyan.toml: expected true or false")
+    return value
+
+
+def _resolve_string(directory: str, key: str, env_name: str, flag_name: str, flag: str | None,
+                    app_value: str | None) -> tuple[str | None, str | None]:
+    """The first of flag, environment, app.serve(), cereyan.toml, with where it came from."""
+    candidates = (
+        (flag, flag_name),
+        (os.environ.get(env_name) or None, env_name),
+        (app_value, f"app.serve({key}=)"),
+        (server_settings(directory).get(key), f"[server] {key} in cereyan.toml"),
+    )
+    for value, source in candidates:
+        if value is not None:
+            if not isinstance(value, str):
+                raise CereyanError(f"invalid {key} {value!r} from {source}: expected a string")
+            return value, source
+    return None, None
+
+
+_COOKIE_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+
+
+def resolve_auth_cookie(directory: str, auth_cookie: str | None = None,
+                        app_auth_cookie: str | None = None) -> str | None:
+    """Flag, environment, app.serve(), cereyan.toml. None means bearer credentials only."""
+    value, source = _resolve_string(directory, "auth_cookie", "CEREYAN_AUTH_COOKIE", "--auth-cookie",
+                                    auth_cookie, app_auth_cookie)
+    if value is None:
+        return None
+    if value == "cereyan_token":
+        raise CereyanError(f"auth_cookie from {source} cannot be 'cereyan_token': that cookie holds the API token")
+    if not _COOKIE_NAME.fullmatch(value):
+        raise CereyanError(f"invalid auth_cookie {value!r} from {source}: expected a cookie name")
+    return value
+
+
+def resolve_auth_scope(directory: str, auth_scope: str | None = None, app_auth_scope: str | None = None) -> str:
+    """Flag, environment, app.serve(), cereyan.toml. ``"api"`` unless set."""
+    value, source = _resolve_string(directory, "auth_scope", "CEREYAN_AUTH_SCOPE", "--auth-scope",
+                                    auth_scope, app_auth_scope)
+    if value is None:
+        return "api"
+    if value not in ("api", "all"):
+        raise CereyanError(f"invalid auth_scope {value!r} from {source}: expected 'api' or 'all'")
+    return value
+
+
+def _valid_login_url(url: str) -> bool:
+    if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in url):
+        return False
+    if url.startswith("/"):
+        # `//host` and `/\host` leave the origin in a browser.
+        return not url.startswith("//") and not url.startswith("/\\")
+    parts = urlsplit(url)
+    return parts.scheme.lower() in ("http", "https") and bool(parts.netloc)
+
+
+def resolve_login_url(directory: str, login_url: str | None = None, app_login_url: str | None = None) -> str | None:
+    """Flag, environment, app.serve(), cereyan.toml. None means no sign-in link."""
+    value, source = _resolve_string(directory, "login_url", "CEREYAN_LOGIN_URL", "--login-url",
+                                    login_url, app_login_url)
+    if value is None:
+        return None
+    if not _valid_login_url(value):
+        raise CereyanError(
+            f"invalid login_url {value!r} from {source}: expected an http or https URL, or a path starting with /"
+        )
+    return value
+
+
+def _qualname(fn) -> str:
+    return f"{getattr(fn, '__module__', '?')}.{getattr(fn, '__qualname__', repr(fn))}"
+
+
+def choose_authenticator(authenticators: list, enabled: bool, failed_modules: list[str]):
+    """The authenticator the server calls: the one registered when auth is enabled, else None."""
+    if len(authenticators) > 1:
+        raise CereyanError(
+            "only one @app.authenticator may be registered per process; found "
+            + " and ".join(_qualname(fn) for fn in authenticators)
+        )
+    if not enabled:
+        return None
+    if not authenticators:
+        message = "enable_auth is true but no @app.authenticator is registered"
+        if failed_modules:
+            message += "; these modules failed to import: " + ", ".join(failed_modules)
+        raise CereyanError(message)
+    return authenticators[0]
+
+
 def serve(directory: str | None = None, *, host: str | None = None, port: int | None = None,
           max_engines: int | None = None, engine_max_runs: int | None = None, open_browser: bool | None = None,
           discover: bool = True, quiet: bool = False, ready=None, crash_retries: int | None = None,
           token: str | None = None, socket: str | None = None, app_host: str | None = None,
           app_port: int | None = None, app_token: str | None = None, app_socket: str | None = None,
-          base_path: str | None = None, app_base_path: str | None = None) -> int:
-    """Serve ``directory``. ``host``, ``port``, ``token``, ``socket``, and ``base_path``
-    are the CLI flags; the ``app_*`` values come from ``app.serve()`` and rank below
-    the environment."""
+          base_path: str | None = None, app_base_path: str | None = None,
+          enable_auth: bool | None = None, app_enable_auth: bool | None = None,
+          auth_cookie: str | None = None, app_auth_cookie: str | None = None,
+          auth_scope: str | None = None, app_auth_scope: str | None = None,
+          login_url: str | None = None, app_login_url: str | None = None) -> int:
+    """Serve ``directory``. ``host``, ``port``, ``token``, ``socket``, ``base_path``,
+    ``enable_auth``, ``auth_cookie``, ``auth_scope``, and ``login_url`` are the CLI
+    flags; the ``app_*`` values come from ``app.serve()`` and rank below the
+    environment."""
     directory = os.path.abspath(directory or os.getcwd())
     if not os.path.isdir(directory):
         raise CereyanError(f"{directory} is not a directory")
@@ -141,11 +266,21 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     resolved_token = resolve_token(directory, token, app_token)
     resolved_socket = resolve_socket(directory, socket, app_socket)
     resolved_base_path = resolve_base_path(directory, base_path, app_base_path)
+    resolved_enable_auth = resolve_enable_auth(directory, enable_auth, app_enable_auth)
+    resolved_auth_cookie = resolve_auth_cookie(directory, auth_cookie, app_auth_cookie)
+    resolved_auth_scope = resolve_auth_scope(directory, auth_scope, app_auth_scope)
+    resolved_login_url = resolve_login_url(directory, login_url, app_login_url)
+    if resolved_auth_scope == "all" and not resolved_enable_auth:
+        raise CereyanError(
+            "auth_scope 'all' requires enable_auth: without an authenticator the UI could not load its token prompt"
+        )
+    failed_modules: list[str] = []
     if discover:
         modules = discover_modules(directory)
         engine.runner.suppress_top_level_runs(True, "cereyan serve is importing modules")
         try:
             for name, tb in import_modules(directory, modules):
+                failed_modules.append(name)
                 print(f"warning: could not import {name}:\n{tb}", file=sys.stderr)
         finally:
             engine.runner.suppress_top_level_runs(False)
@@ -154,6 +289,20 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     registered = apps.all_apps()
     flows = [f for app in registered for f in app.flows.values()]
     routes = [r for app in registered for r in app.routes]
+    authenticators = [fn for app in registered for fn in app.authenticators]
+    authenticator = choose_authenticator(authenticators, resolved_enable_auth, failed_modules)
+    if authenticator is not None:
+        print(f"cereyan: auth enabled; {_qualname(authenticator)} validates credentials", file=sys.stderr)
+        if resolved_auth_cookie is None:
+            print("cereyan: auth_cookie is not set, so only bearer credentials reach the authenticator "
+                  "and browsers cannot sign in", file=sys.stderr)
+    else:
+        if authenticators:
+            print(f"cereyan: authenticator {_qualname(authenticators[0])} is registered but disabled; "
+                  "set enable_auth to use it", file=sys.stderr)
+        for key, value in (("auth_cookie", resolved_auth_cookie), ("login_url", resolved_login_url)):
+            if value is not None:
+                print(f"warning: {key} has no effect while enable_auth is false", file=sys.stderr)
     # Unknown `after=` upstreams are flow errors, not fatal.
     flow_errors: dict[tuple[str, str], str] = {}
     for f in flows:
@@ -209,13 +358,17 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "token": resolved_token,
         "socket": resolved_socket,
         "base_path": resolved_base_path,
+        "auth_cookie": resolved_auth_cookie,
+        "auth_scope": resolved_auth_scope,
+        "login_url": resolved_login_url,
     }
     if "max_engines" in toml_defaults and max_engines is None and "max_engines" not in settings:
         config["max_engines"] = int(toml_defaults["max_engines"])
     if "engine_max_runs" in toml_defaults and engine_max_runs is None and "engine_max_runs" not in settings:
         config["engine_max_runs"] = int(toml_defaults["engine_max_runs"])
     try:
-        server = _core.Server.start(store, json.dumps(config), dispatcher if routes else None, rule_dispatch)
+        server = _core.Server.start(store, json.dumps(config), dispatcher if routes else None, rule_dispatch,
+                                    authenticator=authenticator)
     except RuntimeError as exc:
         engine.close_store()
         raise CereyanError(str(exc)) from None
@@ -240,10 +393,13 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     # the store is not flushed, and engines are left behind. Handle whichever the
     # platform has, so stopping the server means the same thing everywhere.
     # Interactive Ctrl-C needs nothing extra; it arrives as SIGINT.
+    # Handlers can only be installed on the main thread. Served from another
+    # thread, the host stops the server through the handle `ready` received.
     stop_signals = [signal.SIGTERM]
     if hasattr(signal, "SIGBREAK"):  # Windows
         stop_signals.append(signal.SIGBREAK)
-    previous = [(sig, signal.signal(sig, _terminate)) for sig in stop_signals]
+    on_main_thread = threading.current_thread() is threading.main_thread()
+    previous = [(sig, signal.signal(sig, _terminate)) for sig in stop_signals] if on_main_thread else []
     try:
         while not server.wait(0.5):
             pass

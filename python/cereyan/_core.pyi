@@ -136,6 +136,7 @@ class Server:
         config: str,
         dispatcher: object | None = None,
         rule_dispatcher: object | None = None,
+        authenticator: object | None = None,
     ) -> Server: ...
     @property
     def port(self) -> int: ...

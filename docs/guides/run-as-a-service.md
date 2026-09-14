@@ -2,6 +2,8 @@
 
 Run `cereyan serve` under the operating system's service manager so schedules fire after a reboot and the server restarts if it dies. Engines survive a server restart: on start the supervisor adopts runs whose engine is still alive and marks the rest crashed and reruns them.
 
+To host cereyan inside another Python process instead, call `app.serve(ready=...)` on a background thread. It installs no signal handlers there; calling `stop()` on the server `ready` receives shuts it down, and `app.serve` returns.
+
 ## What the service needs
 
 - A working directory containing the flows (and `cereyan.toml`), passed to `cereyan serve`.

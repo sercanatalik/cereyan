@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::Json;
+use axum::{Extension, Json};
 use cereyan_core::{Flow, FlowOptions, Run, State as RunState, StateType, TaskRun};
 use cereyan_store::{CreateRun, ListRunsFilter, RunsPage, UpsertFlow};
 use serde::{Deserialize, Serialize};
@@ -197,8 +197,14 @@ pub async fn list_runs(
 #[utoipa::path(post, path = "/api/runs", request_body = CreateRunBody, responses((status = 201, body = Run), (status = 404, description = "Unknown flow and no module given"), (status = 422)))]
 pub async fn create_run(
     State(state): State<Arc<AppState>>,
+    user: Option<Extension<crate::auth::AuthenticatedUser>>,
     Json(body): Json<CreateRunBody>,
 ) -> ApiResult<(StatusCode, Json<Run>)> {
+    // A signed-in user overrides whatever the client claims.
+    let created_by = crate::auth::run_creator(
+        user.as_ref().map(|Extension(u)| u),
+        body.created_by.as_deref().unwrap_or("client"),
+    );
     let existing = state.store.get_flow_by_key(&body.project, &body.flow)?;
     let flow = match (existing, body.module.clone(), body.source_dir.clone()) {
         (Some(f), Some(module), Some(source_dir)) if !state.is_live(f.id) => {
@@ -283,7 +289,7 @@ pub async fn create_run(
         body.parameters,
         body.name,
         body.tags,
-        body.created_by.as_deref().unwrap_or("client"),
+        &created_by,
     )
     .await?;
     Ok((StatusCode::CREATED, Json(run)))

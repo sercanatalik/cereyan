@@ -1,16 +1,32 @@
 import createClient from "openapi-fetch";
+import { announceSignInRequired } from "@/components/sign-in-required";
 import { announceAuthRequired } from "@/components/token-prompt";
 import { basePath } from "@/lib/base";
 import type { components, paths } from "./schema";
 
 export const api = createClient<paths>({ baseUrl: basePath() });
 
-// A 401 means the server wants a token: raise the prompt (see TokenPrompt).
+/**
+ * A 401 names how the server authenticates: `hook` raises the not-signed-in
+ * panel (see SignInRequired), anything else the token prompt (see TokenPrompt).
+ */
+export async function handleUnauthorized(request: Request, response: Response) {
+  const body = await response
+    .clone()
+    .json()
+    .catch(() => null);
+  if (body?.auth === "hook") {
+    announceSignInRequired(typeof body.login_url === "string" ? body.login_url : null);
+    return;
+  }
+  const hadCookie = document.cookie.split(";").some((c) => c.trim().startsWith("cereyan_token="));
+  announceAuthRequired(hadCookie || request.headers.has("authorization"));
+}
+
 api.use({
-  onResponse({ request, response }) {
+  async onResponse({ request, response }) {
     if (response.status === 401) {
-      const hadCookie = document.cookie.split(";").some((c) => c.trim().startsWith("cereyan_token="));
-      announceAuthRequired(hadCookie || request.headers.has("authorization"));
+      await handleUnauthorized(request, response);
     }
     return response;
   },

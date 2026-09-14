@@ -351,10 +351,12 @@ pub fn router(state: Arc<AppState>) -> Router {
     // Engine reports can carry tens of thousands of log lines per batch.
     let api = api.layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024));
     let api = custom::attach(api, &state.config.custom_routes);
-    // The token check covers API routes only: the UI's static assets stay open.
-    let api = api.route_layer(axum::middleware::from_fn_with_state(
-        state.clone(),
-        crate::auth::require_token,
-    ));
-    api.fallback(ui::serve).with_state(state)
+    // The check wraps the UI fallback too and decides by path and `auth_scope`,
+    // so scope `api` leaves the UI open and scope `all` covers it.
+    api.fallback(ui::serve)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::require_token,
+        ))
+        .with_state(state)
 }

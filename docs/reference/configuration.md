@@ -43,6 +43,10 @@ from = "cereyan@example.com"
 | `base_path` | string | the root | URL path the TCP listener serves the UI, the API, `/mcp`, and custom routes under, for example `/cereyan`. Segments are letters, digits, `-`, `_`, `.`, or `~`. `/` and the bare base path redirect to `{base_path}/`; other paths outside it answer 404. The Unix socket stays at the root. |
 | `token` | string | unset | API token required on every `/api/*` route except `/api/health`. |
 | `socket` | string | unset | Unix socket path served next to the TCP port; not available on Windows. |
+| `enable_auth` | boolean | `false` | Validate credentials with the registered `@app.authenticator`. The server refuses to start when it is true and none is registered. |
+| `auth_cookie` | string | unset | Cookie the authenticator reads the credential from when there is no `Authorization: Bearer` header. `cereyan_token` is reserved. |
+| `auth_scope` | string | `api` | `api` checks `/api/*` except `/api/health`, and `/mcp`; `all` checks every path except `/api/health`, the UI and custom routes included, and needs `enable_auth`. |
+| `login_url` | string | unset | Sign-in page linked from 401 responses and the UI: an `http` or `https` URL, or a path starting with `/`. |
 | `max_engines` | integer | CPU count | Size of the warm engine pool. |
 | `engine_max_runs` | integer | `100` | Runs an engine executes before it is recycled. |
 | `cancel_grace_secs` | integer | `10` | Seconds between SIGTERM and SIGKILL when cancelling a run. |
@@ -81,6 +85,8 @@ The Settings page (`PATCH /api/settings`) updates resource totals, retention, an
 | Base path | `--base-path`, `CEREYAN_BASE_PATH`, `app.serve(base_path=)`, `[server] base_path`, the root |
 | Token | `--token`, `CEREYAN_TOKEN`, `app.serve(token=)`, `[server] token` |
 | Socket | `--socket`, `CEREYAN_SOCKET`, `app.serve(socket=)`, `[server] socket` |
+| `enable_auth` | `--enable-auth`, `CEREYAN_ENABLE_AUTH`, `app.serve(enable_auth=)`, `[server] enable_auth`, `false` |
+| `auth_cookie`, `auth_scope`, `login_url` | `--auth-cookie`/`--auth-scope`/`--login-url`, `CEREYAN_AUTH_COOKIE`/`CEREYAN_AUTH_SCOPE`/`CEREYAN_LOGIN_URL`, the same-named `app.serve()` arguments, `[server]` |
 | `crash_retries` | the flow decorator, `[defaults]`, `--crash-retries`, `5` |
 
 ## Environment variables
@@ -92,6 +98,8 @@ The Settings page (`PATCH /api/settings`) updates resource totals, retention, an
 | `CEREYAN_BASE_PATH` | URL path to serve under. |
 | `CEREYAN_TOKEN` | API token required by the server and sent by the CLI, the Python client, `cereyan mcp`, and engine children. |
 | `CEREYAN_SOCKET` | Unix socket path served next to the TCP port. |
+| `CEREYAN_ENABLE_AUTH` | `true`, `false`, `1`, `0`, `yes`, or `no`: call the registered authenticator. |
+| `CEREYAN_AUTH_COOKIE`, `CEREYAN_AUTH_SCOPE`, `CEREYAN_LOGIN_URL` | The authenticator's cookie, the paths checked, and the sign-in page; as the `[server]` keys. |
 | `CEREYAN_NO_BROWSER` | Do not open the UI on `serve`. |
 
 Set by the server for its engine children, not for users: `CEREYAN_ENGINE_ID`. An engine child finds the server through the `url` in `server.json`, base path included; `CEREYAN_SERVER` overrides that URL for an engine started by hand. Two knobs exist for the test suite and benchmarks only: `CEREYAN_RETENTION_INTERVAL` (seconds between retention passes, default hourly) and `CEREYAN_FAST_CRASH_RERUN`.

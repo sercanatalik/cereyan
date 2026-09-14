@@ -10,7 +10,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
+use axum::{Extension, Json};
 use cereyan_core::{now_micros, ScheduleRow, StateType};
 use cereyan_store::{ArtifactFilter, EventFilter, ListRunsFilter, LogFilter};
 use serde_json::{json, Map, Value};
@@ -115,6 +115,7 @@ pub async fn handle_delete(State(state): State<Arc<AppState>>, headers: HeaderMa
 
 pub async fn handle_post(
     State(state): State<Arc<AppState>>,
+    user: Option<Extension<crate::auth::AuthenticatedUser>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -179,7 +180,8 @@ pub async fn handle_post(
                 .and_then(|a| a.as_object())
                 .cloned()
                 .unwrap_or_default();
-            match call_tool(&state, &client, name, &args).await {
+            let user = user.as_ref().map(|Extension(u)| u);
+            match call_tool(&state, &client, user, name, &args).await {
                 Ok(v) => rpc_result(
                     id,
                     json!({"content": [{"type": "text", "text": pretty(&v)}], "isError": false}),
@@ -406,6 +408,7 @@ fn resolve_flow(
 async fn call_tool(
     state: &Arc<AppState>,
     client: &str,
+    user: Option<&crate::auth::AuthenticatedUser>,
     name: &str,
     args: &Map<String, Value>,
 ) -> Result<Value, ToolError> {
@@ -553,7 +556,7 @@ async fn call_tool(
                 parameters,
                 arg_str(args, "name"),
                 tags,
-                &format!("mcp:{client}"),
+                &crate::auth::run_creator(user, &format!("mcp:{client}")),
             )
             .await?;
             Ok(json!({"run": run, "note": "created; follow it with get_run"}))

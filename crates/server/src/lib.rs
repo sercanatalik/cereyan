@@ -21,6 +21,7 @@ pub mod timer;
 mod ui;
 mod validate;
 
+pub use auth::{AuthenticatedUser, Authenticator};
 pub use custom::{DispatchRequest, DispatchResponse, RouteDispatcher, RouteSpec};
 pub use rules::RuleDispatcher;
 pub use state::AppState;
@@ -93,6 +94,21 @@ pub struct ServeConfig {
     /// Testing aid: run the retention pass every few seconds instead of hourly.
     #[serde(default)]
     pub retention_interval_secs: Option<u64>,
+    /// Cookie the authenticator reads the credential from when there is no
+    /// bearer header.
+    #[serde(default)]
+    pub auth_cookie: Option<String>,
+    /// `api` checks `/api/*` and `/mcp`; `all` checks every path except
+    /// `/api/health` and needs an authenticator.
+    #[serde(default = "default_auth_scope")]
+    pub auth_scope: String,
+    /// Where a user who is not signed in goes to sign in; reported on 401s.
+    #[serde(default)]
+    pub login_url: Option<String>,
+}
+
+fn default_auth_scope() -> String {
+    "api".into()
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -182,17 +198,24 @@ impl Server {
         store: Arc<Store>,
         dispatcher: Option<Arc<dyn RouteDispatcher>>,
     ) -> Result<Server, ServerError> {
-        Server::start_with(config, store, dispatcher, None)
+        Server::start_with(config, store, dispatcher, None, None)
     }
 
+    /// `authenticator` is set only when auth is enabled; with it and no
+    /// configured token, engines get a token generated for this start.
     pub fn start_with(
-        config: ServeConfig,
+        mut config: ServeConfig,
         store: Arc<Store>,
         dispatcher: Option<Arc<dyn RouteDispatcher>>,
         rule_dispatcher: Option<Arc<dyn RuleDispatcher>>,
+        authenticator: Option<Arc<dyn Authenticator>>,
     ) -> Result<Server, ServerError> {
         custom::check_conflicts(&config.custom_routes)?;
         base_path::check(&config.base_path)?;
+        auth::check(&config, authenticator.is_some())?;
+        if authenticator.is_some() && config.token.is_none() {
+            config.token = Some(auth::generate_token());
+        }
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(4)
             .thread_name("cereyan-server")
@@ -218,6 +241,7 @@ impl Server {
             config,
             store,
             dispatcher,
+            authenticator,
             addr,
             shutdown_rx.clone(),
         )?);

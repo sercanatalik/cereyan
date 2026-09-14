@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use cereyan_server::{
-    DispatchRequest, DispatchResponse, RouteDispatcher, RuleDispatcher, ServeConfig,
+    Authenticator, DispatchRequest, DispatchResponse, RouteDispatcher, RuleDispatcher, ServeConfig,
 };
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -95,6 +95,36 @@ impl RuleDispatcher for PyRuleDispatcher {
     }
 }
 
+/// Calls the Python authenticator with a credential. A non-empty `str` names
+/// the user; anything else, or an exception, rejects the credential.
+struct PyAuthenticator(Py<PyAny>);
+
+impl Authenticator for PyAuthenticator {
+    fn authenticate(&self, credential: &str) -> Option<String> {
+        Python::attach(|py| match self.0.bind(py).call1((credential,)) {
+            Ok(value) if value.is_none() => None,
+            Ok(value) => match value.extract::<String>() {
+                Ok(user) => Some(user).filter(|u| !u.is_empty()),
+                Err(_) => {
+                    let kind = value
+                        .get_type()
+                        .name()
+                        .map(|n| n.to_string())
+                        .unwrap_or_default();
+                    eprintln!(
+                        "cereyan: the authenticator returned {kind}, expected str or None; rejecting the credential"
+                    );
+                    None
+                }
+            },
+            Err(e) => {
+                e.print(py);
+                None
+            }
+        })
+    }
+}
+
 #[pyclass(frozen)]
 pub struct Server {
     inner: Mutex<Option<Arc<cereyan_server::Server>>>,
@@ -107,13 +137,14 @@ impl Server {
     /// Start serving. `config` is the JSON form of ServeConfig; `dispatcher`
     /// is a callable handling custom routes.
     #[staticmethod]
-    #[pyo3(signature = (store, config, dispatcher=None, rule_dispatcher=None))]
+    #[pyo3(signature = (store, config, dispatcher=None, rule_dispatcher=None, authenticator=None))]
     fn start(
         py: Python<'_>,
         store: &Store,
         config: &str,
         dispatcher: Option<Py<PyAny>>,
         rule_dispatcher: Option<Py<PyAny>>,
+        authenticator: Option<Py<PyAny>>,
     ) -> PyResult<Server> {
         let config: ServeConfig = serde_json::from_str(config)
             .map_err(|e| PyValueError::new_err(format!("invalid server config: {e}")))?;
@@ -122,9 +153,17 @@ impl Server {
             dispatcher.map(|d| Arc::new(PyDispatcher(d)) as Arc<dyn RouteDispatcher>);
         let rules: Option<Arc<dyn RuleDispatcher>> =
             rule_dispatcher.map(|d| Arc::new(PyRuleDispatcher(d)) as Arc<dyn RuleDispatcher>);
+        let authenticator: Option<Arc<dyn Authenticator>> =
+            authenticator.map(|a| Arc::new(PyAuthenticator(a)) as Arc<dyn Authenticator>);
         let server = py
             .detach(move || {
-                cereyan_server::Server::start_with(config, store_arc, dispatcher, rules)
+                cereyan_server::Server::start_with(
+                    config,
+                    store_arc,
+                    dispatcher,
+                    rules,
+                    authenticator,
+                )
             })
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         let port = server.port();

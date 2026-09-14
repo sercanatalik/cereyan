@@ -28,6 +28,8 @@ pub struct AppState {
     pub scheduler: Scheduler,
     pub timer: Timer,
     pub dispatcher: Option<Arc<dyn RouteDispatcher>>,
+    /// Validates credentials other than the static token; set only when auth is enabled.
+    pub authenticator: Option<Arc<dyn crate::auth::Authenticator>>,
     pub live_flows: RwLock<HashSet<i64>>,
     pub addr: SocketAddr,
     pub started_at: i64,
@@ -62,6 +64,7 @@ impl AppState {
         config: ServeConfig,
         store: Arc<Store>,
         dispatcher: Option<Arc<dyn RouteDispatcher>>,
+        authenticator: Option<Arc<dyn crate::auth::Authenticator>>,
         addr: SocketAddr,
         shutdown: watch::Receiver<bool>,
     ) -> Result<AppState, ServerError> {
@@ -78,6 +81,7 @@ impl AppState {
             index: ActiveIndex::new(),
             stream: Broadcaster::new(),
             dispatcher,
+            authenticator,
             live_flows: RwLock::new(live),
             addr,
             started_at: now_micros(),
