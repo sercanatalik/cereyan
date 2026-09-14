@@ -1,8 +1,9 @@
 import createClient from "openapi-fetch";
 import { announceAuthRequired } from "@/components/token-prompt";
+import { basePath } from "@/lib/base";
 import type { components, paths } from "./schema";
 
-export const api = createClient<paths>({ baseUrl: "" });
+export const api = createClient<paths>({ baseUrl: basePath() });
 
 // A 401 means the server wants a token: raise the prompt (see TokenPrompt).
 api.use({

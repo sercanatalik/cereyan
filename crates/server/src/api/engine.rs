@@ -155,7 +155,7 @@ pub async fn work(
         nice: req.nice,
     };
     let deadline = tokio::time::Instant::now() + Duration::from_millis(req.wait_ms.min(30_000));
-    let url = format!("http://{}", state.addr);
+    let url = state.public_url();
     loop {
         if state
             .shutting_down

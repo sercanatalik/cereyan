@@ -32,7 +32,10 @@ pub struct ServerInfo {
     pub home: String,
     pub pid: u32,
     pub started_at: i64,
+    /// Dialable URL including the base path, with no trailing slash.
     pub url: String,
+    /// URL path every TCP route is served under; empty at the root.
+    pub base_path: String,
     pub served_dir: Option<String>,
     pub engines: Vec<serde_json::Value>,
     pub queued: usize,
@@ -51,7 +54,8 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         home: state.config.home.display().to_string(),
         pid: std::process::id(),
         started_at: state.started_at,
-        url: format!("http://{}", state.addr),
+        url: state.public_url(),
+        base_path: state.config.base_path.clone(),
         served_dir: state
             .config
             .served_dir

@@ -1578,6 +1578,8 @@ export interface components {
             updated_at: components["schemas"]["i64"];
         };
         ServerInfo: {
+            /** @description URL path every TCP route is served under; empty at the root. */
+            base_path: string;
             engines: unknown[];
             home: string;
             /** Format: int32 */
@@ -1588,6 +1590,7 @@ export interface components {
             started_at: number;
             /** Format: int64 */
             stream_seq: number;
+            /** @description Dialable URL including the base path, with no trailing slash. */
             url: string;
             version: string;
         };

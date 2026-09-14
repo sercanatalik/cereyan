@@ -63,7 +63,13 @@ fn bearer_token(req: &Request<Body>) -> Option<String> {
     }
 }
 
-/// Middleware: require the configured token on `/api/*` except `/api/health`.
+/// Whether a path needs the token: `/mcp` and everything under `/api/` except
+/// `/api/health`. Custom routes outside `/api/` stay open.
+fn protected(path: &str) -> bool {
+    path == "/mcp" || (path.starts_with("/api/") && path != "/api/health")
+}
+
+/// Middleware: require the configured token on the paths `protected` names.
 pub async fn require_token(
     State(state): State<Arc<AppState>>,
     req: Request<Body>,
@@ -72,7 +78,7 @@ pub async fn require_token(
     let Some(expected) = state.config.token.as_deref() else {
         return next.run(req).await;
     };
-    if req.uri().path() == "/api/health" || req.extensions().get::<TrustedTransport>().is_some() {
+    if !protected(req.uri().path()) || req.extensions().get::<TrustedTransport>().is_some() {
         return next.run(req).await;
     }
     let presented = bearer_token(&req).or_else(|| cookie_token(&req));

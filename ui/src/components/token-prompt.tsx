@@ -2,14 +2,19 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { basePath } from "@/lib/base";
 
 export const AUTH_REQUIRED_EVENT = "cereyan:auth-required";
 const COOKIE = "cereyan_token";
 
-/** Store the token as a strict same-site cookie scoped to the API path. */
+/** The token as a strict same-site cookie scoped to the API path under the base path. */
+export function tokenCookie(token: string, base: string = basePath()) {
+  return `${COOKIE}=${encodeURIComponent(token)}; path=${base}/api; SameSite=Strict`;
+}
+
 export function storeToken(token: string) {
   // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API is not available in every browser this UI targets
-  document.cookie = `${COOKIE}=${encodeURIComponent(token)}; path=/api; SameSite=Strict`;
+  document.cookie = tokenCookie(token);
 }
 
 /** Fired by the API client on a 401; the prompt listens for it. */

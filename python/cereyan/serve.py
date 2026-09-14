@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import signal
 import sys
 import traceback
@@ -90,16 +91,56 @@ def resolve_socket(directory: str, socket: str | None = None, app_socket: str | 
     return os.path.abspath(os.path.expanduser(str(value)))
 
 
+_BASE_SEGMENT = re.compile(r"[A-Za-z0-9._~-]+")
+
+
+def normalize_base_path(value: str, source: str) -> str:
+    """``""`` for the root, otherwise ``/a/b`` with no trailing slash."""
+    stripped = value.strip("/")
+    if not stripped:
+        return ""
+    for segment in stripped.split("/"):
+        if segment in (".", "..") or not _BASE_SEGMENT.fullmatch(segment):
+            raise CereyanError(
+                f"invalid base path {value!r} from {source}: each segment must be letters, digits, "
+                "'-', '_', '.', or '~', and not '.' or '..'"
+            )
+    return "/" + stripped
+
+
+def resolve_base_path(directory: str, base_path: str | None = None, app_base_path: str | None = None) -> str:
+    """Flag, environment, app.serve(), cereyan.toml. ``""`` means the root."""
+    settings = server_settings(directory)
+    candidates = (
+        (base_path, "--base-path"),
+        (os.environ.get("CEREYAN_BASE_PATH") or None, "CEREYAN_BASE_PATH"),
+        (app_base_path, "app.serve(base_path=)"),
+        (settings.get("base_path"), "[server] base_path in cereyan.toml"),
+    )
+    for value, source in candidates:
+        if value is not None:
+            if not isinstance(value, str):
+                raise CereyanError(f"invalid base path {value!r} from {source}: expected a string")
+            return normalize_base_path(value, source)
+    return ""
+
+
 def serve(directory: str | None = None, *, host: str | None = None, port: int | None = None,
           max_engines: int | None = None, engine_max_runs: int | None = None, open_browser: bool | None = None,
           discover: bool = True, quiet: bool = False, ready=None, crash_retries: int | None = None,
-          token: str | None = None, socket: str | None = None) -> int:
+          token: str | None = None, socket: str | None = None, app_host: str | None = None,
+          app_port: int | None = None, app_token: str | None = None, app_socket: str | None = None,
+          base_path: str | None = None, app_base_path: str | None = None) -> int:
+    """Serve ``directory``. ``host``, ``port``, ``token``, ``socket``, and ``base_path``
+    are the CLI flags; the ``app_*`` values come from ``app.serve()`` and rank below
+    the environment."""
     directory = os.path.abspath(directory or os.getcwd())
     if not os.path.isdir(directory):
         raise CereyanError(f"{directory} is not a directory")
     settings = server_settings(directory)
-    resolved_token = resolve_token(directory, token)
-    resolved_socket = resolve_socket(directory, socket)
+    resolved_token = resolve_token(directory, token, app_token)
+    resolved_socket = resolve_socket(directory, socket, app_socket)
+    resolved_base_path = resolve_base_path(directory, base_path, app_base_path)
     if discover:
         modules = discover_modules(directory)
         engine.runner.suppress_top_level_runs(True, "cereyan serve is importing modules")
@@ -108,7 +149,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
                 print(f"warning: could not import {name}:\n{tb}", file=sys.stderr)
         finally:
             engine.runner.suppress_top_level_runs(False)
-    resolved_host, resolved_port = resolve_host_port(directory, host, port)
+    resolved_host, resolved_port = resolve_host_port(directory, host, port, app_host, app_port)
 
     registered = apps.all_apps()
     flows = [f for app in registered for f in app.flows.values()]
@@ -167,6 +208,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "retention_interval_secs": int(os.environ["CEREYAN_RETENTION_INTERVAL"]) if os.environ.get("CEREYAN_RETENTION_INTERVAL") else None,
         "token": resolved_token,
         "socket": resolved_socket,
+        "base_path": resolved_base_path,
     }
     if "max_engines" in toml_defaults and max_engines is None and "max_engines" not in settings:
         config["max_engines"] = int(toml_defaults["max_engines"])
@@ -183,7 +225,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     should_open = open_browser if open_browser is not None else settings.get("open_browser", True)
     if should_open and not os.environ.get("CEREYAN_NO_BROWSER"):
         try:
-            webbrowser.open(server.url)
+            webbrowser.open(server.url + "/")
         except Exception:
             pass
     if ready is not None:

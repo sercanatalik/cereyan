@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use axum::extract::{Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::IntoResponse;
 use futures::stream::Stream;
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -34,7 +35,7 @@ fn to_sse(e: &StreamEvent) -> Event {
 pub async fn stream(
     State(state): State<Arc<AppState>>,
     Query(q): Query<StreamQuery>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> impl IntoResponse {
     let mut rx = state.stream.subscribe();
     let latest = state.stream.latest_seq();
     let since = q.since.unwrap_or(latest);
@@ -110,7 +111,11 @@ pub async fn stream(
             }
         },
     );
-    Sse::new(live).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+    // nginx buffers proxied responses by default, which would hold events back.
+    (
+        [("x-accel-buffering", "no")],
+        Sse::new(live).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))),
+    )
 }
 
 /// Small helper turning a producer future into a Stream via an mpsc channel.

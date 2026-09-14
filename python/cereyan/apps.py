@@ -163,13 +163,17 @@ class App:
     def serve(self, host: str | None = None, port: int | None = None, **options) -> int:
         """Serve the flows and routes registered so far, blocking until stopped.
 
-        Host and port given here rank below the CLI flags and environment and
-        above ``cereyan.toml``.
+        Host, port, ``token``, ``socket``, and ``base_path`` given here rank below
+        the CLI flags and environment and above ``cereyan.toml``.
         """
         from .serve import serve
 
         directory = os.path.dirname(os.path.abspath(self.source_file)) if self.source_file else os.getcwd()
-        return serve(directory, host=host, port=port, discover=False, **options)
+        token = options.pop("token", None)
+        socket = options.pop("socket", None)
+        base_path = options.pop("base_path", None)
+        return serve(directory, app_host=host, app_port=port, app_token=token, app_socket=socket,
+                     app_base_path=base_path, discover=False, **options)
 
 
 def all_apps() -> list[App]:

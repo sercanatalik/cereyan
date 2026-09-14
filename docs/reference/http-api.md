@@ -1369,6 +1369,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `base_path` | string | yes | URL path every TCP route is served under; empty at the root. |
 | `engines` | array of any | yes |  |
 | `home` | string | yes |  |
 | `pid` | integer (int32) | yes |  |
@@ -1376,7 +1377,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `served_dir` | string or null | no |  |
 | `started_at` | integer (int64) | yes |  |
 | `stream_seq` | integer (int64) | yes |  |
-| `url` | string | yes |  |
+| `url` | string | yes | Dialable URL including the base path, with no trailing slash. |
 | `version` | string | yes |  |
 
 ### `Settings`

@@ -71,7 +71,8 @@ function SettingsPage() {
               <KeyValueList
                 items={[
                   { label: "Version", value: s.version },
-                  { label: "URL", value: `http://${s.host}:${s.port}` },
+                  { label: "URL", value: srv?.url ?? `http://${s.host}:${s.port}` },
+                  { label: "Base path", value: srv ? srv.base_path || "/" : "-" },
                   { label: "PID", value: String(s.pid) },
                   { label: "Home", value: s.home },
                   { label: "Served directory", value: s.served_dir ?? "-" },

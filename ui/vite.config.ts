@@ -5,6 +5,8 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import path from "node:path";
 
 export default defineConfig({
+  // Relative asset URLs: the server injects <base href> so they resolve under its base path.
+  base: "./",
   plugins: [
     tanstackRouter({ target: "react", autoCodeSplitting: false, routesDirectory: "./src/routes", generatedRouteTree: "./src/routeTree.gen.ts" }),
     react(),

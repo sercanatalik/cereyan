@@ -19,6 +19,7 @@ tempfile = "3.27"
 pyo3 = "0.29"
 utoipa = { version = "5.5", features = ["axum_extras"] }
 axum = { version = "0.8", features = ["json", "query", "tokio", "http1"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "time", "sync", "signal", "net"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures = "0.3"

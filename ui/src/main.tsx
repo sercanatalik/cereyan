@@ -4,6 +4,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import { TokenPrompt } from "./components/token-prompt";
+import { basePath } from "./lib/base";
 import { LiveProvider } from "./lib/live";
 import { ProjectProvider } from "./lib/project";
 import { routeTree } from "./routeTree.gen";
@@ -12,7 +13,7 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, refetchOnWindowFocus: false, retry: 1 } },
 });
 
-const router = createRouter({ routeTree, context: { queryClient } });
+const router = createRouter({ routeTree, context: { queryClient }, basepath: basePath() || "/" });
 
 declare module "@tanstack/react-router" {
   interface Register {

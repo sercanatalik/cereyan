@@ -96,6 +96,6 @@ async def status() -> dict:
 
 ## Where routes appear
 
-The Settings page lists every registered route with its source. Routes under `/api/` are protected by the API token like the built-in API; routes elsewhere are open. Starting runs from a route goes through `cereyan.client`, so the run records `created_by = client`.
+The Settings page lists every registered route with its source. Routes under `/api/` are protected by the API token like the built-in API; routes elsewhere are open. With a `base_path` set (see [Configuration](../reference/configuration.md)), every route is served under it: `@app.get("/webhook")` answers at `/cereyan/webhook`, and the handler does not change. Starting runs from a route goes through `cereyan.client`, so the run records `created_by = client`.
 
 Related: [Secure the server](secure-the-server.md), the [webhook route example](../examples/webhook_route.md).

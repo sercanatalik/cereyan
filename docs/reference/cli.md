@@ -33,7 +33,7 @@ cereyan run [-h] [--param NAME=VALUE] [--quiet] target
 ## `cereyan serve`
 
 ```text
-cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--engine-max-runs ENGINE_MAX_RUNS] [--no-open] [--crash-retries CRASH_RETRIES] [--token TOKEN] [--socket SOCKET] [dir]
+cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--engine-max-runs ENGINE_MAX_RUNS] [--no-open] [--crash-retries CRASH_RETRIES] [--token TOKEN] [--socket SOCKET] [--base-path BASE_PATH] [dir]
 ```
 
 | Argument | Meaning |
@@ -50,6 +50,7 @@ cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--en
 | `--crash-retries` `CRASH_RETRIES` | default crash retry limit (flow decorators override). |
 | `--token` `TOKEN` | require this API token (also CEREYAN_TOKEN or [server] token). |
 | `--socket` `SOCKET` | also listen on this Unix socket path (also CEREYAN_SOCKET or [server] socket). |
+| `--base-path` `BASE_PATH` | serve everything under this URL path, e.g. /cereyan (also CEREYAN_BASE_PATH or [server] base_path; default: the root). |
 
 ## `cereyan backfill`
 

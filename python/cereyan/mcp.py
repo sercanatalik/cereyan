@@ -51,6 +51,12 @@ class Transport:
         parts = urllib.parse.urlsplit(self.url or "")
         return http.client.HTTPConnection(parts.hostname or "127.0.0.1", parts.port or 80, timeout=self.timeout)
 
+    def _target(self) -> str:
+        """``/mcp`` under the path of the server URL; the socket serves at the root."""
+        if self.socket_path:
+            return "/mcp"
+        return urllib.parse.urlsplit(self.url or "").path.rstrip("/") + "/mcp"
+
     def send(self, message: dict) -> dict | None:
         """POST one message; returns the JSON reply, or None for a notification."""
         headers = {"content-type": "application/json", "accept": "application/json"}
@@ -60,7 +66,7 @@ class Transport:
             headers[SESSION_HEADER] = self.session
         conn = self._connection()
         try:
-            conn.request("POST", "/mcp", body=json.dumps(message).encode("utf-8"), headers=headers)
+            conn.request("POST", self._target(), body=json.dumps(message).encode("utf-8"), headers=headers)
             resp = conn.getresponse()
             raw = resp.read()
             sid = resp.getheader(SESSION_HEADER)

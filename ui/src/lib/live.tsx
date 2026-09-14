@@ -4,6 +4,7 @@
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Run, TaskRun } from "@/api/client";
+import { basePath } from "./base";
 
 export type LiveStatus = "connecting" | "live" | "reconnecting";
 
@@ -107,7 +108,7 @@ export function LiveProvider({ children }: { children: React.ReactNode }) {
     const connect = () => {
       if (closed) return;
       const since = lastSeq.current ? `?since=${lastSeq.current}` : "";
-      source = new EventSource(`/api/stream${since}`);
+      source = new EventSource(`${basePath()}/api/stream${since}`);
       const handle = (kind: string) => (raw: MessageEvent) => {
         const seq = Number(raw.lastEventId || 0);
         if (seq) lastSeq.current = seq;

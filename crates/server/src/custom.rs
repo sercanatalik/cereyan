@@ -96,6 +96,13 @@ pub const BUILTIN_PATHS: &[&str] = &[
     "/api/variables/{name}",
     "/api/events/{id}",
     "/api/artifacts",
+    "/api/vocabulary",
+    "/api/runs/{id}/resume",
+    "/api/runs/{id}/input",
+    "/api/rules/{id}/expectations",
+    "/api/schedules/{sid}/skips",
+    "/api/schedules/{sid}/skips/{fire}",
+    "/mcp",
 ];
 
 fn normalize(path: &str) -> String {
@@ -264,5 +271,36 @@ mod tests {
         assert!(check_conflicts(&[spec("GET", "/x"), spec("GET", "/x")]).is_err());
         assert!(check_conflicts(&[spec("GET", "/x"), spec("POST", "/x")]).is_ok());
         assert!(check_conflicts(&[spec("GET", "relative")]).is_err());
+    }
+
+    /// Every path `api::router` registers, read from its source so a route
+    /// without an OpenAPI annotation (`/mcp`, `/api/stream`) is covered too.
+    fn registered_paths() -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = include_str!("api/mod.rs");
+        while let Some(i) = rest.find(".route(") {
+            rest = rest[i + ".route(".len()..].trim_start();
+            let literal = rest
+                .strip_prefix('"')
+                .expect("api::router passes route paths as string literals");
+            let end = literal.find('"').expect("closing quote");
+            out.push(literal[..end].to_string());
+            rest = &literal[end..];
+        }
+        out
+    }
+
+    #[test]
+    fn every_registered_route_is_a_builtin_path() {
+        let paths = registered_paths();
+        assert!(paths.len() > 40, "found only {} routes", paths.len());
+        let missing: Vec<&String> = paths
+            .iter()
+            .filter(|p| check_conflicts(&[spec("GET", p)]).is_ok())
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "registered in api::router but missing from BUILTIN_PATHS: {missing:?}"
+        );
     }
 }

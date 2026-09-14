@@ -4,6 +4,7 @@
 
 pub mod api;
 pub mod auth;
+mod base_path;
 mod custom;
 mod dispatch;
 mod events;
@@ -84,6 +85,11 @@ pub struct ServeConfig {
     /// Unix socket path served next to the TCP listener (Unix only).
     #[serde(default)]
     pub socket: Option<PathBuf>,
+    /// URL path the TCP listener serves every route under: `""` for the root,
+    /// otherwise `/segment[/segment…]` with no trailing slash. The Unix socket
+    /// always serves at the root.
+    #[serde(default)]
+    pub base_path: String,
     /// Testing aid: run the retention pass every few seconds instead of hourly.
     #[serde(default)]
     pub retention_interval_secs: Option<u64>,
@@ -186,6 +192,7 @@ impl Server {
         rule_dispatcher: Option<Arc<dyn RuleDispatcher>>,
     ) -> Result<Server, ServerError> {
         custom::check_conflicts(&config.custom_routes)?;
+        base_path::check(&config.base_path)?;
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(4)
             .thread_name("cereyan-server")
@@ -258,6 +265,8 @@ impl Server {
         state.write_discovery_file()?;
 
         let router = api::router(state.clone());
+        // TCP serves under the base path; the socket below always serves at the root.
+        let tcp = base_path::service(router.clone(), &state.config.base_path);
         // Optional Unix socket: same routes, trusted by file mode (no token).
         let socket_listener = match state.config.socket.clone() {
             Some(path) => Some(runtime.block_on(bind_unix_socket(&path))?),
@@ -313,7 +322,8 @@ impl Server {
                         let _ = &socket_listener;
                         None
                     };
-                    let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
+                    let tcp = axum::ServiceExt::<axum::extract::Request>::into_make_service(tcp);
+                    let serve = axum::serve(listener, tcp).with_graceful_shutdown(async move {
                         let _ = rx.wait_for(|v| *v).await;
                     });
                     if let Err(e) = serve.await {
@@ -396,8 +406,9 @@ impl Server {
         self.addr.port()
     }
 
+    /// The dialable URL including the base path; see `AppState::public_url`.
     pub fn url(&self) -> String {
-        format!("http://{}", self.addr)
+        self.state.public_url()
     }
 
     pub fn state(&self) -> &Arc<AppState> {

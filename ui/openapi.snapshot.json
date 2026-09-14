@@ -2295,6 +2295,10 @@
       },
       "ServerInfo": {
         "properties": {
+          "base_path": {
+            "description": "URL path every TCP route is served under; empty at the root.",
+            "type": "string"
+          },
           "engines": {
             "items": {},
             "type": "array"
@@ -2327,6 +2331,7 @@
             "type": "integer"
           },
           "url": {
+            "description": "Dialable URL including the base path, with no trailing slash.",
             "type": "string"
           },
           "version": {
@@ -2339,6 +2344,7 @@
           "pid",
           "started_at",
           "url",
+          "base_path",
           "engines",
           "queued",
           "stream_seq"

@@ -103,25 +103,32 @@ impl AppState {
         self.config.home.join("server.json")
     }
 
-    pub fn write_discovery_file(&self) -> Result<(), ServerError> {
-        // `host` records what was bound; `url` has to be dialable. A listener on an
-        // unspecified address answers on loopback, and 0.0.0.0 is not somewhere a
-        // client can connect: Linux and macOS route it to loopback, Windows refuses
-        // it outright, so every discovery consumer there fails to find the server.
-        let url = if self.addr.ip().is_unspecified() {
+    /// The URL every client uses: the dialable address followed by the base
+    /// path, with no trailing slash. A listener on an unspecified address
+    /// answers on loopback, and 0.0.0.0 is not somewhere a client can connect:
+    /// Linux and macOS route it to loopback, Windows refuses it outright, so
+    /// every discovery consumer there would fail to find the server.
+    pub fn public_url(&self) -> String {
+        let authority = if self.addr.ip().is_unspecified() {
             let loopback = if self.addr.is_ipv6() {
                 "[::1]"
             } else {
                 "127.0.0.1"
             };
-            format!("http://{}:{}", loopback, self.addr.port())
+            format!("{}:{}", loopback, self.addr.port())
         } else {
-            format!("http://{}", self.addr)
+            self.addr.to_string()
         };
+        format!("http://{}{}", authority, self.config.base_path)
+    }
+
+    pub fn write_discovery_file(&self) -> Result<(), ServerError> {
+        // `host` records what was bound; `url` has to be dialable.
         let body = json!({
             "host": self.addr.ip().to_string(),
             "port": self.addr.port(),
-            "url": url,
+            "base_path": self.config.base_path,
+            "url": self.public_url(),
             "pid": std::process::id(),
             "started_at": self.started_at,
             "version": self.config.version,

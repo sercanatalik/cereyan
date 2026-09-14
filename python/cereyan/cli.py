@@ -45,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--crash-retries", type=int, help="default crash retry limit (flow decorators override)")
     serve.add_argument("--token", help="require this API token (also CEREYAN_TOKEN or [server] token)")
     serve.add_argument("--socket", help="also listen on this Unix socket path (also CEREYAN_SOCKET or [server] socket)")
+    serve.add_argument("--base-path", help="serve everything under this URL path, e.g. /cereyan (also CEREYAN_BASE_PATH or [server] base_path; default: the root)")
     serve.set_defaults(func=cmd_serve)
 
     backfill = sub.add_parser("backfill", help="create runs over a date range (requires a running server)")
@@ -165,6 +166,7 @@ def cmd_serve(args) -> int:
             crash_retries=args.crash_retries,
             token=args.token,
             socket=args.socket,
+            base_path=args.base_path,
         )
     except CereyanError as exc:
         print(f"error: {exc}", file=sys.stderr)

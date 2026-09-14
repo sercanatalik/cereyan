@@ -8,6 +8,7 @@ Cereyan reads `cereyan.toml` from the served directory, a handful of environment
 [server]
 host = "127.0.0.1"
 port = 4200
+base_path = "/cereyan"        # optional: serve everything under this URL path
 token = "change-me"           # optional: require Authorization: Bearer on the API
 socket = "/tmp/cereyan.sock"  # optional: also listen on a Unix socket (Unix only)
 max_engines = 8
@@ -39,6 +40,7 @@ from = "cereyan@example.com"
 |---|---|---|---|
 | `host` | string | `127.0.0.1` | Bind address. The server warns when bound to a non-loopback address without a token. |
 | `port` | integer | `4200` | TCP port; `0` picks a free port. |
+| `base_path` | string | the root | URL path the TCP listener serves the UI, the API, `/mcp`, and custom routes under, for example `/cereyan`. Segments are letters, digits, `-`, `_`, `.`, or `~`. `/` and the bare base path redirect to `{base_path}/`; other paths outside it answer 404. The Unix socket stays at the root. |
 | `token` | string | unset | API token required on every `/api/*` route except `/api/health`. |
 | `socket` | string | unset | Unix socket path served next to the TCP port; not available on Windows. |
 | `max_engines` | integer | CPU count | Size of the warm engine pool. |
@@ -76,6 +78,7 @@ The Settings page (`PATCH /api/settings`) updates resource totals, retention, an
 |---|---|
 | Home | `--home`, `CEREYAN_HOME`, `~/.cereyan` |
 | Host and port | `--host`/`--port`, `CEREYAN_HOST`/`CEREYAN_PORT`, `app.serve(host, port)`, `[server]`, `127.0.0.1:4200` |
+| Base path | `--base-path`, `CEREYAN_BASE_PATH`, `app.serve(base_path=)`, `[server] base_path`, the root |
 | Token | `--token`, `CEREYAN_TOKEN`, `app.serve(token=)`, `[server] token` |
 | Socket | `--socket`, `CEREYAN_SOCKET`, `app.serve(socket=)`, `[server] socket` |
 | `crash_retries` | the flow decorator, `[defaults]`, `--crash-retries`, `5` |
@@ -86,8 +89,9 @@ The Settings page (`PATCH /api/settings`) updates resource totals, retention, an
 |---|---|
 | `CEREYAN_HOME` | Runtime home directory. Engine children inherit it. |
 | `CEREYAN_HOST`, `CEREYAN_PORT` | Server bind address. |
+| `CEREYAN_BASE_PATH` | URL path to serve under. |
 | `CEREYAN_TOKEN` | API token required by the server and sent by the CLI, the Python client, `cereyan mcp`, and engine children. |
 | `CEREYAN_SOCKET` | Unix socket path served next to the TCP port. |
 | `CEREYAN_NO_BROWSER` | Do not open the UI on `serve`. |
 
-Set by the server for its engine children, not for users: `CEREYAN_SERVER` (the server URL) and `CEREYAN_ENGINE_ID`. Two knobs exist for the test suite and benchmarks only: `CEREYAN_RETENTION_INTERVAL` (seconds between retention passes, default hourly) and `CEREYAN_FAST_CRASH_RERUN`.
+Set by the server for its engine children, not for users: `CEREYAN_ENGINE_ID`. An engine child finds the server through the `url` in `server.json`, base path included; `CEREYAN_SERVER` overrides that URL for an engine started by hand. Two knobs exist for the test suite and benchmarks only: `CEREYAN_RETENTION_INTERVAL` (seconds between retention passes, default hourly) and `CEREYAN_FAST_CRASH_RERUN`.

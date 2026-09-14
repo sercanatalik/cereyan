@@ -11,7 +11,7 @@ token = "change-me"
 
 Or `cereyan serve --token change-me`, `CEREYAN_TOKEN`, or `app.serve(token=...)`, in that precedence. With a token set, every `/api/*` route except `/api/health`, and the `/mcp` endpoint, require `Authorization: Bearer <token>`. Requests without it get 401.
 
-Clients pick the token up from `CEREYAN_TOKEN` or `cereyan --token`; engine children receive it in their environment; the UI prompts for it once and stores it in a `cereyan_token` cookie scoped to `/api`. `server.json` records `auth: true` and never the token itself.
+Clients pick the token up from `CEREYAN_TOKEN` or `cereyan --token`; engine children receive it in their environment; the UI prompts for it once and stores it in a `cereyan_token` cookie scoped to `/api` under the base path. `server.json` records `auth: true` and never the token itself.
 
 ```python
 from cereyan import client
@@ -31,7 +31,27 @@ port = 4200
 token = "..."
 ```
 
-The server warns at start when bound to a non-loopback address without a token. There is no TLS: put a reverse proxy in front if the network is not trusted.
+The server warns at start when bound to a non-loopback address without a token. There is no TLS: put a reverse proxy in front if the network is not trusted, as below.
+
+## Put it behind nginx at a sub-path
+
+```toml
+[server]
+base_path = "/cereyan"
+```
+
+Or `--base-path /cereyan`, `CEREYAN_BASE_PATH`, or `app.serve(base_path=...)`. The server then answers everything under that path, custom routes included, and the proxy forwards the path unchanged:
+
+```nginx
+location /cereyan/ {
+    proxy_pass http://127.0.0.1:4200;   # no trailing slash: the path passes through unchanged
+    proxy_http_version 1.1;
+    proxy_buffering off;                # live updates on /api/stream
+    proxy_read_timeout 1h;
+}
+```
+
+A `proxy_pass` ending in `/` strips `/cereyan`, and every request then answers 404. The same URLs work without the proxy, at `http://127.0.0.1:4200/cereyan/`, and `/` redirects there. The CLI, the Python client, engines, and `cereyan mcp` read the base path from `server.json`; the Unix socket stays at the root. Keep the server on loopback so the proxy, which terminates TLS, is the only way in.
 
 ## Trust local processes through the socket
 
