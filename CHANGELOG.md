@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.14.0 (2026-09-14)
+
 - **Serve under a base path, so a reverse proxy can put cereyan at a sub-path.** `--base-path /cereyan`, `CEREYAN_BASE_PATH`, `app.serve(base_path=)` or `[server] base_path` serves everything the TCP listener answers under that path: the UI, its assets, the API, `/mcp`, and custom routes, which keep the paths they were registered with, so `@app.get("/webhook")` answers at `/cereyan/webhook`. `/` and `/cereyan` redirect to `/cereyan/`, and any other path outside it answers 404. `server.json` records `base_path` and its `url` includes it, so the CLI, the Python client, engines and `cereyan mcp` find the server without being told; `/api/server` reports both, and the Settings page shows the base path. The Unix socket keeps serving at the root. The proxy must pass the path through unchanged rather than strip it.
 - **Breaking: custom routes outside `/api/` no longer require the API token.** The token check covered every route the router matched, so with a token set a route such as `@app.get("/health")` answered 401, although the custom routes guide says routes outside `/api/` are open. The check now covers `/api/*` except `/api/health`, and `/mcp`. A route that relied on the token has to move under `/api/`.
 - `app.serve(host=, port=, token=, socket=)` passed its arguments as the command-line flags, so it ranked above `CEREYAN_HOST`, `CEREYAN_PORT`, `CEREYAN_TOKEN` and `CEREYAN_SOCKET`. It now ranks below the environment and above `cereyan.toml`, as documented.
