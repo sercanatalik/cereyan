@@ -185,8 +185,10 @@ def test_cooldown_across_lapses_and_disable_cancels(pro):
         "do": [{"kind": "cancel_run"}],
     })
     rid = created["id"]
-    a = start(pro, "slow", seconds=1.2)
-    b = start(pro, "slow", seconds=1.2)
+    # Long enough that the server can lapse and cancel the first run well before
+    # it ends; a cancel that lands after the run completed finds nothing to cancel.
+    a = start(pro, "slow", seconds=3.0)
+    b = start(pro, "slow", seconds=3.0)
     done_a = pro.wait_run(a["id"])
     done_b = pro.wait_run(b["id"])
     time.sleep(0.5)
