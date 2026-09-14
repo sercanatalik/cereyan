@@ -39,7 +39,7 @@ wheels = [
 
 [[package]]
 name = "cereyan"
-version = "1.13.0"
+version = "1.13.1"
 source = { editable = "." }
 
 [package.dev-dependencies]

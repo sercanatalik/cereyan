@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.13.1 (2026-09-14)
+
 - **An offline flow's `timeout_seconds` now works on Windows, and a cancel interrupts a sleeping flow there.** Both stop a flow from inside its own process, and both assumed a Unix signal. The offline timeout armed only where `signal.setitimer` exists, which it never does on Windows, so a flow run there by `python pipeline.py` or `cereyan run` ran unbounded. A cancel fell back to `_thread.interrupt_main()`, which only sets the flag CPython checks between bytecodes; a flow in `time.sleep` never reaches one, so the run ended only when the supervisor terminated the engine after the 10 second grace period, without running its `on_cancellation` hooks. Both now call `signal.raise_signal(SIGINT)` from a thread, which goes through CPython's C handler and on Windows also wakes a main thread in `time.sleep`; a real Ctrl-C during an offline flow is still a `KeyboardInterrupt`. Windows still cannot interrupt most blocking I/O: an offline timeout lands when the call returns, and a served cancel still ends the engine. An offline flow with a timeout called off the main thread, where no timeout can interrupt it on any platform, now logs a warning instead of running without one silently.
 
 ## 1.13.0 (2026-09-13)
