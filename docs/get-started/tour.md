@@ -76,8 +76,8 @@ Named JSON values with tags. Secrets are stored encrypted and shown masked. Valu
 
 ## Settings
 
-![Settings page with server details, database size and retention, resource totals, defaults, custom routes, and engines](../images/settings.png)
+![Settings page with the interface title, server details, database size and retention, resource totals, defaults, custom routes, and engines](../images/settings.png)
 
-The server's version, URL, PID, home, served directory, and start time; the database path, size, WAL size, and retention; resource totals you can add and edit; the retention and crash-retry defaults; the custom routes registered by the served Apps; and the engine pool with each engine's PID, module, runs done, and current run. Saving settings writes them back to `cereyan.toml`.
+The title shown in the top bar and the browser tab, which names this installation (`[ui] title`; empty shows `cereyan`); the server's version, URL, PID, home, served directory, and start time; the database path, size, WAL size, and retention; resource totals you can add and edit; the retention and crash-retry defaults; the custom routes registered by the served Apps; and the engine pool with each engine's PID, module, runs done, and current run. Saving settings writes them back to `cereyan.toml`.
 
 Next: the [concepts](../concepts/app-and-projects.md), or straight to the [guides](../guides/retries-timeouts-crashes.md).

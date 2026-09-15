@@ -43,6 +43,7 @@ KNOWN_KEYS = {
                "socket", "enable_auth", "auth_cookie", "auth_scope", "login_url"},
     "defaults": {"catchup", "crash_retries", "retain_days", "max_engines", "engine_max_runs"},
     "email": {"host", "port", "tls", "username", "password", "from"},
+    "ui": {"title"},
 }
 
 
@@ -89,3 +90,9 @@ def resource_totals(directory: str) -> dict[str, float]:
 def defaults(directory: str) -> dict:
     """The ``[defaults]`` table (crash_retries)."""
     return dict(load_project_config(directory).get("defaults", {}))
+
+
+def ui_title(directory: str) -> str | None:
+    """``[ui] title`` as written; the server trims it, validates it, and falls back to ``cereyan``."""
+    title = load_project_config(directory).get("ui", {}).get("title")
+    return None if title is None else str(title)

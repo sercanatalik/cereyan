@@ -36,6 +36,8 @@ pub struct ServerInfo {
     pub url: String,
     /// URL path every TCP route is served under; empty at the root.
     pub base_path: String,
+    /// UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`.
+    pub title: String,
     pub served_dir: Option<String>,
     pub engines: Vec<serde_json::Value>,
     pub queued: usize,
@@ -56,6 +58,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         started_at: state.started_at,
         url: state.public_url(),
         base_path: state.config.base_path.clone(),
+        title: state.title(),
         served_dir: state
             .config
             .served_dir

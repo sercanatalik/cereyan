@@ -103,10 +103,27 @@ function ProjectSwitcher() {
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
+// The server writes the UI title into index.html's <title>, so the first paint needs no request.
+const INITIAL_TITLE = (typeof document !== "undefined" && document.title) || "cereyan";
+
+/** The UI title (`[ui] title` in cereyan.toml), kept in step with the browser tab. */
+export function useUiTitle(): string {
+  const server = useQuery({
+    queryKey: ["server"],
+    queryFn: async () => unwrap(await api.GET("/api/server")),
+  });
+  const title = server.data?.title ?? INITIAL_TITLE;
+  useEffect(() => {
+    document.title = title;
+  }, [title]);
+  return title;
+}
+
 export function Shell({ children }: { children: React.ReactNode }) {
   const { dark, toggle } = useTheme();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const title = useUiTitle();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
@@ -119,9 +136,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }, []);
   return (
     <div className="flex h-full min-w-[960px] flex-col">
-      <header className="flex h-[52px] shrink-0 items-center gap-7 border-b bg-card px-6">
-        <Link to="/" className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-          <Mark /> cereyan
+      <header className="shrink-0 border-b bg-card">
+        <div className="frame flex h-[52px] items-center gap-7" data-testid="top-bar-row">
+        <Link to="/" className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight">
+          <Mark />
+          <span className="max-w-60 truncate" title={title} data-testid="ui-title">
+            {title}
+          </span>
         </Link>
         <nav className="flex h-full items-stretch gap-0.5" aria-label="Sections">
           {NAV.map((item) => {
@@ -159,6 +180,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
           </Button>
         </div>
+        </div>
       </header>
       <main className="flex min-w-0 flex-1 flex-col overflow-auto">{children}</main>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
@@ -187,15 +209,22 @@ export function Crumb({ items }: { items: { label: string; to?: string }[] }) {
 }
 
 /**
+ * How much of the frame a page uses: `fluid` fills it, `narrow` caps the content
+ * at 1080 px on the frame's left edge, and `bleed` runs edge to edge, leaving the
+ * page to put its own rows on the frame.
+ */
+export type PageWidth = "fluid" | "narrow" | "bleed";
+
+/**
  * A page body. List pages pass `title`; detail pages pass `crumbs` and draw
- * their own header. `wide` drops the 1280 px column for full-width layouts.
+ * their own header.
  */
 export function Page({
   crumbs,
   title,
   subtitle,
   actions,
-  wide,
+  width = "fluid",
   className,
   children,
 }: {
@@ -203,19 +232,13 @@ export function Page({
   title?: React.ReactNode;
   subtitle?: React.ReactNode;
   actions?: React.ReactNode;
-  wide?: boolean;
+  width?: PageWidth;
   className?: string;
   children: React.ReactNode;
 }) {
   const showCrumb = crumbs && crumbs.length > 1;
-  return (
-    <div
-      className={cn(
-        "flex min-h-full w-full flex-col gap-5",
-        wide ? "p-0" : "mx-auto max-w-[1280px] px-8 pt-6 pb-10",
-        className,
-      )}
-    >
+  const body = (
+    <>
       {showCrumb ? (
         <div className="flex items-center justify-between gap-4">
           <Crumb items={crumbs} />
@@ -232,6 +255,26 @@ export function Page({
         </div>
       ) : null}
       {children}
+    </>
+  );
+  if (width === "narrow") {
+    // Capped but not centred inside the frame, so the title keeps the left edge.
+    return (
+      <div className={cn("frame flex min-h-full flex-col pt-6 pb-10", className)} data-width="narrow">
+        <div className="flex w-full max-w-[1080px] flex-col gap-5">{body}</div>
+      </div>
+    );
+  }
+  return (
+    <div
+      className={cn(
+        "flex min-h-full w-full flex-col gap-5",
+        width === "bleed" ? "p-0" : "frame pt-6 pb-10",
+        className,
+      )}
+      data-width={width}
+    >
+      {body}
     </div>
   );
 }

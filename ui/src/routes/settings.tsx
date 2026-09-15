@@ -32,9 +32,11 @@ function SettingsPage() {
   const [resources, setResources] = useState<{ name: string; total: string }[]>([]);
   const [retain, setRetain] = useState("");
   const [crash, setCrash] = useState("");
+  const [title, setTitle] = useState("");
   useEffect(() => {
     const s = settings.data;
     if (!s) return;
+    setTitle(s.title === "cereyan" ? "" : s.title);
     setResources(
       Object.entries(s.resources as Record<string, { total: number }>).map(([name, v]) => ({
         name,
@@ -59,11 +61,60 @@ function SettingsPage() {
       ),
     onSuccess: () => client.invalidateQueries({ queryKey: ["settings"] }),
   });
+  // Sends only the title, so saving it does not resend the other cards' fields.
+  const saveTitle = useMutation({
+    mutationFn: async () => unwrap(await api.PATCH("/api/settings", { body: { title } })),
+    onSuccess: (saved) => {
+      client.setQueryData(["server"], (old: typeof info.data) =>
+        old ? { ...old, title: saved.title } : old,
+      );
+      document.title = saved.title;
+      client.invalidateQueries({ queryKey: ["server"] });
+      client.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
   const s = settings.data;
   const srv = info.data;
   return (
     <Page crumbs={[{ label: "Settings" }]} title="Settings">
       <div className="grid grid-cols-2 gap-4">
+        <Card className="col-span-2 gap-0 py-0">
+          <CardHead title="Interface" />
+          <CardContent className="p-4">
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+              <div className="flex items-end gap-2">
+                <label className="block text-xs text-muted-foreground" htmlFor="ui-title">
+                  Title
+                  <Input
+                    id="ui-title"
+                    className="mt-1 w-80"
+                    value={title}
+                    placeholder="cereyan"
+                    maxLength={80}
+                    onChange={(e) => setTitle(e.target.value)}
+                  />
+                </label>
+                <Button
+                  size="sm"
+                  className="mb-0.5"
+                  onClick={() => saveTitle.mutate()}
+                  disabled={saveTitle.isPending}
+                >
+                  Save
+                </Button>
+              </div>
+              <p className="min-w-72 flex-1 pb-1.5 text-xs text-muted-foreground">
+                Shown next to the mark in the top bar and as the browser tab title. Leave it empty to show
+                cereyan. Saved to cereyan.toml as <code className="font-mono">[ui] title</code>.
+              </p>
+            </div>
+            {saveTitle.isError ? (
+              <p className="mt-2 text-xs text-destructive">
+                The title was not saved: use at most 80 characters and no control characters.
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
         <Card className="gap-0 py-0">
           <CardHead title="Server" />
           <CardContent className="p-4">

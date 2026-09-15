@@ -1377,6 +1377,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `served_dir` | string or null | no |  |
 | `started_at` | integer (int64) | yes |  |
 | `stream_seq` | integer (int64) | yes |  |
+| `title` | string | yes | UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`. |
 | `url` | string | yes | Dialable URL including the base path, with no trailing slash. |
 | `version` | string | yes |  |
 
@@ -1404,6 +1405,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `secret_key_missing` | boolean | yes |  |
 | `secret_key_present` | boolean | yes |  |
 | `served_dir` | string or null | no |  |
+| `title` | string | yes | UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`. |
 | `version` | string | yes |  |
 | `wal_bytes` | integer (int64) | yes |  |
 
@@ -1414,6 +1416,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `crash_retries` | integer or null (int64) | no |  |
 | `resources` | object or null | no |  |
 | `retain_days` | integer or null (int64) | no |  |
+| `title` | string or null | no | UI title; an empty string removes `[ui] title` and restores `cereyan`. |
 
 ### `SkipBody`
 

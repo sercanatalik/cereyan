@@ -80,6 +80,9 @@ pub struct ServeConfig {
     /// Default catch-up policy name reported in settings.
     #[serde(default = "default_catchup")]
     pub catchup_default: String,
+    /// `[ui] title` from cereyan.toml as written; see `ui::normalize_title`.
+    #[serde(default)]
+    pub title: Option<String>,
     /// API token; when set every `/api/*` route except health requires it.
     #[serde(default)]
     pub token: Option<String>,

@@ -1590,6 +1590,8 @@ export interface components {
             started_at: number;
             /** Format: int64 */
             stream_seq: number;
+            /** @description UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`. */
+            title: string;
             /** @description Dialable URL including the base path, with no trailing slash. */
             url: string;
             version: string;
@@ -1621,6 +1623,8 @@ export interface components {
             secret_key_missing: boolean;
             secret_key_present: boolean;
             served_dir?: string | null;
+            /** @description UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`. */
+            title: string;
             version: string;
             /** Format: int64 */
             wal_bytes: number;
@@ -1633,6 +1637,8 @@ export interface components {
             } | null;
             /** Format: int64 */
             retain_days?: number | null;
+            /** @description UI title; an empty string removes `[ui] title` and restores `cereyan`. */
+            title?: string | null;
         };
         SkipBody: {
             /** @description Who asked: `ui` or `api` (the default). */

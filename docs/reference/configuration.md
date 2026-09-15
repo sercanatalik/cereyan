@@ -32,6 +32,9 @@ tls = "starttls"   # none, starttls, tls
 username = "..."
 password = "..."
 from = "cereyan@example.com"
+
+[ui]
+title = "Data Platform"   # optional: shown in the top bar and the browser tab
 ```
 
 ### `[server]`
@@ -74,7 +77,13 @@ Each key is a resource name and its value the total, for example `db = 4`. Resou
 | `username`, `password` | string | SMTP credentials. |
 | `from` | string | Sender address; required. |
 
-The Settings page (`PATCH /api/settings`) updates resource totals, retention, and the crash retry default and writes them back to `cereyan.toml`.
+### `[ui]`
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `title` | string | `cereyan` | Name shown next to the mark in the top bar, cut to 240 px with an ellipsis, and in full as the browser tab title. It is trimmed and may have at most 80 characters and no control characters; an invalid title logs a warning at startup and `cereyan` shows instead. |
+
+The Settings page (`PATCH /api/settings`) updates resource totals, retention, the crash retry default, and the UI title and writes them back to `cereyan.toml`. Writing back rewrites the file, so comments in it are not kept. A server with no served directory has no file to write: a title saved there lasts until the server restarts.
 
 ## Precedence
 

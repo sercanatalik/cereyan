@@ -2330,6 +2330,10 @@
             "minimum": 0,
             "type": "integer"
           },
+          "title": {
+            "description": "UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`.",
+            "type": "string"
+          },
           "url": {
             "description": "Dialable URL including the base path, with no trailing slash.",
             "type": "string"
@@ -2345,6 +2349,7 @@
           "started_at",
           "url",
           "base_path",
+          "title",
           "engines",
           "queued",
           "stream_seq"
@@ -2436,6 +2441,10 @@
               "null"
             ]
           },
+          "title": {
+            "description": "UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`.",
+            "type": "string"
+          },
           "version": {
             "type": "string"
           },
@@ -2450,6 +2459,7 @@
           "port",
           "pid",
           "version",
+          "title",
           "home",
           "database_path",
           "database_bytes",
@@ -2495,6 +2505,13 @@
             "format": "int64",
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "title": {
+            "description": "UI title; an empty string removes `[ui] title` and restores `cereyan`.",
+            "type": [
+              "string",
               "null"
             ]
           }

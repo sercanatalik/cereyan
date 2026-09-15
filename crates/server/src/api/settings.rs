@@ -17,6 +17,8 @@ pub struct Settings {
     pub port: u16,
     pub pid: u32,
     pub version: String,
+    /// UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`.
+    pub title: String,
     pub home: String,
     pub served_dir: Option<String>,
     pub database_path: String,
@@ -46,6 +48,9 @@ pub struct SettingsPatch {
     pub retain_days: Option<i64>,
     #[serde(default)]
     pub crash_retries: Option<i64>,
+    /// UI title; an empty string removes `[ui] title` and restores `cereyan`.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 pub fn saturation(state: &AppState) -> (bool, Vec<String>, Option<String>) {
@@ -113,6 +118,7 @@ pub async fn get_settings(State(state): State<Arc<AppState>>) -> Json<Settings> 
         port: state.addr.port(),
         pid: std::process::id(),
         version: state.config.version.clone(),
+        title: state.title(),
         home: state.config.home.display().to_string(),
         served_dir: state
             .config
@@ -151,6 +157,7 @@ fn persist_toml(
     resources: Option<&HashMap<String, f64>>,
     retain_days: Option<i64>,
     crash_retries: Option<i64>,
+    title: Option<&str>,
 ) -> Result<(), String> {
     let Some(dir) = &state.config.served_dir else {
         return Ok(());
@@ -185,6 +192,25 @@ fn persist_toml(
             }
         }
     }
+    match title {
+        Some("") => {
+            if let Some(toml::Value::Table(ui)) = doc.get_mut("ui") {
+                ui.remove("title");
+                if ui.is_empty() {
+                    doc.remove("ui");
+                }
+            }
+        }
+        Some(title) => {
+            let table = doc
+                .entry("ui")
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+            if let toml::Value::Table(t) = table {
+                t.insert("title".into(), toml::Value::String(title.into()));
+            }
+        }
+        None => {}
+    }
     let rendered = toml::to_string(&doc).map_err(|e| e.to_string())?;
     std::fs::write(&path, rendered).map_err(|e| e.to_string())
 }
@@ -194,6 +220,11 @@ pub async fn patch_settings(
     State(state): State<Arc<AppState>>,
     Json(body): Json<SettingsPatch>,
 ) -> ApiResult<Json<Settings>> {
+    // Validate the title before anything changes, so a bad one leaves all as it was.
+    let title = match body.title.as_deref() {
+        Some(raw) => Some(crate::ui::normalize_title(Some(raw)).map_err(ApiError::Unprocessable)?),
+        None => None,
+    };
     if let Some(resources) = &body.resources {
         if resources.values().any(|v| *v < 0.0) {
             return Err(ApiError::Unprocessable(
@@ -231,11 +262,15 @@ pub async fn patch_settings(
             .store(c, std::sync::atomic::Ordering::Relaxed);
         let _ = state.store.kv_set("settings.crash_retries", &c.to_string());
     }
+    if let Some(t) = title {
+        *state.title.write().unwrap_or_else(|e| e.into_inner()) = t;
+    }
     persist_toml(
         &state,
         body.resources.as_ref(),
         body.retain_days,
         body.crash_retries,
+        body.title.as_deref().map(str::trim),
     )
     .map_err(ApiError::Internal)?;
     Ok(get_settings(State(state)).await)

@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 from . import _core, apps, engine
 from .config import defaults as project_defaults
-from .config import email_settings, resource_totals, server_settings
+from .config import email_settings, resource_totals, server_settings, ui_title
 from .rules import dispatch as rule_dispatch
 from .rules import register_with_store as register_code_rules
 from .exceptions import CereyanError
@@ -353,6 +353,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "fast_crash_rerun": bool(os.environ.get("CEREYAN_FAST_CRASH_RERUN")),
         "email": email,
         "retain_days": int(toml_defaults.get("retain_days", 30)),
+        "title": ui_title(directory),
         "catchup_default": str(toml_defaults.get("catchup", "skip")),
         "retention_interval_secs": int(os.environ["CEREYAN_RETENTION_INTERVAL"]) if os.environ.get("CEREYAN_RETENTION_INTERVAL") else None,
         "token": resolved_token,

@@ -42,6 +42,8 @@ pub struct AppState {
     pub mcp: crate::mcp::Sessions,
     pub retain_days: std::sync::atomic::AtomicI64,
     pub crash_retries_default: std::sync::atomic::AtomicI64,
+    /// UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`.
+    pub title: RwLock<String>,
 }
 
 /// Outcome of a transition request: the run after the change, or the current
@@ -71,6 +73,10 @@ impl AppState {
         let live: HashSet<i64> = config.live_flows.iter().copied().collect();
         let retain_days = config.retain_days;
         let crash_retries_default = config.crash_retries_default;
+        let title = crate::ui::normalize_title(config.title.as_deref()).unwrap_or_else(|e| {
+            eprintln!("warning: cereyan.toml: [ui] title ignored: {e}");
+            crate::ui::DEFAULT_TITLE.into()
+        });
         let state = AppState {
             supervisor: Supervisor::new(&config),
             mcp: crate::mcp::Sessions::default(),
@@ -92,8 +98,14 @@ impl AppState {
             rule_dispatcher: RwLock::new(None),
             retain_days: std::sync::atomic::AtomicI64::new(retain_days),
             crash_retries_default: std::sync::atomic::AtomicI64::new(crash_retries_default),
+            title: RwLock::new(title),
         };
         Ok(state)
+    }
+
+    /// The UI title in effect.
+    pub fn title(&self) -> String {
+        self.title.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn is_live(&self, flow_id: i64) -> bool {
