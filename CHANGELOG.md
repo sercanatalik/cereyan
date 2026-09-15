@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.16.0 (2026-09-15)
+
+- Version bump only; no changes since 1.15.0.
+
 ## 1.15.0 (2026-09-15)
 
 - **Validate credentials in the server with an authenticator, so single sign-on no longer needs a gateway in front of cereyan.** `@app.authenticator` registers one function per process that takes a credential and returns the user's name, or `None` to reject it. It runs only when `enable_auth` is true (`--enable-auth`, `CEREYAN_ENABLE_AUTH`, `app.serve(enable_auth=)`, or `[server] enable_auth`; default false), so the same code runs open on a developer's machine, and a server with `enable_auth` and no authenticator, for instance because its module failed to import, refuses to start. The credential is the `Authorization: Bearer` header, else the cookie named by `auth_cookie`; a request with neither is rejected without calling Python. The static token is still checked first, so engines never reach the authenticator, and with auth enabled and no token configured the server generates one for its engines at each start. A run started through the API, the UI, or MCP by a signed-in user records `created_by` as `user:<name>`. `auth_scope = "all"` also covers the UI and custom routes outside `/api/`, and `login_url` puts a sign-in link on 401 responses and in the UI, which shows a not-signed-in panel instead of the token prompt.
