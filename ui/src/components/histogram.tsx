@@ -68,62 +68,62 @@ export function Histogram({
   const baseline = top + plot + 0.5;
   return (
     <div ref={ref} className="w-full">
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      className="h-[120px] w-full"
-      role="img"
-      aria-label="Run activity"
-      data-buckets={buckets}
-    >
-      {bins.map((bin, i) => {
-        let y = top + plot;
-        const x = i * (barWidth + gap);
-        return (
-          <g key={bin.from}>
-            {STACK_ORDER.map((state) => {
-              const n = bin.counts[state] ?? 0;
-              if (!n) return null;
-              const h = (n / max) * plot;
-              y -= h;
-              return (
-                <rect
-                  key={state}
-                  x={x}
-                  y={y}
-                  width={barWidth}
-                  height={Math.max(h - 1, 1)}
-                  fill={FILL[state]}
-                  rx={2}
-                />
-              );
-            })}
-          </g>
-        );
-      })}
-      <line x1={0} x2={width} y1={baseline} y2={baseline} className="stroke-border" />
-      {bins.map((bin, i) =>
-        i % tickEvery === 0 ? (
-          <text
-            key={`t${bin.from}`}
-            x={i * (barWidth + gap)}
-            y={height - 4}
-            fontSize={11}
-            className="fill-muted-foreground font-mono"
-          >
-            {tickLabel(bin.from, span)}
-          </text>
-        ) : null,
-      )}
-      <line
-        x1={(buckets - 1) * (barWidth + gap) + barWidth / 2}
-        x2={(buckets - 1) * (barWidth + gap) + barWidth / 2}
-        y1={top}
-        y2={top + plot}
-        strokeDasharray="2 3"
-        className="stroke-muted-foreground"
-        data-testid="now-marker"
-      />
-    </svg>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="h-[120px] w-full"
+        role="img"
+        aria-label="Run activity"
+        data-buckets={buckets}
+      >
+        {bins.map((bin, i) => {
+          let y = top + plot;
+          const x = i * (barWidth + gap);
+          return (
+            <g key={bin.from}>
+              {STACK_ORDER.map((state) => {
+                const n = bin.counts[state] ?? 0;
+                if (!n) return null;
+                const h = (n / max) * plot;
+                y -= h;
+                return (
+                  <rect
+                    key={state}
+                    x={x}
+                    y={y}
+                    width={barWidth}
+                    height={Math.max(h - 1, 1)}
+                    fill={FILL[state]}
+                    rx={2}
+                  />
+                );
+              })}
+            </g>
+          );
+        })}
+        <line x1={0} x2={width} y1={baseline} y2={baseline} className="stroke-border" />
+        {bins.map((bin, i) =>
+          i % tickEvery === 0 ? (
+            <text
+              key={`t${bin.from}`}
+              x={i * (barWidth + gap)}
+              y={height - 4}
+              fontSize={11}
+              className="fill-muted-foreground font-mono"
+            >
+              {tickLabel(bin.from, span)}
+            </text>
+          ) : null,
+        )}
+        <line
+          x1={(buckets - 1) * (barWidth + gap) + barWidth / 2}
+          x2={(buckets - 1) * (barWidth + gap) + barWidth / 2}
+          y1={top}
+          y2={top + plot}
+          strokeDasharray="2 3"
+          className="stroke-muted-foreground"
+          data-testid="now-marker"
+        />
+      </svg>
     </div>
   );
 }

@@ -6,9 +6,9 @@ The palette is a warm neutral in light and dark. Ink is the only brand colour; e
 
 ## Dashboard
 
-![Dashboard with counts by state, a proportion bar and hourly histogram, the Needs attention and Running now lists, and the Upcoming table](../images/dashboard.png)
+![Dashboard with counts by state, a proportion bar and a histogram by state, the Needs attention and Running now lists, then the Recently completed and Upcoming tables](../images/dashboard.png)
 
-Counts for the selected range (Running, Completed, Failed, Crashed, Waiting for input, Late, Scheduled) with a proportion bar and an hourly histogram by state. **Needs attention** lists the runs waiting on you: paused runs with their question and an **Answer** button, failed runs with **Run again**, crashed and late runs with **Open**. **Running now** shows each active run with its elapsed time and how many of its tasks are done. **Upcoming** lists the next scheduled runs with a **Run now** shortcut. The range selector and the tag filter apply to the whole page.
+Counts for the selected range (Running, Completed, Failed, Crashed, Waiting for input, Late, Scheduled) with a proportion bar and a histogram by state across the width of its card. **Needs attention** lists the runs waiting on you: paused runs with their question and an **Answer** button, failed runs with **Run again**, crashed and late runs with **Open**. **Running now** shows each active run with its elapsed time and how many of its tasks are done. **Recently completed** lists the eight runs in the range that finished last, with when each finished, its task bar, duration, and parameters. **Upcoming** lists the next scheduled runs with a **Run now** shortcut. On a screen 1680 px wide or wider, Needs attention, Running now, and Upcoming sit side by side above Recently completed, and the histogram shows twice as many bars. The range selector and the tag filter apply to the whole page.
 
 ![The same dashboard in the dark theme](../images/dashboard-dark.png)
 
@@ -52,9 +52,9 @@ The flow's description (rendered from its docstring), its schedule summary with 
 
 ## Events
 
-![Events feed with name-prefix, resource, flow, and time filters](../images/events.png)
+![Events feed filling the page under its name-prefix, resource, flow, and time filters, with a row for the day, a state-coloured dot on each event, its resource, flow, and payload, and the selected event's payload in the panel beside it](../images/events.png)
 
-The event feed, newest first, filtered by name or prefix such as `run.*`, by resource kind, by flow, and by time range. Open an event to see its payload and related resources. New events appear as they happen.
+The event feed, newest first, filling the page below its filters: by name or prefix such as `run.*`, by resource kind, by flow, and by time range. A row heads each day, and each event shows its time, a dot in the colour of the state its name ends in, its resource, its flow, and the start of its payload. Select an event to see its payload and a **Create rule from this event** button; on a screen 1440 px wide or wider that panel stays open beside the feed. New events appear as they happen.
 
 ## Artifacts
 
@@ -76,9 +76,9 @@ Named JSON values with tags. Secrets are stored encrypted and shown masked. Valu
 
 ## Settings
 
-![Settings page with the interface title, server details, database size and retention, resource totals, defaults, custom routes, and engines](../images/settings.png)
+![Settings page on the General tab, in a column on the left: the interface title, resource totals, defaults, custom routes, and engines](../images/settings.png)
 
-Three tabs, the one open kept in the URL (`/settings?tab=data`).
+Three tabs, the one open kept in the URL (`/settings?tab=data`), in a column at most 1080 px wide on the left so the forms stay readable on a wide screen.
 
 | Tab | Shows |
 |---|---|

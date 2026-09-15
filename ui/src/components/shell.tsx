@@ -138,48 +138,48 @@ export function Shell({ children }: { children: React.ReactNode }) {
     <div className="flex h-full min-w-[960px] flex-col">
       <header className="shrink-0 border-b bg-card">
         <div className="frame flex h-[52px] items-center gap-7" data-testid="top-bar-row">
-        <Link to="/" className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight">
-          <Mark />
-          <span className="max-w-60 truncate" title={title} data-testid="ui-title">
-            {title}
-          </span>
-        </Link>
-        <nav className="flex h-full items-stretch gap-0.5" aria-label="Sections">
-          {NAV.map((item) => {
-            const active = item.to === "/" ? path === "/" : path.startsWith(item.to);
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "-mb-px flex items-center border-b-2 border-transparent px-2.5 text-sm font-medium text-muted-foreground hover:text-foreground",
-                  active && "border-foreground text-foreground",
-                )}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="ml-auto flex items-center gap-2">
-          <ProjectSwitcher />
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-[30px] w-60 justify-start gap-2 font-normal text-muted-foreground"
-            onClick={() => setPaletteOpen(true)}
-            aria-label="Search"
-          >
-            <Search className="size-3.5" />
-            <span className="flex-1 text-left">Search runs, flows, artifacts</span>
-            <Kbd>{isMac ? "⌘K" : "Ctrl K"}</Kbd>
-          </Button>
-          <LiveIndicator />
-          <Button variant="ghost" size="icon-sm" aria-label="Toggle theme" onClick={toggle}>
-            {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-          </Button>
-        </div>
+          <Link to="/" className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight">
+            <Mark />
+            <span className="max-w-60 truncate" title={title} data-testid="ui-title">
+              {title}
+            </span>
+          </Link>
+          <nav className="flex h-full items-stretch gap-0.5" aria-label="Sections">
+            {NAV.map((item) => {
+              const active = item.to === "/" ? path === "/" : path.startsWith(item.to);
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "-mb-px flex items-center border-b-2 border-transparent px-2.5 text-sm font-medium text-muted-foreground hover:text-foreground",
+                    active && "border-foreground text-foreground",
+                  )}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+          <div className="ml-auto flex items-center gap-2">
+            <ProjectSwitcher />
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-[30px] w-60 justify-start gap-2 font-normal text-muted-foreground"
+              onClick={() => setPaletteOpen(true)}
+              aria-label="Search"
+            >
+              <Search className="size-3.5" />
+              <span className="flex-1 text-left">Search runs, flows, artifacts</span>
+              <Kbd>{isMac ? "⌘K" : "Ctrl K"}</Kbd>
+            </Button>
+            <LiveIndicator />
+            <Button variant="ghost" size="icon-sm" aria-label="Toggle theme" onClick={toggle}>
+              {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            </Button>
+          </div>
         </div>
       </header>
       <main className="flex min-w-0 flex-1 flex-col overflow-auto">{children}</main>
