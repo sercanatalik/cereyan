@@ -138,7 +138,7 @@ test("a long title is capped with an ellipsis and keeps the full title as its to
 test("saving a title sends only the title and updates the top bar without a reload", async () => {
   mount("/settings");
   // Loaded settings reset the field, so type only once they are in.
-  await screen.findByText("/home/ops/pipelines");
+  await screen.findByDisplayValue("30");
   const input = (await screen.findByLabelText("Title")) as HTMLInputElement;
   fireEvent.change(input, { target: { value: "Ops" } });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));

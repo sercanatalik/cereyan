@@ -158,6 +158,7 @@ pub async fn create_backfill(
         .store
         .get_flow(id)?
         .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
+    super::database::refuse_while_resetting(&state)?;
     let status = create_backfill_inner(&state, &flow, &body).await?;
     Ok((StatusCode::CREATED, Json(status)))
 }

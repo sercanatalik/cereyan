@@ -16,6 +16,8 @@ pub enum ApiError {
     Unprocessable(String),
     Conflict(serde_json::Value),
     Internal(String),
+    /// 503: the server cannot take this request right now.
+    Unavailable(String),
 }
 
 impl From<StoreError> for ApiError {
@@ -38,6 +40,10 @@ impl IntoResponse for ApiError {
                 serde_json::json!({"error": m}),
             ),
             ApiError::Conflict(v) => (StatusCode::CONFLICT, v),
+            ApiError::Unavailable(m) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                serde_json::json!({"error": m}),
+            ),
             ApiError::Internal(m) => {
                 eprintln!("cereyan api error: {m}");
                 (

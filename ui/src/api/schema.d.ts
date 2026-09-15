@@ -85,6 +85,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_database"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/database/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reset_database"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/engine/failed": {
         parameters: {
             query?: never;
@@ -336,6 +368,38 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_projects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_project"];
+        put?: never;
+        post?: never;
+        delete: operations["delete_project"];
         options?: never;
         head?: never;
         patch?: never;
@@ -741,6 +805,22 @@ export interface paths {
         patch: operations["patch_settings"];
         trace?: never;
     };
+    "/api/settings/environment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_environment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/stream": {
         parameters: {
             query?: never;
@@ -963,6 +1043,18 @@ export interface components {
         };
         /** @enum {string} */
         CatchupPolicy: "skip" | "latest" | "all";
+        ConfigEntry: {
+            key: string;
+            /** @description True when the value is set and hidden. */
+            secret: boolean;
+            /** @description `flag`, `env`, `app`, `toml`, `settings`, or `default`. */
+            source: string;
+            /** @description The flag, variable, `app.serve()` argument, or table and key. */
+            source_name?: string | null;
+            table: string;
+            /** @description The value in effect; null when nothing sets it or it is secret. */
+            value: Record<string, never>;
+        };
         Counts: {
             /**
              * Format: int64
@@ -1009,6 +1101,41 @@ export interface components {
             parameters?: Record<string, never>;
             tags?: string[];
         };
+        DatabaseInfo: {
+            /** @description Where a reset writes its copy. */
+            backup_dir: string;
+            /** Format: int64 */
+            bytes: number;
+            counts: components["schemas"]["TableCounts"];
+            path: string;
+            /** @description Projects none of whose flows this server serves. */
+            stale_projects: number;
+            /** Format: int64 */
+            wal_bytes: number;
+        };
+        /** @description Rows deleted by a project removal or a reset. */
+        DeletedCounts: {
+            /** Format: int64 */
+            artifacts: number;
+            /** Format: int64 */
+            backfills: number;
+            /** Format: int64 */
+            events: number;
+            /** Format: int64 */
+            flows: number;
+            /** Format: int64 */
+            logs: number;
+            /** Format: int64 */
+            rules: number;
+            /** Format: int64 */
+            runs: number;
+            /** Format: int64 */
+            schedules: number;
+            /** Format: int64 */
+            task_runs: number;
+            /** Format: int64 */
+            variables: number;
+        };
         /** @description A flow that runs after the skipped one, directly or further down its chain. */
         DownstreamSkip: {
             /** @description The skipped fires whose runs of this flow will be created Skipped. */
@@ -1024,6 +1151,22 @@ export interface components {
             resource?: null | components["schemas"]["Resource"];
             /** Format: int64 */
             run_id?: number | null;
+        };
+        Environment: {
+            /** @description The served directory's `cereyan.toml` with its secrets hidden. */
+            cereyan_toml?: string | null;
+            /** @description Known `CEREYAN_*` variables that are not set. */
+            cereyan_unset: string[];
+            configuration: components["schemas"]["ConfigEntry"][];
+            runtime: components["schemas"]["Runtime"];
+            /** @description The server process environment, `CEREYAN_*` first. */
+            variables: components["schemas"]["EnvVariable"][];
+        };
+        EnvVariable: {
+            hidden: boolean;
+            name: string;
+            /** @description Null when hidden. */
+            value?: string | null;
         };
         ErrorBody: {
             error: string;
@@ -1259,6 +1402,42 @@ export interface components {
             skipped_at?: number | null;
             skipped_by?: string | null;
         };
+        ProjectPreview: {
+            /**
+             * Format: int64
+             * @description Runs that are Pending, Running, Paused or Cancelling.
+             */
+            active_runs: number;
+            /** Format: int64 */
+            backfills: number;
+            /** Format: int64 */
+            events: number;
+            /** Format: int64 */
+            flows: number;
+            /** @description Rules whose match names the project; they are kept. */
+            matching_rules: number;
+            name: string;
+            /** Format: int64 */
+            runs: number;
+            /** Format: int64 */
+            schedules: number;
+            served: boolean;
+        };
+        ProjectSummary: {
+            flows: number;
+            /**
+             * Format: int64
+             * @description Start time of the project's latest run.
+             */
+            last_run_at?: number | null;
+            /** @description Flows this server registered from code. */
+            live_flows: number;
+            name: string;
+            /** Format: int64 */
+            runs: number;
+            /** @description True when any of its flows is live, so it cannot be removed. */
+            served: boolean;
+        };
         ReleaseRequest: {
             /** Format: int64 */
             lease: number;
@@ -1277,6 +1456,18 @@ export interface components {
             /** Format: int64 */
             last_seq: number;
             skipped: number;
+        };
+        ResetBody: {
+            /** @description Write a copy to `<home>/backups/` first; defaults to true. */
+            backup?: boolean | null;
+            /** @description `history` or `everything`; required. */
+            scope?: string | null;
+        };
+        ResetResult: {
+            /** @description The copy written before the reset, when one was asked for. */
+            backup_path?: string | null;
+            deleted: components["schemas"]["DeletedCounts"];
+            scope: string;
         };
         /** @description What an event is about. */
         Resource: {
@@ -1493,6 +1684,14 @@ export interface components {
             /** Format: int64 */
             next_cursor?: number | null;
         };
+        Runtime: {
+            /** @description The served directory's `cereyan.toml`, when it has one. */
+            config_file?: string | null;
+            platform?: string | null;
+            /** @description Python interpreter engines run with. */
+            python: string;
+            python_version?: string | null;
+        };
         Schedule: {
             cron: string;
             day_or?: boolean;
@@ -1669,6 +1868,31 @@ export interface components {
         };
         /** @enum {string} */
         StateType: "Scheduled" | "Pending" | "Running" | "Completed" | "Failed" | "Cancelled" | "Crashed" | "Paused" | "Cancelling";
+        /** @description Row counts for the Data tab and the reset dialog. */
+        TableCounts: {
+            /** Format: int64 */
+            artifacts: number;
+            /** Format: int64 */
+            events: number;
+            /** Format: int64 */
+            logs: number;
+            /** Format: int64 */
+            runs: number;
+            /** Format: int64 */
+            task_runs: number;
+            /**
+             * Format: int64
+             * @description Rules not registered from code.
+             */
+            ui_rules: number;
+            /**
+             * Format: int64
+             * @description Schedules not registered from code.
+             */
+            ui_schedules: number;
+            /** Format: int64 */
+            variables: number;
+        };
         TaskRun: {
             /** Format: int32 */
             crash_count: number;
@@ -1956,6 +2180,69 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Counts"];
                 };
+            };
+        };
+    };
+    get_database: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseInfo"];
+                };
+            };
+        };
+    };
+    reset_database: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResetResult"];
+                };
+            };
+            /** @description A reset is already running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or unknown scope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The copy failed; nothing was deleted */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2432,6 +2719,93 @@ export interface operations {
         responses: {
             /** @description Server is up */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_projects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSummary"][];
+                };
+            };
+        };
+    };
+    get_project: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectPreview"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_project: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedCounts"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The project is served, or a run of it is in progress */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The database is being reset */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3301,6 +3675,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Settings"];
+                };
+            };
+        };
+    };
+    get_environment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Environment"];
                 };
             };
         };

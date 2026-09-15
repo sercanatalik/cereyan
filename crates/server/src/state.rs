@@ -44,6 +44,10 @@ pub struct AppState {
     pub crash_retries_default: std::sync::atomic::AtomicI64,
     /// UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`.
     pub title: RwLock<String>,
+    /// Where each setting came from, keyed `table.key`; Settings edits mark theirs.
+    pub sources: RwLock<std::collections::HashMap<String, crate::SettingSource>>,
+    /// Set while `POST /api/database/reset` runs; run creation answers 503.
+    pub resetting: AtomicBool,
 }
 
 /// Outcome of a transition request: the run after the change, or the current
@@ -73,6 +77,7 @@ impl AppState {
         let live: HashSet<i64> = config.live_flows.iter().copied().collect();
         let retain_days = config.retain_days;
         let crash_retries_default = config.crash_retries_default;
+        let sources = config.sources.clone();
         let title = crate::ui::normalize_title(config.title.as_deref()).unwrap_or_else(|e| {
             eprintln!("warning: cereyan.toml: [ui] title ignored: {e}");
             crate::ui::DEFAULT_TITLE.into()
@@ -99,13 +104,33 @@ impl AppState {
             retain_days: std::sync::atomic::AtomicI64::new(retain_days),
             crash_retries_default: std::sync::atomic::AtomicI64::new(crash_retries_default),
             title: RwLock::new(title),
+            sources: RwLock::new(sources),
+            resetting: AtomicBool::new(false),
         };
         Ok(state)
+    }
+
+    pub fn is_resetting(&self) -> bool {
+        self.resetting.load(Ordering::SeqCst)
     }
 
     /// The UI title in effect.
     pub fn title(&self) -> String {
         self.title.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Record that the value of `key` (`table.key`) now comes from a Settings edit.
+    pub fn mark_edited(&self, key: &str) {
+        self.sources
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(
+                key.to_string(),
+                crate::SettingSource {
+                    source: "settings".into(),
+                    name: None,
+                },
+            );
     }
 
     pub fn is_live(&self, flow_id: i64) -> bool {

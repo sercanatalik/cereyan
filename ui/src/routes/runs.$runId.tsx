@@ -110,8 +110,9 @@ function RunDetail() {
     .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
     .join(", ");
   return (
-    <Page wide className="gap-0">
-      <div className="flex flex-col gap-3.5 border-b bg-card px-8 pt-4 pb-4" data-testid="run-header">
+    <Page width="bleed" className="gap-0">
+      <div className="border-b bg-card pt-4 pb-4" data-testid="run-header">
+        <div className="frame flex flex-col gap-3.5">
         <Crumb items={[{ label: "Runs", to: "/runs" }, { label: r.name }]} />
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-[22px] font-semibold leading-7 tracking-tight">{r.name}</h1>
@@ -192,6 +193,7 @@ function RunDetail() {
             {r.state.message}
           </div>
         ) : null}
+        </div>
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)]">

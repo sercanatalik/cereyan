@@ -173,6 +173,7 @@ nav:
           - Use cereyan with an AI agent: guides/agents.md
           - Test a pipeline: guides/test-a-pipeline.md
           - Run the server as a service: guides/run-as-a-service.md
+          - Clean up the store: guides/clean-up-the-store.md
           - Migrate from Prefect or Luigi: guides/migrate.md
   - Reference:
       - Python API: reference/python-api.md

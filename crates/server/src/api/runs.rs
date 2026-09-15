@@ -128,6 +128,7 @@ pub async fn create_run_inner(
             serde_json::json!({"error": "server is shutting down"}),
         ));
     }
+    super::database::refuse_while_resetting(state)?;
     validate_parameters(&flow.parameter_schema, &parameters).map_err(ApiError::Unprocessable)?;
     // Fill defaults so the engine and the UI see the effective parameters.
     let mut effective = parameters;

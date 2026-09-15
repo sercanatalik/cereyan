@@ -47,6 +47,12 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 |---|---|
 | 200 | [`Settings`](#settings) (application/json) |
 
+### `GET /api/settings/environment`
+
+| Status | Body |
+|---|---|
+| 200 | [`Environment`](#environment) (application/json) |
+
 ### `GET /api/stream`
 
 | Parameter | In | Type | Required | Description |
@@ -786,6 +792,55 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 |---|---|
 | 200 | [`WorkResponse`](#workresponse) (application/json) |
 
+## Other
+
+### `GET /api/database`
+
+| Status | Body |
+|---|---|
+| 200 | [`DatabaseInfo`](#databaseinfo) (application/json) |
+
+### `POST /api/database/reset`
+
+**Request body** (application/json): [`ResetBody`](#resetbody)
+
+| Status | Body |
+|---|---|
+| 200 | [`ResetResult`](#resetresult) (application/json) |
+| 409 | A reset is already running |
+| 422 | Missing or unknown scope |
+| 500 | The copy failed; nothing was deleted |
+
+### `GET /api/projects`
+
+| Status | Body |
+|---|---|
+| 200 | [`ProjectSummary`](#projectsummary)[] (application/json) |
+
+### `GET /api/projects/{name}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `name` | path | string | yes |  |
+
+| Status | Body |
+|---|---|
+| 200 | [`ProjectPreview`](#projectpreview) (application/json) |
+| 404 | no body |
+
+### `DELETE /api/projects/{name}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `name` | path | string | yes |  |
+
+| Status | Body |
+|---|---|
+| 200 | [`DeletedCounts`](#deletedcounts) (application/json) |
+| 404 | no body |
+| 409 | The project is served, or a run of it is in progress |
+| 503 | The database is being reset |
+
 ## Schemas
 
 ### `AcquireRequest`
@@ -881,6 +936,17 @@ Type: any.
 
 One of: `skip`, `latest`, `all`.
 
+### `ConfigEntry`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key` | string | yes |  |
+| `secret` | boolean | yes | True when the value is set and hidden. |
+| `source` | string | yes | `flag`, `env`, `app`, `toml`, `settings`, or `default`. |
+| `source_name` | string or null | no | The flag, variable, `app.serve()` argument, or table and key. |
+| `table` | string | yes |  |
+| `value` | object | yes | The value in effect; null when nothing sets it or it is secret. |
+
 ### `Counts`
 
 | Field | Type | Required | Description |
@@ -919,6 +985,34 @@ know it yet (offline handoff from another project).
 | `parameters` | object | no |  |
 | `tags` | array of string | no |  |
 
+### `DatabaseInfo`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `backup_dir` | string | yes | Where a reset writes its copy. |
+| `bytes` | integer (int64) | yes |  |
+| `counts` | [`TableCounts`](#tablecounts) | yes |  |
+| `path` | string | yes |  |
+| `stale_projects` | integer | yes | Projects none of whose flows this server serves. |
+| `wal_bytes` | integer (int64) | yes |  |
+
+### `DeletedCounts`
+
+Rows deleted by a project removal or a reset.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `artifacts` | integer (int64) | yes |  |
+| `backfills` | integer (int64) | yes |  |
+| `events` | integer (int64) | yes |  |
+| `flows` | integer (int64) | yes |  |
+| `logs` | integer (int64) | yes |  |
+| `rules` | integer (int64) | yes |  |
+| `runs` | integer (int64) | yes |  |
+| `schedules` | integer (int64) | yes |  |
+| `task_runs` | integer (int64) | yes |  |
+| `variables` | integer (int64) | yes |  |
+
 ### `DownstreamSkip`
 
 A flow that runs after the skipped one, directly or further down its chain.
@@ -938,6 +1032,24 @@ A flow that runs after the skipped one, directly or further down its chain.
 | `payload` | object | no |  |
 | `resource` | null or [`Resource`](#resource) | no |  |
 | `run_id` | integer or null (int64) | no |  |
+
+### `EnvVariable`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hidden` | boolean | yes |  |
+| `name` | string | yes |  |
+| `value` | string or null | no | Null when hidden. |
+
+### `Environment`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cereyan_toml` | string or null | no | The served directory's `cereyan.toml` with its secrets hidden. |
+| `cereyan_unset` | array of string | yes | Known `CEREYAN_*` variables that are not set. |
+| `configuration` | [`ConfigEntry`](#configentry)[] | yes |  |
+| `runtime` | [`Runtime`](#runtime) | yes |  |
+| `variables` | [`EnvVariable`](#envvariable)[] | yes | The server process environment, `CEREYAN_*` first. |
 
 ### `ErrorBody`
 
@@ -1116,6 +1228,31 @@ Type: any.
 | `next` | array of integer (int64) | yes |  |
 | `timezone` | string | yes |  |
 
+### `ProjectPreview`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `active_runs` | integer (int64) | yes | Runs that are Pending, Running, Paused or Cancelling. |
+| `backfills` | integer (int64) | yes |  |
+| `events` | integer (int64) | yes |  |
+| `flows` | integer (int64) | yes |  |
+| `matching_rules` | integer | yes | Rules whose match names the project; they are kept. |
+| `name` | string | yes |  |
+| `runs` | integer (int64) | yes |  |
+| `schedules` | integer (int64) | yes |  |
+| `served` | boolean | yes |  |
+
+### `ProjectSummary`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `flows` | integer | yes |  |
+| `last_run_at` | integer or null (int64) | no | Start time of the project's latest run. |
+| `live_flows` | integer | yes | Flows this server registered from code. |
+| `name` | string | yes |  |
+| `runs` | integer (int64) | yes |  |
+| `served` | boolean | yes | True when any of its flows is live, so it cannot be removed. |
+
 ### `ProjectedFire`
 
 A fire past the look-ahead, computed from the schedule; no run exists for it yet.
@@ -1152,6 +1289,21 @@ A fire past the look-ahead, computed from the schedule; no run exists for it yet
 | `cancel` | boolean | yes |  |
 | `last_seq` | integer (int64) | yes |  |
 | `skipped` | integer | yes |  |
+
+### `ResetBody`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `backup` | boolean or null | no | Write a copy to `<home>/backups/` first; defaults to true. |
+| `scope` | string or null | no | `history` or `everything`; required. |
+
+### `ResetResult`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `backup_path` | string or null | no | The copy written before the reset, when one was asked for. |
+| `deleted` | [`DeletedCounts`](#deletedcounts) | yes |  |
+| `scope` | string | yes |  |
 
 ### `Resource`
 
@@ -1314,6 +1466,15 @@ Type: any.
 | `items` | [`Run`](#run)[] | yes |  |
 | `next_cursor` | integer or null (int64) | no |  |
 
+### `Runtime`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `config_file` | string or null | no | The served directory's `cereyan.toml`, when it has one. |
+| `platform` | string or null | no |  |
+| `python` | string | yes | Python interpreter engines run with. |
+| `python_version` | string or null | no |  |
+
 ### `Schedule`
 
 One of: object, object, object.
@@ -1455,6 +1616,21 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 ### `StateType`
 
 One of: `Scheduled`, `Pending`, `Running`, `Completed`, `Failed`, `Cancelled`, `Crashed`, `Paused`, `Cancelling`.
+
+### `TableCounts`
+
+Row counts for the Data tab and the reset dialog.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `artifacts` | integer (int64) | yes |  |
+| `events` | integer (int64) | yes |  |
+| `logs` | integer (int64) | yes |  |
+| `runs` | integer (int64) | yes |  |
+| `task_runs` | integer (int64) | yes |  |
+| `ui_rules` | integer (int64) | yes | Rules not registered from code. |
+| `ui_schedules` | integer (int64) | yes | Schedules not registered from code. |
+| `variables` | integer (int64) | yes |  |
 
 ### `TaskRun`
 

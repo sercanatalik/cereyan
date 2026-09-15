@@ -315,6 +315,43 @@
         ],
         "type": "string"
       },
+      "ConfigEntry": {
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "secret": {
+            "description": "True when the value is set and hidden.",
+            "type": "boolean"
+          },
+          "source": {
+            "description": "`flag`, `env`, `app`, `toml`, `settings`, or `default`.",
+            "type": "string"
+          },
+          "source_name": {
+            "description": "The flag, variable, `app.serve()` argument, or table and key.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "table": {
+            "type": "string"
+          },
+          "value": {
+            "description": "The value in effect; null when nothing sets it or it is secret.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "table",
+          "key",
+          "value",
+          "source",
+          "secret"
+        ],
+        "type": "object"
+      },
       "Counts": {
         "properties": {
           "active": {
@@ -464,6 +501,102 @@
         },
         "type": "object"
       },
+      "DatabaseInfo": {
+        "properties": {
+          "backup_dir": {
+            "description": "Where a reset writes its copy.",
+            "type": "string"
+          },
+          "bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/TableCounts"
+          },
+          "path": {
+            "type": "string"
+          },
+          "stale_projects": {
+            "description": "Projects none of whose flows this server serves.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wal_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "bytes",
+          "wal_bytes",
+          "counts",
+          "stale_projects",
+          "backup_dir"
+        ],
+        "type": "object"
+      },
+      "DeletedCounts": {
+        "description": "Rows deleted by a project removal or a reset.",
+        "properties": {
+          "artifacts": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "backfills": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "events": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "flows": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "logs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rules": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "schedules": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "task_runs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "variables": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "flows",
+          "runs",
+          "task_runs",
+          "logs",
+          "events",
+          "artifacts",
+          "schedules",
+          "backfills",
+          "rules",
+          "variables"
+        ],
+        "type": "object"
+      },
       "DownstreamSkip": {
         "description": "A flow that runs after the skipped one, directly or further down its chain.",
         "properties": {
@@ -524,6 +657,69 @@
         },
         "required": [
           "name"
+        ],
+        "type": "object"
+      },
+      "EnvVariable": {
+        "properties": {
+          "hidden": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "description": "Null when hidden.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "hidden"
+        ],
+        "type": "object"
+      },
+      "Environment": {
+        "properties": {
+          "cereyan_toml": {
+            "description": "The served directory's `cereyan.toml` with its secrets hidden.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cereyan_unset": {
+            "description": "Known `CEREYAN_*` variables that are not set.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "configuration": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigEntry"
+            },
+            "type": "array"
+          },
+          "runtime": {
+            "$ref": "#/components/schemas/Runtime"
+          },
+          "variables": {
+            "description": "The server process environment, `CEREYAN_*` first.",
+            "items": {
+              "$ref": "#/components/schemas/EnvVariable"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "runtime",
+          "configuration",
+          "variables",
+          "cereyan_unset"
         ],
         "type": "object"
       },
@@ -1183,6 +1379,98 @@
         ],
         "type": "object"
       },
+      "ProjectPreview": {
+        "properties": {
+          "active_runs": {
+            "description": "Runs that are Pending, Running, Paused or Cancelling.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "backfills": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "events": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "flows": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "matching_rules": {
+            "description": "Rules whose match names the project; they are kept.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "runs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "schedules": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "served": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "flows",
+          "runs",
+          "schedules",
+          "backfills",
+          "events",
+          "matching_rules",
+          "served",
+          "active_runs"
+        ],
+        "type": "object"
+      },
+      "ProjectSummary": {
+        "properties": {
+          "flows": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_run_at": {
+            "description": "Start time of the project's latest run.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "live_flows": {
+            "description": "Flows this server registered from code.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "runs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "served": {
+            "description": "True when any of its flows is live, so it cannot be removed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "flows",
+          "live_flows",
+          "runs",
+          "served"
+        ],
+        "type": "object"
+      },
       "ProjectedFire": {
         "description": "A fire past the look-ahead, computed from the schedule; no run exists for it yet.",
         "properties": {
@@ -1287,6 +1575,47 @@
           "skipped",
           "last_seq",
           "cancel"
+        ],
+        "type": "object"
+      },
+      "ResetBody": {
+        "properties": {
+          "backup": {
+            "description": "Write a copy to `<home>/backups/` first; defaults to true.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "scope": {
+            "description": "`history` or `everything`; required.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ResetResult": {
+        "properties": {
+          "backup_path": {
+            "description": "The copy written before the reset, when one was asked for.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "deleted": {
+            "$ref": "#/components/schemas/DeletedCounts"
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "deleted"
         ],
         "type": "object"
       },
@@ -1975,6 +2304,37 @@
         ],
         "type": "object"
       },
+      "Runtime": {
+        "properties": {
+          "config_file": {
+            "description": "The served directory's `cereyan.toml`, when it has one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "python": {
+            "description": "Python interpreter engines run with.",
+            "type": "string"
+          },
+          "python_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "python"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "oneOf": [
           {
@@ -2634,6 +2994,56 @@
           "Cancelling"
         ],
         "type": "string"
+      },
+      "TableCounts": {
+        "description": "Row counts for the Data tab and the reset dialog.",
+        "properties": {
+          "artifacts": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "events": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "logs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "task_runs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ui_rules": {
+            "description": "Rules not registered from code.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "ui_schedules": {
+            "description": "Schedules not registered from code.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "variables": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "task_runs",
+          "logs",
+          "events",
+          "artifacts",
+          "variables",
+          "ui_rules",
+          "ui_schedules"
+        ],
+        "type": "object"
       },
       "TaskRun": {
         "properties": {
@@ -3386,6 +3796,65 @@
         ]
       }
     },
+    "/api/database": {
+      "get": {
+        "operationId": "get_database",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseInfo"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "database"
+        ]
+      }
+    },
+    "/api/database/reset": {
+      "post": {
+        "operationId": "reset_database",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetResult"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "description": "A reset is already running"
+          },
+          "422": {
+            "description": "Missing or unknown scope"
+          },
+          "500": {
+            "description": "The copy failed; nothing was deleted"
+          }
+        },
+        "tags": [
+          "database"
+        ]
+      }
+    },
     "/api/engine/failed": {
       "post": {
         "operationId": "failed",
@@ -4095,6 +4564,99 @@
           }
         },
         "tags": []
+      }
+    },
+    "/api/projects": {
+      "get": {
+        "operationId": "list_projects",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{name}": {
+      "delete": {
+        "operationId": "delete_project",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedCounts"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "The project is served, or a run of it is in progress"
+          },
+          "503": {
+            "description": "The database is being reset"
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      },
+      "get": {
+        "operationId": "get_project",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPreview"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "projects"
+        ]
       }
     },
     "/api/resources/acquire": {
@@ -5377,6 +5939,26 @@
         },
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/settings/environment": {
+      "get": {
+        "operationId": "get_environment",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Environment"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "environment"
         ]
       }
     },

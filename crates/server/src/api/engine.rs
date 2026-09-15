@@ -160,8 +160,10 @@ pub async fn work(
         if state
             .shutting_down
             .load(std::sync::atomic::Ordering::SeqCst)
+            || state.is_resetting()
         {
-            // The server is stopping: tell the engine to exit rather than to keep asking.
+            // The server is stopping or resetting its database: tell the engine to
+            // exit rather than to keep asking.
             // begin_shutdown wakes every parked long-poll so each one lands here.
             return Ok(Json(WorkResponse {
                 run: None,

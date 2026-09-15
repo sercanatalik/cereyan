@@ -85,3 +85,13 @@ body {
   font-feature-settings: "tnum" 1, "cv11" 1;
 }
 * { border-color: var(--border); }
+
+/* One frame for the top bar's row and every page: at most 1920 px, centred, with a
+   gutter that grows from 24 px at 1440 px to 40 px from 2500 px. */
+:root { --gutter: clamp(24px, 1.6vw, 40px); }
+@utility frame {
+  width: 100%;
+  max-width: 1920px;
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}

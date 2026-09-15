@@ -232,6 +232,9 @@ pub async fn patch_settings(
             ));
         }
         state.supervisor.set_totals(resources);
+        for name in resources.keys() {
+            state.mark_edited(&format!("resources.{name}"));
+        }
         let merged = state.supervisor.resource_totals();
         let _ = state.store.kv_set(
             "settings.resources",
@@ -250,6 +253,7 @@ pub async fn patch_settings(
         let _ = state
             .store
             .kv_set("settings.retain_days", &days.to_string());
+        state.mark_edited("defaults.retain_days");
     }
     if let Some(c) = body.crash_retries {
         if c < 0 {
@@ -261,9 +265,11 @@ pub async fn patch_settings(
             .crash_retries_default
             .store(c, std::sync::atomic::Ordering::Relaxed);
         let _ = state.store.kv_set("settings.crash_retries", &c.to_string());
+        state.mark_edited("defaults.crash_retries");
     }
     if let Some(t) = title {
         *state.title.write().unwrap_or_else(|e| e.into_inner()) = t;
+        state.mark_edited("ui.title");
     }
     persist_toml(
         &state,

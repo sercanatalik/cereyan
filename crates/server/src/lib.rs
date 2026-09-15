@@ -83,6 +83,17 @@ pub struct ServeConfig {
     /// `[ui] title` from cereyan.toml as written; see `ui::normalize_title`.
     #[serde(default)]
     pub title: Option<String>,
+    /// Where each resolved setting came from, keyed `table.key`.
+    #[serde(default)]
+    pub sources: std::collections::HashMap<String, SettingSource>,
+    #[serde(default)]
+    pub python_version: Option<String>,
+    /// Operating system and machine, e.g. `linux x86_64`.
+    #[serde(default)]
+    pub platform: Option<String>,
+    /// Whether `cereyan serve` was set to open a browser.
+    #[serde(default)]
+    pub open_browser: Option<bool>,
     /// API token; when set every `/api/*` route except health requires it.
     #[serde(default)]
     pub token: Option<String>,
@@ -112,6 +123,16 @@ pub struct ServeConfig {
 
 fn default_auth_scope() -> String {
     "api".into()
+}
+
+/// Where a setting's value came from.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingSource {
+    /// `flag`, `env`, `app`, `toml`, `settings`, or `default`.
+    pub source: String,
+    /// The flag, variable, `app.serve()` argument, or table and key.
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -259,6 +280,7 @@ impl Server {
                 state
                     .retain_days
                     .store(d, std::sync::atomic::Ordering::Relaxed);
+                state.mark_edited("defaults.retain_days");
             }
         }
         if let Ok(Some(v)) = state.store.kv_get("settings.crash_retries") {
@@ -266,12 +288,16 @@ impl Server {
                 state
                     .crash_retries_default
                     .store(c, std::sync::atomic::Ordering::Relaxed);
+                state.mark_edited("defaults.crash_retries");
             }
         }
         if let Ok(Some(saved)) = state.store.kv_get("settings.resources") {
             if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, f64>>(&saved)
             {
                 state.supervisor.set_totals(&map);
+                for name in map.keys() {
+                    state.mark_edited(&format!("resources.{name}"));
+                }
             }
         }
         state.reconcile()?;

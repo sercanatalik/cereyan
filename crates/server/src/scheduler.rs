@@ -46,6 +46,14 @@ impl Scheduler {
         Scheduler::default()
     }
 
+    /// Forget every schedule; a restart loads them again from the store.
+    pub fn clear(&self) {
+        self.schedules
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+
     pub fn get(&self, id: i64) -> Option<ScheduleRow> {
         self.schedules
             .read()
@@ -74,7 +82,7 @@ impl Scheduler {
             .insert(row.id, row);
     }
 
-    fn remove(&self, id: i64) {
+    pub fn remove(&self, id: i64) {
         self.schedules
             .write()
             .unwrap_or_else(|e| e.into_inner())
@@ -171,6 +179,17 @@ pub fn sync_code_schedules(
 
 /// Load every schedule, apply catch-up, materialize, and arm timers.
 pub fn start(state: &Arc<AppState>) {
+    start_inner(state, true);
+}
+
+/// After a database reset: reload every schedule and arm it from now, with
+/// no catch-up for fires before the reset.
+pub fn restart(state: &Arc<AppState>) {
+    state.scheduler.clear();
+    start_inner(state, false);
+}
+
+fn start_inner(state: &Arc<AppState>, with_catch_up: bool) {
     let rows = match state.store.list_schedules(None) {
         Ok(r) => r,
         Err(e) => {
@@ -183,7 +202,8 @@ pub fn start(state: &Arc<AppState>) {
         .kv_get(LAST_WAKEUP_KEY)
         .ok()
         .flatten()
-        .and_then(|v| v.parse().ok());
+        .and_then(|v| v.parse().ok())
+        .filter(|_| with_catch_up);
     let now = now_micros();
     // A disable window's resume timer lives only in memory, so it is derived
     // again from `paused_until`: ended windows resume now, open ones re-arm.

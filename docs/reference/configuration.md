@@ -85,6 +85,8 @@ Each key is a resource name and its value the total, for example `db = 4`. Resou
 
 The Settings page (`PATCH /api/settings`) updates resource totals, retention, the crash retry default, and the UI title and writes them back to `cereyan.toml`. Writing back rewrites the file, so comments in it are not kept. A server with no served directory has no file to write: a title saved there lasts until the server restarts.
 
+The Settings page's Environment tab (`GET /api/settings/environment`) lists every setting in effect with where its value came from, following the precedence below: the flag, the environment variable, `app.serve()`, `cereyan.toml`, an edit in Settings, or the default. It shows `cereyan.toml` with `[server] token` and `[email] password` replaced, and never sends either value.
+
 ## Precedence
 
 | Setting | Order, highest first |

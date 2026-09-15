@@ -84,7 +84,10 @@ fn rpc_result(id: Value, result: Value) -> Value {
 
 fn api_error_message(e: ApiError) -> String {
     match e {
-        ApiError::NotFound(m) | ApiError::BadRequest(m) | ApiError::Unprocessable(m) => m,
+        ApiError::NotFound(m)
+        | ApiError::BadRequest(m)
+        | ApiError::Unprocessable(m)
+        | ApiError::Unavailable(m) => m,
         ApiError::Internal(m) => format!("internal error: {m}"),
         ApiError::Conflict(v) => v
             .get("error")

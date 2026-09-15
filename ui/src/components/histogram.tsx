@@ -1,5 +1,6 @@
 // A stacked-by-state activity histogram drawn as inline SVG.
 import type { Run, StateType } from "@/api/client";
+import { useElementSize } from "@/lib/media";
 
 const STACK_ORDER: StateType[] = [
   "Completed",
@@ -43,7 +44,9 @@ export function Histogram({
   end: number;
   buckets?: number;
 }) {
-  const width = 1200;
+  const [ref, size] = useElementSize<HTMLDivElement>();
+  // Draw in real pixels once measured, so the bars stretch with the card instead of letterboxing.
+  const width = size.width || 1200;
   const height = 120;
   const top = 6;
   const bottom = 20;
@@ -64,7 +67,14 @@ export function Histogram({
   const tickEvery = Math.max(1, Math.round(buckets / 6));
   const baseline = top + plot + 0.5;
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="h-[120px] w-full" role="img" aria-label="Run activity">
+    <div ref={ref} className="w-full">
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="h-[120px] w-full"
+      role="img"
+      aria-label="Run activity"
+      data-buckets={buckets}
+    >
       {bins.map((bin, i) => {
         let y = top + plot;
         const x = i * (barWidth + gap);
@@ -114,5 +124,6 @@ export function Histogram({
         data-testid="now-marker"
       />
     </svg>
+    </div>
   );
 }

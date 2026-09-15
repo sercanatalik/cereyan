@@ -68,7 +68,9 @@ To accept your organisation's single sign-on instead of, or beside, the token, r
 
 ## What a token holder can do
 
-Everything the API allows, including starting runs, backfilling, setting variables, and, through MCP, the same for an agent. A user the authenticator signs in can do the same. There is one permission level; there are no read-only tokens.
+Everything the API allows, including starting runs, backfilling, setting variables, removing projects, resetting the database, and, through MCP, the same for an agent. A user the authenticator signs in can do the same. There is one permission level; there are no read-only tokens.
+
+That includes the Settings page's Environment tab, which lists the server's settings and its process environment. The server hides a value before sending it when the variable's name contains `KEY`, `SECRET`, `TOKEN`, `PASS`, `PWD`, `CREDENTIAL`, `PRIVATE`, `AUTH`, `COOKIE`, or `SESSION`, when it equals the token or the `[email]` password, and for the password inside a `user:password@` URL. A secret under any other name, such as a webhook URL with its key in the path, is shown, so keep such values out of the server's environment on a shared server.
 
 ## Custom routes
 

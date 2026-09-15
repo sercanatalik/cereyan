@@ -3,11 +3,14 @@
 
 pub mod backfills;
 pub mod counts;
+pub mod database;
 pub mod engine;
+pub mod environment;
 pub mod error;
 pub mod flows;
 pub mod logs;
 pub mod observability;
+pub mod projects;
 pub mod runs;
 pub mod schedules;
 pub mod settings;
@@ -122,6 +125,12 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         backfills::cancel_backfill,
         settings::get_settings,
         settings::patch_settings,
+        environment::get_environment,
+        projects::list_projects,
+        projects::get_project,
+        projects::delete_project,
+        database::get_database,
+        database::reset_database,
         vocabulary::get_vocabulary,
         observability::list_events,
         observability::get_event,
@@ -197,6 +206,17 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         backfills::PrefilterBody,
         settings::Settings,
         settings::SettingsPatch,
+        environment::Environment,
+        environment::Runtime,
+        environment::ConfigEntry,
+        environment::EnvVariable,
+        projects::ProjectSummary,
+        projects::ProjectPreview,
+        database::DatabaseInfo,
+        database::ResetBody,
+        database::ResetResult,
+        cereyan_store::DeletedCounts,
+        cereyan_store::TableCounts,
         vocabulary::Vocabulary,
         vocabulary::EventEntry,
         vocabulary::StateEntry,
@@ -285,6 +305,17 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/settings",
             get(settings::get_settings).patch(settings::patch_settings),
         )
+        .route(
+            "/api/settings/environment",
+            get(environment::get_environment),
+        )
+        .route("/api/projects", get(projects::list_projects))
+        .route(
+            "/api/projects/{name}",
+            get(projects::get_project).delete(projects::delete_project),
+        )
+        .route("/api/database", get(database::get_database))
+        .route("/api/database/reset", post(database::reset_database))
         .route("/api/vocabulary", get(vocabulary::get_vocabulary))
         .route(
             "/api/events",

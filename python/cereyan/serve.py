@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import platform
 import re
 import signal
 import sys
@@ -55,42 +56,83 @@ def import_modules(directory: str, modules: list[str]) -> list[tuple[str, str]]:
     return failures
 
 
+def _source(kind: str, name: str | None = None) -> dict:
+    """Where a setting's value came from: flag, env, app, toml, or default."""
+    return {"source": kind, "name": name}
+
+
+def _describe(source: dict) -> str:
+    """A source as error messages name it."""
+    return f"{source['name']} in cereyan.toml" if source["source"] == "toml" else str(source["name"])
+
+
+def _first(candidates: tuple, default=None) -> tuple:
+    """The first ``(value, kind, name)`` candidate whose value is set, with its source."""
+    for value, kind, name in candidates:
+        if value is not None:
+            return value, _source(kind, name)
+    return default, _source("default")
+
+
+def _host_port(directory: str, host: str | None, port: int | None, app_host: str | None = None,
+               app_port: int | None = None) -> tuple[str, int, dict, dict]:
+    settings = server_settings(directory)
+    resolved_host, host_source = _first((
+        (host or None, "flag", "--host"),
+        (os.environ.get("CEREYAN_HOST") or None, "env", "CEREYAN_HOST"),
+        (app_host or None, "app", "app.serve(host=)"),
+        (settings.get("host") or None, "toml", "[server] host"),
+    ), "127.0.0.1")
+    resolved_port, port_source = _first((
+        (port, "flag", "--port"),
+        (os.environ.get("CEREYAN_PORT") or None, "env", "CEREYAN_PORT"),
+        (app_port, "app", "app.serve(port=)"),
+        (settings.get("port"), "toml", "[server] port"),
+    ), 4200)
+    return str(resolved_host), int(resolved_port), host_source, port_source
+
+
 def resolve_host_port(directory: str, host: str | None, port: int | None, app_host: str | None = None,
                       app_port: int | None = None) -> tuple[str, int]:
     """Flag, environment, app.serve(), cereyan.toml, default."""
+    resolved_host, resolved_port, _, _ = _host_port(directory, host, port, app_host, app_port)
+    return resolved_host, resolved_port
+
+
+def _token(directory: str, token: str | None = None, app_token: str | None = None) -> tuple[str | None, dict]:
     settings = server_settings(directory)
-    env_host = os.environ.get("CEREYAN_HOST") or None
-    env_port = os.environ.get("CEREYAN_PORT")
-    resolved_host = host or env_host or app_host or settings.get("host") or "127.0.0.1"
-    if port is not None:
-        resolved_port = port
-    elif env_port:
-        resolved_port = int(env_port)
-    elif app_port is not None:
-        resolved_port = app_port
-    elif "port" in settings:
-        resolved_port = int(settings["port"])
-    else:
-        resolved_port = 4200
-    return str(resolved_host), int(resolved_port)
+    value, source = _first((
+        (token or None, "flag", "--token"),
+        (os.environ.get("CEREYAN_TOKEN") or None, "env", "CEREYAN_TOKEN"),
+        (app_token or None, "app", "app.serve(token=)"),
+        (settings.get("token") or None, "toml", "[server] token"),
+    ))
+    return (str(value) if value else None), source
 
 
 def resolve_token(directory: str, token: str | None = None, app_token: str | None = None) -> str | None:
     """Flag, environment, app.serve(), cereyan.toml. None means unauthenticated."""
+    return _token(directory, token, app_token)[0]
+
+
+def _socket(directory: str, socket: str | None = None, app_socket: str | None = None) -> tuple[str | None, dict]:
     settings = server_settings(directory)
-    value = token or os.environ.get("CEREYAN_TOKEN") or app_token or settings.get("token")
-    return str(value) if value else None
+    value, source = _first((
+        (socket or None, "flag", "--socket"),
+        (os.environ.get("CEREYAN_SOCKET") or None, "env", "CEREYAN_SOCKET"),
+        (app_socket or None, "app", "app.serve(socket=)"),
+        (settings.get("socket") or None, "toml", "[server] socket"),
+    ))
+    if not value:
+        return None, source
+    if sys.platform.startswith("win"):
+        raise CereyanError("Unix sockets are not supported on Windows; use --host and --port")
+    return os.path.abspath(os.path.expanduser(str(value))), source
 
 
 def resolve_socket(directory: str, socket: str | None = None, app_socket: str | None = None) -> str | None:
     """Flag, environment, app.serve(), cereyan.toml. None means no Unix socket."""
-    settings = server_settings(directory)
-    value = socket or os.environ.get("CEREYAN_SOCKET") or app_socket or settings.get("socket")
-    if not value:
-        return None
-    if sys.platform.startswith("win"):
-        raise CereyanError("Unix sockets are not supported on Windows; use --host and --port")
-    return os.path.abspath(os.path.expanduser(str(value)))
+    return _socket(directory, socket, app_socket)[0]
 
 
 _BASE_SEGMENT = re.compile(r"[A-Za-z0-9._~-]+")
@@ -110,95 +152,118 @@ def normalize_base_path(value: str, source: str) -> str:
     return "/" + stripped
 
 
+def _base_path(directory: str, base_path: str | None = None, app_base_path: str | None = None) -> tuple[str, dict]:
+    settings = server_settings(directory)
+    value, source = _first((
+        (base_path, "flag", "--base-path"),
+        (os.environ.get("CEREYAN_BASE_PATH") or None, "env", "CEREYAN_BASE_PATH"),
+        (app_base_path, "app", "app.serve(base_path=)"),
+        (settings.get("base_path"), "toml", "[server] base_path"),
+    ))
+    if value is None:
+        return "", source
+    if not isinstance(value, str):
+        raise CereyanError(f"invalid base path {value!r} from {_describe(source)}: expected a string")
+    return normalize_base_path(value, _describe(source)), source
+
+
 def resolve_base_path(directory: str, base_path: str | None = None, app_base_path: str | None = None) -> str:
     """Flag, environment, app.serve(), cereyan.toml. ``""`` means the root."""
-    settings = server_settings(directory)
-    candidates = (
-        (base_path, "--base-path"),
-        (os.environ.get("CEREYAN_BASE_PATH") or None, "CEREYAN_BASE_PATH"),
-        (app_base_path, "app.serve(base_path=)"),
-        (settings.get("base_path"), "[server] base_path in cereyan.toml"),
-    )
-    for value, source in candidates:
-        if value is not None:
-            if not isinstance(value, str):
-                raise CereyanError(f"invalid base path {value!r} from {source}: expected a string")
-            return normalize_base_path(value, source)
-    return ""
+    return _base_path(directory, base_path, app_base_path)[0]
 
 
 _TRUE = {"true", "1", "yes"}
 _FALSE = {"false", "0", "no"}
 
 
-def resolve_enable_auth(directory: str, enable_auth: bool | None = None,
-                        app_enable_auth: bool | None = None) -> bool:
-    """Flag, environment, app.serve(), cereyan.toml. False unless one of them turns auth on."""
+def _enable_auth(directory: str, enable_auth: bool | None = None,
+                 app_enable_auth: bool | None = None) -> tuple[bool, dict]:
     if enable_auth:
-        return True
+        return True, _source("flag", "--enable-auth")
     env = os.environ.get("CEREYAN_ENABLE_AUTH")
     if env is not None and env.strip():
         value = env.strip().lower()
         if value in _TRUE:
-            return True
+            return True, _source("env", "CEREYAN_ENABLE_AUTH")
         if value in _FALSE:
-            return False
+            return False, _source("env", "CEREYAN_ENABLE_AUTH")
         raise CereyanError(f"invalid CEREYAN_ENABLE_AUTH {env!r}: expected true, false, 1, 0, yes, or no")
     if app_enable_auth is not None:
         if not isinstance(app_enable_auth, bool):
             raise CereyanError(f"invalid app.serve(enable_auth={app_enable_auth!r}): expected True or False")
-        return app_enable_auth
+        return app_enable_auth, _source("app", "app.serve(enable_auth=)")
     value = server_settings(directory).get("enable_auth")
     if value is None:
-        return False
+        return False, _source("default")
     if not isinstance(value, bool):
         raise CereyanError(f"invalid [server] enable_auth {value!r} in cereyan.toml: expected true or false")
-    return value
+    return value, _source("toml", "[server] enable_auth")
+
+
+def resolve_enable_auth(directory: str, enable_auth: bool | None = None,
+                        app_enable_auth: bool | None = None) -> bool:
+    """Flag, environment, app.serve(), cereyan.toml. False unless one of them turns auth on."""
+    return _enable_auth(directory, enable_auth, app_enable_auth)[0]
+
+
+def _string_setting(directory: str, key: str, env_name: str, flag_name: str, flag: str | None,
+                    app_value: str | None) -> tuple[str | None, dict]:
+    """The first of flag, environment, app.serve(), cereyan.toml, with its source."""
+    value, source = _first((
+        (flag, "flag", flag_name),
+        (os.environ.get(env_name) or None, "env", env_name),
+        (app_value, "app", f"app.serve({key}=)"),
+        (server_settings(directory).get(key), "toml", f"[server] {key}"),
+    ))
+    if value is not None and not isinstance(value, str):
+        raise CereyanError(f"invalid {key} {value!r} from {_describe(source)}: expected a string")
+    return value, source
 
 
 def _resolve_string(directory: str, key: str, env_name: str, flag_name: str, flag: str | None,
                     app_value: str | None) -> tuple[str | None, str | None]:
     """The first of flag, environment, app.serve(), cereyan.toml, with where it came from."""
-    candidates = (
-        (flag, flag_name),
-        (os.environ.get(env_name) or None, env_name),
-        (app_value, f"app.serve({key}=)"),
-        (server_settings(directory).get(key), f"[server] {key} in cereyan.toml"),
-    )
-    for value, source in candidates:
-        if value is not None:
-            if not isinstance(value, str):
-                raise CereyanError(f"invalid {key} {value!r} from {source}: expected a string")
-            return value, source
-    return None, None
+    value, source = _string_setting(directory, key, env_name, flag_name, flag, app_value)
+    return value, (None if value is None else _describe(source))
 
 
 _COOKIE_NAME = re.compile(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 
 
+def _auth_cookie(directory: str, auth_cookie: str | None = None,
+                 app_auth_cookie: str | None = None) -> tuple[str | None, dict]:
+    value, source = _string_setting(directory, "auth_cookie", "CEREYAN_AUTH_COOKIE", "--auth-cookie",
+                                    auth_cookie, app_auth_cookie)
+    if value is None:
+        return None, source
+    if value == "cereyan_token":
+        raise CereyanError(
+            f"auth_cookie from {_describe(source)} cannot be 'cereyan_token': that cookie holds the API token"
+        )
+    if not _COOKIE_NAME.fullmatch(value):
+        raise CereyanError(f"invalid auth_cookie {value!r} from {_describe(source)}: expected a cookie name")
+    return value, source
+
+
 def resolve_auth_cookie(directory: str, auth_cookie: str | None = None,
                         app_auth_cookie: str | None = None) -> str | None:
     """Flag, environment, app.serve(), cereyan.toml. None means bearer credentials only."""
-    value, source = _resolve_string(directory, "auth_cookie", "CEREYAN_AUTH_COOKIE", "--auth-cookie",
-                                    auth_cookie, app_auth_cookie)
+    return _auth_cookie(directory, auth_cookie, app_auth_cookie)[0]
+
+
+def _auth_scope(directory: str, auth_scope: str | None = None, app_auth_scope: str | None = None) -> tuple[str, dict]:
+    value, source = _string_setting(directory, "auth_scope", "CEREYAN_AUTH_SCOPE", "--auth-scope",
+                                    auth_scope, app_auth_scope)
     if value is None:
-        return None
-    if value == "cereyan_token":
-        raise CereyanError(f"auth_cookie from {source} cannot be 'cereyan_token': that cookie holds the API token")
-    if not _COOKIE_NAME.fullmatch(value):
-        raise CereyanError(f"invalid auth_cookie {value!r} from {source}: expected a cookie name")
-    return value
+        return "api", source
+    if value not in ("api", "all"):
+        raise CereyanError(f"invalid auth_scope {value!r} from {_describe(source)}: expected 'api' or 'all'")
+    return value, source
 
 
 def resolve_auth_scope(directory: str, auth_scope: str | None = None, app_auth_scope: str | None = None) -> str:
     """Flag, environment, app.serve(), cereyan.toml. ``"api"`` unless set."""
-    value, source = _resolve_string(directory, "auth_scope", "CEREYAN_AUTH_SCOPE", "--auth-scope",
-                                    auth_scope, app_auth_scope)
-    if value is None:
-        return "api"
-    if value not in ("api", "all"):
-        raise CereyanError(f"invalid auth_scope {value!r} from {source}: expected 'api' or 'all'")
-    return value
+    return _auth_scope(directory, auth_scope, app_auth_scope)[0]
 
 
 def _valid_login_url(url: str) -> bool:
@@ -211,17 +276,42 @@ def _valid_login_url(url: str) -> bool:
     return parts.scheme.lower() in ("http", "https") and bool(parts.netloc)
 
 
-def resolve_login_url(directory: str, login_url: str | None = None, app_login_url: str | None = None) -> str | None:
-    """Flag, environment, app.serve(), cereyan.toml. None means no sign-in link."""
-    value, source = _resolve_string(directory, "login_url", "CEREYAN_LOGIN_URL", "--login-url",
+def _login_url(directory: str, login_url: str | None = None,
+               app_login_url: str | None = None) -> tuple[str | None, dict]:
+    value, source = _string_setting(directory, "login_url", "CEREYAN_LOGIN_URL", "--login-url",
                                     login_url, app_login_url)
     if value is None:
-        return None
+        return None, source
     if not _valid_login_url(value):
         raise CereyanError(
-            f"invalid login_url {value!r} from {source}: expected an http or https URL, or a path starting with /"
+            f"invalid login_url {value!r} from {_describe(source)}: "
+            "expected an http or https URL, or a path starting with /"
         )
-    return value
+    return value, source
+
+
+def resolve_login_url(directory: str, login_url: str | None = None, app_login_url: str | None = None) -> str | None:
+    """Flag, environment, app.serve(), cereyan.toml. None means no sign-in link."""
+    return _login_url(directory, login_url, app_login_url)[0]
+
+
+def _file_sources(directory: str, settings: dict, toml_defaults: dict) -> dict[str, dict]:
+    """Sources of the settings only cereyan.toml can set."""
+
+    def from_file(table: str, key: str, present: bool) -> dict:
+        return _source("toml", f"[{table}] {key}") if present else _source("default")
+
+    out = {
+        "server.cancel_grace_secs": from_file("server", "cancel_grace_secs", "cancel_grace_secs" in settings),
+        "defaults.catchup": from_file("defaults", "catchup", "catchup" in toml_defaults),
+        "defaults.retain_days": from_file("defaults", "retain_days", "retain_days" in toml_defaults),
+        "ui.title": from_file("ui", "title", ui_title(directory) is not None),
+    }
+    for key in resource_totals(directory):
+        out[f"resources.{key}"] = _source("toml", f"[resources] {key}")
+    for key in email_settings(directory) or {}:
+        out[f"email.{key}"] = _source("toml", f"[email] {key}")
+    return out
 
 
 def _qualname(fn) -> str:
@@ -263,13 +353,15 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     if not os.path.isdir(directory):
         raise CereyanError(f"{directory} is not a directory")
     settings = server_settings(directory)
-    resolved_token = resolve_token(directory, token, app_token)
-    resolved_socket = resolve_socket(directory, socket, app_socket)
-    resolved_base_path = resolve_base_path(directory, base_path, app_base_path)
-    resolved_enable_auth = resolve_enable_auth(directory, enable_auth, app_enable_auth)
-    resolved_auth_cookie = resolve_auth_cookie(directory, auth_cookie, app_auth_cookie)
-    resolved_auth_scope = resolve_auth_scope(directory, auth_scope, app_auth_scope)
-    resolved_login_url = resolve_login_url(directory, login_url, app_login_url)
+    # Where each setting came from, keyed `table.key`, for the Environment tab.
+    sources: dict[str, dict] = {}
+    resolved_token, sources["server.token"] = _token(directory, token, app_token)
+    resolved_socket, sources["server.socket"] = _socket(directory, socket, app_socket)
+    resolved_base_path, sources["server.base_path"] = _base_path(directory, base_path, app_base_path)
+    resolved_enable_auth, sources["server.enable_auth"] = _enable_auth(directory, enable_auth, app_enable_auth)
+    resolved_auth_cookie, sources["server.auth_cookie"] = _auth_cookie(directory, auth_cookie, app_auth_cookie)
+    resolved_auth_scope, sources["server.auth_scope"] = _auth_scope(directory, auth_scope, app_auth_scope)
+    resolved_login_url, sources["server.login_url"] = _login_url(directory, login_url, app_login_url)
     if resolved_auth_scope == "all" and not resolved_enable_auth:
         raise CereyanError(
             "auth_scope 'all' requires enable_auth: without an authenticator the UI could not load its token prompt"
@@ -284,7 +376,9 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
                 print(f"warning: could not import {name}:\n{tb}", file=sys.stderr)
         finally:
             engine.runner.suppress_top_level_runs(False)
-    resolved_host, resolved_port = resolve_host_port(directory, host, port, app_host, app_port)
+    resolved_host, resolved_port, sources["server.host"], sources["server.port"] = _host_port(
+        directory, host, port, app_host, app_port
+    )
 
     registered = apps.all_apps()
     flows = [f for app in registered for f in app.flows.values()]
@@ -327,12 +421,28 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
             print(f"warning: flow {f.project}/{f.name}: {err}", file=sys.stderr)
     toml_defaults = project_defaults(directory)
     # Precedence: flow decorator (server side), then cereyan.toml, then the CLI flag.
-    if "crash_retries" in toml_defaults:
-        crash_default = int(toml_defaults["crash_retries"])
-    elif crash_retries is not None:
-        crash_default = int(crash_retries)
-    else:
-        crash_default = 5
+    crash_default, sources["defaults.crash_retries"] = _first((
+        (toml_defaults.get("crash_retries"), "toml", "[defaults] crash_retries"),
+        (crash_retries, "flag", "--crash-retries"),
+    ), 5)
+    crash_default = int(crash_default)
+    # max_engines and engine_max_runs: the argument, [server], then [defaults].
+    engines, sources["server.max_engines"] = _first((
+        (max_engines or None, "flag", "--max-engines or app.serve(max_engines=)"),
+        (settings.get("max_engines") or None, "toml", "[server] max_engines"),
+        (toml_defaults.get("max_engines"), "toml", "[defaults] max_engines"),
+    ), os.cpu_count() or 4)
+    engine_runs, sources["server.engine_max_runs"] = _first((
+        (engine_max_runs or None, "flag", "--engine-max-runs or app.serve(engine_max_runs=)"),
+        (settings.get("engine_max_runs") or None, "toml", "[server] engine_max_runs"),
+        (toml_defaults.get("engine_max_runs"), "toml", "[defaults] engine_max_runs"),
+    ), 100)
+    should_open, sources["server.open_browser"] = _first((
+        (False if os.environ.get("CEREYAN_NO_BROWSER") else None, "env", "CEREYAN_NO_BROWSER"),
+        (open_browser, "flag", "--no-open or app.serve(open_browser=)"),
+        (settings.get("open_browser"), "toml", "[server] open_browser"),
+    ), True)
+    sources.update(_file_sources(directory, settings, toml_defaults))
 
     dispatcher = Dispatcher(routes)
     email = email_settings(directory)
@@ -342,8 +452,8 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "port": resolved_port,
         "served_dir": directory,
         "python": sys.executable,
-        "max_engines": int(max_engines or settings.get("max_engines") or (os.cpu_count() or 4)),
-        "engine_max_runs": int(engine_max_runs or settings.get("engine_max_runs") or 100),
+        "max_engines": int(engines),
+        "engine_max_runs": int(engine_runs),
         "cancel_grace_secs": int(settings.get("cancel_grace_secs", 10)),
         "custom_routes": dispatcher.specs(),
         "live_flows": live_ids,
@@ -362,11 +472,11 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "auth_cookie": resolved_auth_cookie,
         "auth_scope": resolved_auth_scope,
         "login_url": resolved_login_url,
+        "open_browser": bool(should_open),
+        "sources": sources,
+        "python_version": platform.python_version(),
+        "platform": f"{platform.system().lower()} {platform.machine()}",
     }
-    if "max_engines" in toml_defaults and max_engines is None and "max_engines" not in settings:
-        config["max_engines"] = int(toml_defaults["max_engines"])
-    if "engine_max_runs" in toml_defaults and engine_max_runs is None and "engine_max_runs" not in settings:
-        config["engine_max_runs"] = int(toml_defaults["engine_max_runs"])
     try:
         server = _core.Server.start(store, json.dumps(config), dispatcher if routes else None, rule_dispatch,
                                     authenticator=authenticator)
@@ -376,8 +486,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
 
     if not quiet:
         print(f"cereyan serving {len(flows)} flow(s) from {directory} at {server.url}", file=sys.stderr)
-    should_open = open_browser if open_browser is not None else settings.get("open_browser", True)
-    if should_open and not os.environ.get("CEREYAN_NO_BROWSER"):
+    if should_open:
         try:
             webbrowser.open(server.url + "/")
         except Exception:

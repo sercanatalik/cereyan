@@ -98,6 +98,15 @@ impl Timer {
         out
     }
 
+    /// Drop every pending event; a reset re-arms what it keeps.
+    pub fn clear(&self) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .heap
+            .clear();
+    }
+
     pub fn remove_run_events(&self, run_id: i64) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let kept: Vec<_> = inner

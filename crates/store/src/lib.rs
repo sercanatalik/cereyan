@@ -3,6 +3,7 @@
 
 mod error;
 mod home;
+mod manage;
 mod migrations;
 mod open;
 mod read;
@@ -12,13 +13,14 @@ mod writer;
 
 pub use error::StoreError;
 pub use home::resolve_home;
+pub use manage::{ProjectCounts, ProjectRow, TableCounts, BACKUP_DIR};
 pub use migrations::latest_version as latest_schema_version;
 pub use read::{ArtifactFilter, ArtifactsPage, EventFilter, EventsPage};
 pub use read::{ListRunsFilter, ListTaskRunsFilter, LogFilter, LogsPage, RunsPage, TaskRunsPage};
 pub use writer::{
-    ArmExpectation, CreateBackfill, CreateRun, CreateTaskRun, NewEvent, NewLog, ReportEvent,
-    ReportOutcome, RuleWrite, SchedulePatch, ScheduleWrite, UpsertArtifact, UpsertFlow,
-    WriteCommand,
+    ArmExpectation, CreateBackfill, CreateRun, CreateTaskRun, DeletedCounts, FlowRows, NewEvent,
+    NewLog, ReportEvent, ReportOutcome, ResetScope, RuleWrite, SchedulePatch, ScheduleWrite,
+    UpsertArtifact, UpsertFlow, WriteCommand,
 };
 
 use std::path::{Path, PathBuf};

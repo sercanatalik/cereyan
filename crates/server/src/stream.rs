@@ -10,6 +10,9 @@ use tokio::sync::broadcast;
 
 pub const RING_SIZE: usize = 4_096;
 
+/// Sent once after a database reset, with its scope; clients reload everything.
+pub const DATABASE_RESET: &str = "database.reset";
+
 #[derive(Clone, Debug)]
 pub struct StreamEvent {
     pub seq: u64,

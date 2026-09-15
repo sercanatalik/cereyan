@@ -87,6 +87,15 @@ impl ActiveIndex {
         inner.flow_project.insert(flow_id, project);
     }
 
+    /// Forget every run held in memory; a reset reloads what is left.
+    pub fn clear_active(&self) {
+        self.inner
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .active
+            .clear();
+    }
+
     pub fn remove_flow(&self, flow_id: i64) {
         let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
         inner.flow_project.remove(&flow_id);

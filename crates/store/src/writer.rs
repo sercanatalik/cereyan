@@ -129,6 +129,38 @@ pub struct RuleWrite {
     pub spec: String,
 }
 
+/// What a database reset deletes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResetScope {
+    /// Runs and everything they recorded; definitions stay.
+    History,
+    /// History, stale flows, UI-made schedules and rules, and variables.
+    Everything,
+}
+
+/// Which rows of a set of flows a batched delete removes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowRows {
+    Log,
+    Event,
+}
+
+/// Rows deleted by a project removal or a reset.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DeletedCounts {
+    pub flows: i64,
+    pub runs: i64,
+    pub task_runs: i64,
+    pub logs: i64,
+    pub events: i64,
+    pub artifacts: i64,
+    pub schedules: i64,
+    pub backfills: i64,
+    pub rules: i64,
+    pub variables: i64,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CreateTaskRun {
     pub run_id: i64,
@@ -397,8 +429,43 @@ pub enum WriteCommand {
         run_id: i64,
         reply: Reply<bool>,
     },
+    /// Delete up to `limit` log or event rows of the given flows; returns the count.
+    DeleteFlowRows {
+        rows: FlowRows,
+        flow_ids: Vec<i64>,
+        limit: i64,
+        reply: Reply<usize>,
+    },
+    /// Delete the given flows with everything that names them.
+    DeleteFlows {
+        flow_ids: Vec<i64>,
+        reply: Reply<DeletedCounts>,
+    },
+    /// Write a consistent copy of the database to `path`; runs outside any transaction.
+    BackupTo {
+        path: String,
+        reply: Reply<()>,
+    },
+    /// Delete the history, or everything but what the live flows registered from code.
+    Reset {
+        scope: ResetScope,
+        live_flows: Vec<i64>,
+        reply: Reply<DeletedCounts>,
+    },
+    /// Rebuild the file to its smallest size; runs outside any transaction.
+    Vacuum(Reply<()>),
     Flush(Reply<()>),
     Shutdown,
+}
+
+impl WriteCommand {
+    /// `VACUUM` in either form cannot run inside a transaction.
+    fn outside_transaction(&self) -> bool {
+        matches!(
+            self,
+            WriteCommand::BackupTo { .. } | WriteCommand::Vacuum(_)
+        )
+    }
 }
 
 /// Deferred acknowledgement: the closure is run after the commit.
@@ -433,24 +500,24 @@ pub fn run(conn: Connection, rx: Receiver<WriteCommand>, commits: Arc<AtomicU64>
 
         let mut acks: Vec<Ack> = Vec::with_capacity(batch.len());
         let mut shutdown = false;
-        let tx_ok = conn.execute_batch("BEGIN IMMEDIATE").is_ok();
+        let mut in_tx = conn.execute_batch("BEGIN IMMEDIATE").is_ok();
         for cmd in batch {
             if let WriteCommand::Shutdown = cmd {
                 shutdown = true;
                 continue;
             }
+            if cmd.outside_transaction() {
+                if in_tx {
+                    commit(&conn, &commits);
+                }
+                acks.push(execute(&conn, cmd));
+                in_tx = conn.execute_batch("BEGIN IMMEDIATE").is_ok();
+                continue;
+            }
             acks.push(execute(&conn, cmd));
         }
-        if tx_ok {
-            match conn.execute_batch("COMMIT") {
-                Ok(()) => {
-                    commits.fetch_add(1, Ordering::Relaxed);
-                }
-                Err(e) => {
-                    eprintln!("cereyan writer: commit failed: {e}");
-                    let _ = conn.execute_batch("ROLLBACK");
-                }
-            }
+        if in_tx {
+            commit(&conn, &commits);
         }
         last_commit = Instant::now();
         for ack in acks {
@@ -461,6 +528,18 @@ pub fn run(conn: Connection, rx: Receiver<WriteCommand>, commits: Arc<AtomicU64>
         }
     }
     let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+}
+
+fn commit(conn: &Connection, commits: &AtomicU64) {
+    match conn.execute_batch("COMMIT") {
+        Ok(()) => {
+            commits.fetch_add(1, Ordering::Relaxed);
+        }
+        Err(e) => {
+            eprintln!("cereyan writer: commit failed: {e}");
+            let _ = conn.execute_batch("ROLLBACK");
+        }
+    }
 }
 
 fn ack<T: Send + 'static>(reply: Reply<T>, value: Result<T>) -> Ack {
@@ -815,6 +894,25 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
             reply,
         } => ack(reply, apply_report(conn, run_id, events)),
         WriteCommand::DeleteRun { run_id, reply } => ack(reply, delete_run(conn, run_id)),
+        WriteCommand::DeleteFlowRows {
+            rows,
+            flow_ids,
+            limit,
+            reply,
+        } => ack(reply, delete_flow_rows(conn, rows, &flow_ids, limit)),
+        WriteCommand::DeleteFlows { flow_ids, reply } => ack(reply, delete_flows(conn, &flow_ids)),
+        WriteCommand::BackupTo { path, reply } => ack(
+            reply,
+            conn.execute("VACUUM INTO ?1", params![path])
+                .map(|_| ())
+                .map_err(Into::into),
+        ),
+        WriteCommand::Reset {
+            scope,
+            live_flows,
+            reply,
+        } => ack(reply, reset(conn, scope, &live_flows)),
+        WriteCommand::Vacuum(reply) => ack(reply, conn.execute_batch("VACUUM").map_err(Into::into)),
         WriteCommand::Flush(reply) => ack(reply, Ok(())),
         WriteCommand::Shutdown => Box::new(|| {}),
     }
@@ -1279,6 +1377,140 @@ fn delete_run(conn: &Connection, run_id: i64) -> Result<bool> {
     Ok(n > 0)
 }
 
+/// A comma-separated id list for `IN (...)`; SQLite reads `IN ()` as empty.
+fn id_list(ids: &[i64]) -> String {
+    ids.iter()
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn count(conn: &Connection, sql: &str) -> Result<i64> {
+    Ok(conn.query_row(sql, [], |r| r.get(0))?)
+}
+
+fn delete_flow_rows(
+    conn: &Connection,
+    rows: FlowRows,
+    flow_ids: &[i64],
+    limit: i64,
+) -> Result<usize> {
+    let ids = id_list(flow_ids);
+    let sql = match rows {
+        FlowRows::Log => format!(
+            "DELETE FROM log WHERE id IN (SELECT l.id FROM log l JOIN run r ON r.id = l.run_id WHERE r.flow_id IN ({ids}) LIMIT ?1)"
+        ),
+        FlowRows::Event => format!(
+            "DELETE FROM event WHERE id IN (SELECT id FROM event WHERE flow_id IN ({ids}) LIMIT ?1)"
+        ),
+    };
+    Ok(conn.execute(&sql, params![limit])?)
+}
+
+/// Delete flows; the cascades take their runs, task runs, logs, artifacts,
+/// schedules and backfills. Events, expectations and stored answers have no
+/// foreign key and are deleted here.
+fn delete_flows(conn: &Connection, flow_ids: &[i64]) -> Result<DeletedCounts> {
+    let ids = id_list(flow_ids);
+    let runs = format!("SELECT id FROM run WHERE flow_id IN ({ids})");
+    let out = DeletedCounts {
+        flows: count(
+            conn,
+            &format!("SELECT COUNT(*) FROM flow WHERE id IN ({ids})"),
+        )?,
+        runs: count(
+            conn,
+            &format!("SELECT COUNT(*) FROM run WHERE flow_id IN ({ids})"),
+        )?,
+        task_runs: count(
+            conn,
+            &format!("SELECT COUNT(*) FROM task_run WHERE run_id IN ({runs})"),
+        )?,
+        logs: count(
+            conn,
+            &format!("SELECT COUNT(*) FROM log WHERE run_id IN ({runs})"),
+        )?,
+        events: count(
+            conn,
+            &format!("SELECT COUNT(*) FROM event WHERE flow_id IN ({ids})"),
+        )?,
+        artifacts: count(
+            conn,
+            &format!("SELECT COUNT(*) FROM artifact WHERE run_id IN ({runs})"),
+        )?,
+        schedules: count(
+            conn,
+            &format!("SELECT COUNT(*) FROM schedule WHERE flow_id IN ({ids})"),
+        )?,
+        backfills: count(
+            conn,
+            &format!("SELECT COUNT(*) FROM backfill WHERE flow_id IN ({ids})"),
+        )?,
+        ..Default::default()
+    };
+    conn.execute(
+        &format!("DELETE FROM kv WHERE key IN (SELECT 'run.input:' || id FROM run WHERE flow_id IN ({ids}))"),
+        [],
+    )?;
+    conn.execute(
+        &format!("DELETE FROM expectation WHERE flow_id IN ({ids}) OR run_id IN ({runs})"),
+        [],
+    )?;
+    conn.execute(&format!("DELETE FROM event WHERE flow_id IN ({ids})"), [])?;
+    conn.execute(&format!("DELETE FROM flow WHERE id IN ({ids})"), [])?;
+    Ok(out)
+}
+
+/// Children are deleted before parents, so the cascades find nothing left to do.
+fn reset(conn: &Connection, scope: ResetScope, live_flows: &[i64]) -> Result<DeletedCounts> {
+    let mut out = DeletedCounts {
+        runs: count(conn, "SELECT COUNT(*) FROM run")?,
+        task_runs: count(conn, "SELECT COUNT(*) FROM task_run")?,
+        logs: count(conn, "SELECT COUNT(*) FROM log")?,
+        events: count(conn, "SELECT COUNT(*) FROM event")?,
+        artifacts: count(conn, "SELECT COUNT(*) FROM artifact")?,
+        backfills: count(conn, "SELECT COUNT(*) FROM backfill")?,
+        ..Default::default()
+    };
+    conn.execute_batch(
+        "DELETE FROM log;
+         DELETE FROM task_run_state;
+         DELETE FROM artifact;
+         DELETE FROM task_run;
+         DELETE FROM run_state;
+         DELETE FROM rule_firing;
+         DELETE FROM expectation;
+         DELETE FROM event;
+         DELETE FROM run;
+         DELETE FROM backfill;
+         DELETE FROM kv WHERE key LIKE 'run.input:%';
+         UPDATE rule SET fire_count = 0, last_fired = NULL;",
+    )?;
+    if scope == ResetScope::Everything {
+        let live = id_list(live_flows);
+        out.flows = count(
+            conn,
+            &format!("SELECT COUNT(*) FROM flow WHERE id NOT IN ({live})"),
+        )?;
+        out.schedules = count(
+            conn,
+            &format!(
+                "SELECT COUNT(*) FROM schedule WHERE source != 'code' OR flow_id NOT IN ({live})"
+            ),
+        )?;
+        out.variables = count(conn, "SELECT COUNT(*) FROM variable")?;
+        conn.execute(&format!("DELETE FROM flow WHERE id NOT IN ({live})"), [])?;
+        conn.execute("DELETE FROM schedule WHERE source != 'code'", [])?;
+        conn.execute(
+            "DELETE FROM kv WHERE key IN (SELECT 'rules.clock_last:' || id FROM rule WHERE source != 'code')",
+            [],
+        )?;
+        out.rules = conn.execute("DELETE FROM rule WHERE source != 'code'", [])? as i64;
+        conn.execute("DELETE FROM variable", [])?;
+    }
+    Ok(out)
+}
+
 fn upsert_schedule(conn: &Connection, sw: &ScheduleWrite) -> Result<i64> {
     let now = now_micros();
     if let Some(id) = sw.id {
@@ -1440,6 +1672,15 @@ fn sync_skip_marks(conn: &Connection, schedule_id: i64) -> Result<Vec<i64>> {
 
 fn append_event(conn: &Connection, e: &NewEvent) -> Result<(i64, Id)> {
     let id = new_id();
+    // An event about a run always names its flow too, so a project's events
+    // can be found through `event_flow`.
+    let flow_id = match (e.flow_id, e.run_id) {
+        (None, Some(run_id)) => conn
+            .prepare_cached("SELECT flow_id FROM run WHERE id = ?1")?
+            .query_row(params![run_id], |r| r.get(0))
+            .optional()?,
+        (flow_id, _) => flow_id,
+    };
     conn.execute(
         "INSERT INTO event (external_id, kind, timestamp, run_id, flow_id, payload, resource_kind, resource_id, resource_name, related)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -1448,7 +1689,7 @@ fn append_event(conn: &Connection, e: &NewEvent) -> Result<(i64, Id)> {
             e.name,
             now_micros(),
             e.run_id,
-            e.flow_id,
+            flow_id,
             e.payload.to_string(),
             e.resource.kind,
             e.resource.id,

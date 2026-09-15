@@ -1,0 +1,226 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { api, unwrap } from "@/api/client";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHead } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+
+/** What you edit (title, resources, defaults) and what is running (custom routes, engines). */
+export function GeneralTab() {
+  const client = useQueryClient();
+  const info = useQuery({
+    queryKey: ["server"],
+    queryFn: async () => unwrap(await api.GET("/api/server")),
+    refetchInterval: 5000,
+  });
+  const settings = useQuery({
+    queryKey: ["settings"],
+    queryFn: async () => unwrap(await api.GET("/api/settings", {})),
+  });
+  const [resources, setResources] = useState<{ name: string; total: string }[]>([]);
+  const [retain, setRetain] = useState("");
+  const [crash, setCrash] = useState("");
+  const [title, setTitle] = useState("");
+  useEffect(() => {
+    const s = settings.data;
+    if (!s) return;
+    setTitle(s.title === "cereyan" ? "" : s.title);
+    setResources(
+      Object.entries(s.resources as Record<string, { total: number }>).map(([name, v]) => ({
+        name,
+        total: String(v.total),
+      })),
+    );
+    setRetain(String(s.retain_days));
+    setCrash(String(s.crash_retries_default));
+  }, [settings.data]);
+  const save = useMutation({
+    mutationFn: async () =>
+      unwrap(
+        await api.PATCH("/api/settings", {
+          body: {
+            resources: Object.fromEntries(
+              resources.filter((r) => r.name).map((r) => [r.name, Number(r.total) || 0]),
+            ),
+            retain_days: Number(retain),
+            crash_retries: Number(crash),
+          },
+        }),
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["settings"] });
+      client.invalidateQueries({ queryKey: ["environment"] });
+    },
+  });
+  // Sends only the title, so saving it does not resend the other cards' fields.
+  const saveTitle = useMutation({
+    mutationFn: async () => unwrap(await api.PATCH("/api/settings", { body: { title } })),
+    onSuccess: (saved) => {
+      client.setQueryData(["server"], (old: typeof info.data) =>
+        old ? { ...old, title: saved.title } : old,
+      );
+      document.title = saved.title;
+      client.invalidateQueries({ queryKey: ["server"] });
+      client.invalidateQueries({ queryKey: ["settings"] });
+      client.invalidateQueries({ queryKey: ["environment"] });
+    },
+  });
+  const s = settings.data;
+  const srv = info.data;
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <Card className="col-span-2 gap-0 py-0">
+        <CardHead title="Interface" />
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+            <div className="flex items-end gap-2">
+              <label className="block text-xs text-muted-foreground" htmlFor="ui-title">
+                Title
+                <Input
+                  id="ui-title"
+                  className="mt-1 w-80"
+                  value={title}
+                  placeholder="cereyan"
+                  maxLength={80}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </label>
+              <Button
+                size="sm"
+                className="mb-0.5"
+                onClick={() => saveTitle.mutate()}
+                disabled={saveTitle.isPending}
+              >
+                Save
+              </Button>
+            </div>
+            <p className="min-w-72 flex-1 pb-1.5 text-xs text-muted-foreground">
+              Shown next to the mark in the top bar and as the browser tab title. Leave it empty to show
+              cereyan. Saved to cereyan.toml as <code className="font-mono">[ui] title</code>.
+            </p>
+          </div>
+          {saveTitle.isError ? (
+            <p className="mt-2 text-xs text-destructive">
+              The title was not saved: use at most 80 characters and no control characters.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+      <Card className="gap-0 py-0">
+        <CardHead title="Resources" />
+        <CardContent className="space-y-2 p-4" data-testid="resources-editor">
+          {resources
+            .map((r, i) => ({ r, i, key: `${i}:${r.name}` }))
+            .map(({ r, i, key }) => (
+              <div key={key} className="flex items-center gap-2">
+                <Input
+                  value={r.name}
+                  aria-label="Resource name"
+                  onChange={(e) =>
+                    setResources(resources.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))
+                  }
+                />
+                <Input
+                  value={r.total}
+                  aria-label={`Total for ${r.name}`}
+                  className="w-24"
+                  onChange={(e) =>
+                    setResources(resources.map((x, j) => (j === i ? { ...x, total: e.target.value } : x)))
+                  }
+                />
+              </div>
+            ))}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setResources([...resources, { name: "", total: "1" }])}
+          >
+            Add resource
+          </Button>
+        </CardContent>
+      </Card>
+      <Card className="gap-0 py-0">
+        <CardHead title="Defaults" />
+        <CardContent className="space-y-2 p-4">
+          <label className="block text-xs text-muted-foreground" htmlFor="retain">
+            Retention days (logs and events)
+            <Input
+              id="retain"
+              className="mt-1 w-32"
+              value={retain}
+              onChange={(e) => setRetain(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground" htmlFor="crash">
+            Crash retries
+            <Input
+              id="crash"
+              className="mt-1 w-32"
+              value={crash}
+              onChange={(e) => setCrash(e.target.value)}
+            />
+          </label>
+          <div className="text-xs text-muted-foreground">
+            Catch-up {s?.catchup_default} · max engines {s?.max_engines} · engine max runs{" "}
+            {s?.engine_max_runs}
+          </div>
+          <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
+            Save settings
+          </Button>
+          {save.isSuccess ? (
+            <span className="ml-2 text-xs text-muted-foreground">Saved to cereyan.toml</span>
+          ) : null}
+        </CardContent>
+      </Card>
+      <Card className="col-span-2 gap-0 py-0">
+        <CardHead title="Custom routes" />
+        <CardContent className="p-4">
+          {s?.custom_routes.length ? (
+            <table className="w-full text-sm">
+              <tbody>
+                {s.custom_routes.map((r) => (
+                  <tr key={`${r.method}-${r.path}`} className="border-t">
+                    <td className="py-1 font-mono text-xs">{r.method}</td>
+                    <td className="font-mono text-xs">{r.path}</td>
+                    <td className="text-xs text-muted-foreground">{r.source ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <span className="text-muted-foreground">No custom routes registered.</span>
+          )}
+        </CardContent>
+      </Card>
+      <Card className="col-span-2 gap-0 py-0">
+        <CardHead title="Engines" />
+        <CardContent className="p-4">
+          {srv?.engines.length ? (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase text-muted-foreground">
+                  <th className="py-1">PID</th>
+                  <th>Module</th>
+                  <th>Runs done</th>
+                  <th>Current run</th>
+                </tr>
+              </thead>
+              <tbody>
+                {srv.engines.map((e: any) => (
+                  <tr key={e.id} className="border-t">
+                    <td className="py-1 font-mono text-xs">{e.pid}</td>
+                    <td>{e.module}</td>
+                    <td>{e.runs_done}</td>
+                    <td>{e.current_run ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <span className="text-muted-foreground">No engines running.</span>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -78,6 +78,12 @@ Named JSON values with tags. Secrets are stored encrypted and shown masked. Valu
 
 ![Settings page with the interface title, server details, database size and retention, resource totals, defaults, custom routes, and engines](../images/settings.png)
 
-The title shown in the top bar and the browser tab, which names this installation (`[ui] title`; empty shows `cereyan`); the server's version, URL, PID, home, served directory, and start time; the database path, size, WAL size, and retention; resource totals you can add and edit; the retention and crash-retry defaults; the custom routes registered by the served Apps; and the engine pool with each engine's PID, module, runs done, and current run. Saving settings writes them back to `cereyan.toml`.
+Three tabs, the one open kept in the URL (`/settings?tab=data`).
+
+| Tab | Shows |
+|---|---|
+| **General** | What you change: the title shown in the top bar and the browser tab, which names this installation (`[ui] title`; empty shows `cereyan`), resource totals, and the retention and crash-retry defaults; saving writes them back to `cereyan.toml`. What is running: the custom routes the served Apps registered, and the engine pool with each engine's PID, module, runs done, and current run. |
+| **Environment** | The server's version, URL, PID, home, served directory, `cereyan.toml` path, Python, and platform; every setting with its value and where it came from (a flag, a `CEREYAN_*` variable, `app.serve()`, `cereyan.toml`, an edit in Settings, or the default); `cereyan.toml` itself; and the environment variables engines inherit. Secret values are hidden by the server and never reach the page. |
+| **Data** | The database's path, size, and row counts; the projects in the store, with **Remove** on any this server does not serve; and **Reset database**. See [How to clean up the store](../guides/clean-up-the-store.md). |
 
 Next: the [concepts](../concepts/app-and-projects.md), or straight to the [guides](../guides/retries-timeouts-crashes.md).

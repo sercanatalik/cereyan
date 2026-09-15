@@ -76,7 +76,9 @@ export function applyEvent(client: QueryClient, event: LiveEvent) {
       client.invalidateQueries({ queryKey: ["flows"] });
       client.invalidateQueries({ queryKey: ["upcoming"] });
       break;
+    // After a database reset nothing cached is still true.
     case "resync":
+    case "database.reset":
       client.invalidateQueries();
       break;
     default:
