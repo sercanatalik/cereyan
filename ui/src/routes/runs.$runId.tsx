@@ -113,86 +113,86 @@ function RunDetail() {
     <Page width="bleed" className="gap-0">
       <div className="border-b bg-card pt-4 pb-4" data-testid="run-header">
         <div className="frame flex flex-col gap-3.5">
-        <Crumb items={[{ label: "Runs", to: "/runs" }, { label: r.name }]} />
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-[22px] font-semibold leading-7 tracking-tight">{r.name}</h1>
-          <StateBadge state={r.state} />
-          <Link
-            to="/flows/$flowId"
-            params={{ flowId: String(r.flow_id) }}
-            className="text-muted-foreground hover:underline"
-          >
-            {r.project}/{r.flow_name}
-          </Link>
-          <Tags tags={r.tags} />
-          <div className="ml-auto flex gap-2">
-            <Button variant="outline" onClick={() => again.mutate(r)} disabled={again.isPending}>
-              <RotateCcw /> Run again
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!active || cancel.isPending}
-              onClick={() => window.confirm("Cancel this run?") && cancel.mutate()}
+          <Crumb items={[{ label: "Runs", to: "/runs" }, { label: r.name }]} />
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-[22px] font-semibold leading-7 tracking-tight">{r.name}</h1>
+            <StateBadge state={r.state} />
+            <Link
+              to="/flows/$flowId"
+              params={{ flowId: String(r.flow_id) }}
+              className="text-muted-foreground hover:underline"
             >
-              Cancel
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="icon" aria-label="More actions">
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  variant="destructive"
-                  onSelect={() => window.confirm("Delete this run and its history?") && remove.mutate()}
-                >
-                  Delete run
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              {r.project}/{r.flow_name}
+            </Link>
+            <Tags tags={r.tags} />
+            <div className="ml-auto flex gap-2">
+              <Button variant="outline" onClick={() => again.mutate(r)} disabled={again.isPending}>
+                <RotateCcw /> Run again
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!active || cancel.isPending}
+                onClick={() => window.confirm("Cancel this run?") && cancel.mutate()}
+              >
+                Cancel
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon" aria-label="More actions">
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => window.confirm("Delete this run and its history?") && remove.mutate()}
+                  >
+                    Delete run
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-4.5 gap-y-1 text-xs text-muted-foreground">
-          <span>
-            Started{" "}
-            <span className="text-foreground tabular-nums">{formatTime(r.start_time ?? r.created_at)}</span>
-          </span>
-          <span>
-            {active ? "Elapsed" : "Duration"}{" "}
-            <span className="text-foreground tabular-nums">
-              {formatDuration(r.total_run_time ?? (r.start_time ? Date.now() * 1000 - r.start_time : null))}
-            </span>
-          </span>
-          <span>
-            Attempt <span className="text-foreground tabular-nums">{r.attempt ?? 0}</span>
-          </span>
-          <span>
-            Created by{" "}
-            {by.to ? (
-              <Link to={by.to} params={by.params as any} className="text-foreground hover:underline">
-                {by.label}
-              </Link>
-            ) : (
-              <span className="text-foreground">{by.label}</span>
-            )}
-          </span>
-          {params ? (
+          <div className="flex flex-wrap items-center gap-x-4.5 gap-y-1 text-xs text-muted-foreground">
             <span>
-              Parameters <span className="font-mono text-muted-foreground">{params}</span>
+              Started{" "}
+              <span className="text-foreground tabular-nums">{formatTime(r.start_time ?? r.created_at)}</span>
             </span>
-          ) : null}
-        </div>
-        {r.state.type === "Paused" ? (
-          <PausedBanner run={r} onResumed={() => client.invalidateQueries({ queryKey: ["run", id] })} />
-        ) : r.state.message ? (
-          <div
-            className="rounded-md border bg-muted/50 px-3 py-2 font-mono text-xs"
-            data-testid="state-message"
-          >
-            {r.state.message}
+            <span>
+              {active ? "Elapsed" : "Duration"}{" "}
+              <span className="text-foreground tabular-nums">
+                {formatDuration(r.total_run_time ?? (r.start_time ? Date.now() * 1000 - r.start_time : null))}
+              </span>
+            </span>
+            <span>
+              Attempt <span className="text-foreground tabular-nums">{r.attempt ?? 0}</span>
+            </span>
+            <span>
+              Created by{" "}
+              {by.to ? (
+                <Link to={by.to} params={by.params as any} className="text-foreground hover:underline">
+                  {by.label}
+                </Link>
+              ) : (
+                <span className="text-foreground">{by.label}</span>
+              )}
+            </span>
+            {params ? (
+              <span>
+                Parameters <span className="font-mono text-muted-foreground">{params}</span>
+              </span>
+            ) : null}
           </div>
-        ) : null}
+          {r.state.type === "Paused" ? (
+            <PausedBanner run={r} onResumed={() => client.invalidateQueries({ queryKey: ["run", id] })} />
+          ) : r.state.message ? (
+            <div
+              className="rounded-md border bg-muted/50 px-3 py-2 font-mono text-xs"
+              data-testid="state-message"
+            >
+              {r.state.message}
+            </div>
+          ) : null}
         </div>
       </div>
 

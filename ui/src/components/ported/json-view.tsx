@@ -2,8 +2,10 @@
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-export function JsonView({ value }: { value: unknown }) {
+/** `wrap` breaks long lines instead of scrolling, for narrow panels. */
+export function JsonView({ value, wrap = false }: { value: unknown; wrap?: boolean }) {
   const [copied, setCopied] = useState(false);
   const text = JSON.stringify(value ?? null, null, 2);
   return (
@@ -20,7 +22,14 @@ export function JsonView({ value }: { value: unknown }) {
       >
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
       </Button>
-      <pre className="overflow-auto rounded-lg border bg-card p-3 font-mono text-xs leading-5">{text}</pre>
+      <pre
+        className={cn(
+          "overflow-auto rounded-lg border bg-card p-3 font-mono text-xs leading-5",
+          wrap && "whitespace-pre-wrap break-words",
+        )}
+      >
+        {text}
+      </pre>
     </div>
   );
 }

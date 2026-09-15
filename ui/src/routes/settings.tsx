@@ -25,7 +25,7 @@ function SettingsPage() {
   const { tab = "general" } = Route.useSearch();
   const navigate = Route.useNavigate();
   return (
-    <Page crumbs={[{ label: "Settings" }]} title="Settings">
+    <Page crumbs={[{ label: "Settings" }]} title="Settings" width="narrow">
       <UnderlineTabs
         items={TABS}
         value={tab}

@@ -72,7 +72,10 @@ export function dayLabel(micros: number, now = Date.now()): { label: string; dat
       : day === startOfDay(today - 1)
         ? "Yesterday"
         : d.toLocaleDateString(undefined, { weekday: "long" });
-  return { label, date: d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) };
+  return {
+    label,
+    date: d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }),
+  };
 }
 
 type Line = { key: string; day: { label: string; date: string } } | { key: string; event: Event };
@@ -105,7 +108,11 @@ function lineAt(offsets: number[], y: number): number {
 }
 
 const timeOfDay = (micros: number) =>
-  new Date(micros / 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  new Date(micros / 1000).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 
 function preview(payload: unknown): string {
   const text = JSON.stringify(payload ?? {});

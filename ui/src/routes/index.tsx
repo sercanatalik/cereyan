@@ -12,12 +12,16 @@ import { StateBar, TaskProgress } from "@/components/state-bar";
 import { Button } from "@/components/ui/button";
 import { Card, CardHead } from "@/components/ui/card";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { useMinWidth } from "@/lib/media";
 import { useProject } from "@/lib/project";
 import { formatDuration, relativeTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({ component: Dashboard });
 
 const ATTENTION: StateType[] = ["Paused", "Failed", "Crashed"];
+/** From this viewport width the three lists share a row and the histogram doubles its buckets. */
+const WIDE = 1680;
+const COMPLETED_LIMIT = 8;
 
 function elapsed(run: Run, now: number): string {
   if (run.total_run_time != null) return formatDuration(run.total_run_time);
@@ -31,10 +35,21 @@ function scheduleWords(run: Run): string {
   return run.created_by ?? "";
 }
 
+const clock = (micros: number) =>
+  new Date(micros / 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+const paramText = (run: Run) =>
+  Object.entries(run.parameters ?? {})
+    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join(", ");
+
+const finishedAt = (run: Run) => run.end_time ?? run.state.timestamp;
+
 function Dashboard() {
   const [range, setRange] = useState<RangePreset>("24h");
   const [tags, setTags] = useState<string[]>([]);
   const { project } = useProject();
+  const wide = useMinWidth(WIDE);
   const start = rangeStart(range);
   const now = Date.now() * 1000;
   const counts = useQuery({
@@ -90,11 +105,54 @@ function Dashboard() {
     .sort((a, b) => rank(a) - rank(b))
     .slice(0, 6);
   const running = runs.filter((r) => r.state.type === "Running").slice(0, 6);
+  // Derived from the same runs as the stat row, so it shares its bound of 500 runs in range.
+  const completed = runs
+    .filter((r) => r.state.type === "Completed")
+    .sort((a, b) => finishedAt(b) - finishedAt(a))
+    .slice(0, COMPLETED_LIMIT);
+  const upcomingRuns = upcoming.data?.items ?? [];
+  const noneDue = upcoming.data && upcoming.data.items.length === 0;
   const proportion: Record<string, number> = {};
   for (const r of runs) {
     const k = r.state.name === "Late" ? "Late" : r.state.type;
     proportion[k] = (proportion[k] ?? 0) + 1;
   }
+  const attentionCard = (
+    <Card className="gap-0 py-0">
+      <CardHead title="Needs attention" aside={`${attention.length} runs`} />
+      {attention.length === 0 ? <Empty>Nothing waiting on you.</Empty> : null}
+      {attention.map((r) => (
+        <AttentionRow key={r.id} run={r} />
+      ))}
+    </Card>
+  );
+  const runningCard = (
+    <Card className="gap-0 py-0">
+      <CardHead title="Running now" aside={`${byType.Running ?? running.length} running`} />
+      {running.length === 0 ? <Empty>Nothing running.</Empty> : null}
+      {running.map((r) => (
+        <div key={r.id} className="flex flex-col gap-2 border-b px-4 py-3 last:border-b-0" data-run-id={r.id}>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <StateDot type="Running" />
+            <Link
+              to="/runs/$runId"
+              params={{ runId: String(r.id) }}
+              className="whitespace-nowrap font-medium hover:underline"
+            >
+              {r.name}
+            </Link>
+            <span className="min-w-0 truncate text-xs text-muted-foreground">
+              {r.project}/{r.flow_name}
+            </span>
+            <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">
+              {elapsed(r, now)}
+            </span>
+          </div>
+          <TaskProgress counts={r.task_counts ?? {}} />
+        </div>
+      ))}
+    </Card>
+  );
   return (
     <Page
       title="Dashboard"
@@ -137,74 +195,64 @@ function Dashboard() {
           </div>
         </div>
         <StateBar counts={proportion} className="w-full" height={6} title={`${runs.length} runs by state`} />
-        <Histogram runs={runs} start={start ?? runs.at(-1)?.created_at ?? now - 86_400_000_000} end={now} />
+        <Histogram
+          runs={runs}
+          start={start ?? runs.at(-1)?.created_at ?? now - 86_400_000_000}
+          end={now}
+          buckets={wide ? 48 : 24}
+        />
       </Card>
 
-      <div className="grid grid-cols-[minmax(0,7fr)_minmax(0,5fr)] gap-4">
-        <Card className="gap-0 py-0">
-          <CardHead title="Needs attention" aside={`${attention.length} runs`} />
-          {attention.length === 0 ? <Empty>Nothing waiting on you.</Empty> : null}
-          {attention.map((r) => (
-            <AttentionRow key={r.id} run={r} />
-          ))}
-        </Card>
-        <Card className="gap-0 py-0">
-          <CardHead title="Running now" aside={`${byType.Running ?? running.length} running`} />
-          {running.length === 0 ? <Empty>Nothing running.</Empty> : null}
-          {running.map((r) => (
-            <div
-              key={r.id}
-              className="flex flex-col gap-2 border-b px-4 py-3 last:border-b-0"
-              data-run-id={r.id}
-            >
-              <div className="flex items-baseline gap-2">
-                <StateDot type="Running" />
-                <Link
-                  to="/runs/$runId"
-                  params={{ runId: String(r.id) }}
-                  className="font-medium hover:underline"
-                >
-                  {r.name}
-                </Link>
-                <span className="text-xs text-muted-foreground">
-                  {r.project}/{r.flow_name}
-                </span>
-                <span className="ml-auto font-mono text-xs tabular-nums text-muted-foreground">
-                  {elapsed(r, now)}
-                </span>
-              </div>
-              <TaskProgress counts={r.task_counts ?? {}} />
-            </div>
-          ))}
-        </Card>
-      </div>
-
-      <Card className="gap-0 py-0">
-        <CardHead title="Upcoming" aside="next scheduled runs" />
-        <Table>
-          <thead>
-            <tr>
-              <Th className="w-40">When</Th>
-              <Th>Flow</Th>
-              <Th>Created by</Th>
-              <Th>Parameters</Th>
-              <Th className="w-28" />
-            </tr>
-          </thead>
-          <tbody>
-            {(upcoming.data?.items ?? []).map((r) => (
-              <UpcomingRow key={r.id} run={r} />
-            ))}
-            {upcoming.data && upcoming.data.items.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
-                  No schedules are due.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </Table>
-      </Card>
+      {wide ? (
+        <>
+          <div className="grid grid-cols-3 gap-4" data-testid="dashboard-lists">
+            {attentionCard}
+            {runningCard}
+            <Card className="gap-0 py-0">
+              <CardHead title="Upcoming" aside="next scheduled runs" />
+              {noneDue ? <Empty>No schedules are due.</Empty> : null}
+              {upcomingRuns.map((r) => (
+                <UpcomingItem key={r.id} run={r} />
+              ))}
+            </Card>
+          </div>
+          <CompletedCard runs={completed} />
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-[minmax(0,7fr)_minmax(0,5fr)] gap-4" data-testid="dashboard-lists">
+            {attentionCard}
+            {runningCard}
+          </div>
+          <CompletedCard runs={completed} />
+          <Card className="gap-0 py-0">
+            <CardHead title="Upcoming" aside="next scheduled runs" />
+            <Table>
+              <thead>
+                <tr>
+                  <Th className="w-40">When</Th>
+                  <Th>Flow</Th>
+                  <Th>Created by</Th>
+                  <Th>Parameters</Th>
+                  <Th className="w-28" />
+                </tr>
+              </thead>
+              <tbody>
+                {upcomingRuns.map((r) => (
+                  <UpcomingRow key={r.id} run={r} />
+                ))}
+                {noneDue ? (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                      No schedules are due.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </Table>
+          </Card>
+        </>
+      )}
     </Page>
   );
 }
@@ -245,14 +293,18 @@ function AttentionRow({ run }: { run: Run }) {
     >
       <StateBadge state={run.state} />
       <div className="flex min-w-0 flex-col">
-        <div className="flex items-baseline gap-2">
-          <Link to="/runs/$runId" params={{ runId: String(run.id) }} className="font-medium hover:underline">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <Link
+            to="/runs/$runId"
+            params={{ runId: String(run.id) }}
+            className="whitespace-nowrap font-medium hover:underline"
+          >
             {run.name}
           </Link>
-          <span className="text-xs text-muted-foreground">
+          <span className="min-w-0 truncate text-xs text-muted-foreground">
             {run.project}/{run.flow_name}
           </span>
-          <span className="ml-auto text-xs text-muted-foreground">
+          <span className="ml-auto whitespace-nowrap text-xs text-muted-foreground">
             {relativeTime(run.state.timestamp || run.created_at)}
           </span>
         </div>
@@ -277,10 +329,9 @@ function AttentionRow({ run }: { run: Run }) {
   );
 }
 
-function UpcomingRow({ run }: { run: Run }) {
+function useRunNow(run: Run) {
   const client = useQueryClient();
-  const at = run.scheduled_time ?? run.created_at;
-  const start = useMutation({
+  return useMutation({
     mutationFn: async () =>
       unwrap(
         await api.POST("/api/flows/{id}/runs", {
@@ -290,15 +341,15 @@ function UpcomingRow({ run }: { run: Run }) {
       ),
     onSuccess: () => client.invalidateQueries({ queryKey: ["runs"] }),
   });
-  const params = Object.entries(run.parameters ?? {})
-    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
-    .join(", ");
+}
+
+function UpcomingRow({ run }: { run: Run }) {
+  const start = useRunNow(run);
+  const at = run.scheduled_time ?? run.created_at;
   return (
     <Tr data-run-id={run.id}>
       <Td>
-        <span className="tabular-nums">
-          {new Date(at / 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-        </span>
+        <span className="tabular-nums">{clock(at)}</span>
         <span className="ml-1.5 text-xs text-muted-foreground">{relativeTime(at)}</span>
       </Td>
       <Td>
@@ -311,12 +362,109 @@ function UpcomingRow({ run }: { run: Run }) {
         </Link>
       </Td>
       <Td className="text-muted-foreground">{scheduleWords(run)}</Td>
-      <Td className="font-mono text-xs text-muted-foreground">{params}</Td>
+      <Td className="font-mono text-xs text-muted-foreground">{paramText(run)}</Td>
       <Td className="text-right">
         <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => start.mutate()}>
           <Play /> Run now
         </Button>
       </Td>
     </Tr>
+  );
+}
+
+/** An Upcoming run as a list row, for the three-column row on wide screens. */
+function UpcomingItem({ run }: { run: Run }) {
+  const start = useRunNow(run);
+  const at = run.scheduled_time ?? run.created_at;
+  return (
+    <div
+      className="grid grid-cols-[104px_minmax(0,1fr)_auto] items-center gap-3.5 border-b px-4 py-3 last:border-b-0"
+      data-run-id={run.id}
+    >
+      <div className="flex flex-col">
+        <span className="font-medium tabular-nums">{clock(at)}</span>
+        <span className="text-xs text-muted-foreground">{relativeTime(at)}</span>
+      </div>
+      <div className="flex min-w-0 flex-col">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <Link
+            to="/flows/$flowId"
+            params={{ flowId: String(run.flow_id) }}
+            className="truncate font-medium hover:underline"
+          >
+            {run.project}/{run.flow_name}
+          </Link>
+          <span className="whitespace-nowrap text-xs text-muted-foreground">{scheduleWords(run)}</span>
+        </div>
+        <div className="truncate font-mono text-xs text-muted-foreground">{paramText(run)}</div>
+      </div>
+      <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => start.mutate()}>
+        <Play /> Run now
+      </Button>
+    </div>
+  );
+}
+
+/** The latest Completed runs in the range, in the Runs table's columns. */
+function CompletedCard({ runs }: { runs: Run[] }) {
+  return (
+    <Card className="gap-0 py-0" data-testid="recently-completed">
+      <CardHead
+        title="Recently completed"
+        aside={runs.length === 1 ? "last run" : `last ${runs.length} runs`}
+      />
+      <Table>
+        <thead>
+          <tr>
+            <Th className="w-40">Finished</Th>
+            <Th>Name</Th>
+            <Th>Flow</Th>
+            <Th>Tasks</Th>
+            <Th>Duration</Th>
+            <Th>Parameters</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((r) => (
+            <Tr key={r.id} data-run-id={r.id}>
+              <Td>
+                <span className="tabular-nums">{clock(finishedAt(r))}</span>
+                <span className="ml-1.5 text-xs text-muted-foreground">{relativeTime(finishedAt(r))}</span>
+              </Td>
+              <Td>
+                <Link
+                  to="/runs/$runId"
+                  params={{ runId: String(r.id) }}
+                  className="font-medium hover:underline"
+                >
+                  {r.name}
+                </Link>
+              </Td>
+              <Td className="text-muted-foreground">
+                {r.project}/{r.flow_name}
+              </Td>
+              <Td>
+                {Object.keys(r.task_counts ?? {}).length ? (
+                  <StateBar counts={r.task_counts ?? {}} className="w-22" />
+                ) : (
+                  <span className="text-muted-foreground">-</span>
+                )}
+              </Td>
+              <Td className="tabular-nums">{formatDuration(r.total_run_time)}</Td>
+              <Td className="font-mono text-xs text-muted-foreground">
+                <span className="block max-w-md truncate">{paramText(r)}</span>
+              </Td>
+            </Tr>
+          ))}
+          {runs.length === 0 ? (
+            <tr>
+              <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
+                No completed runs in this range.
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </Table>
+    </Card>
   );
 }
