@@ -64,6 +64,8 @@ class Flow:
         schedules: Any = None,
         retries: int = 0,
         retry_delay: Any = 0,
+        retry_on: tuple[type[BaseException], ...] | None = None,
+        retry_when: Callable[[BaseException, int], bool] | None = None,
         timeout_seconds: float | None = None,
         crash_retries: int | None = None,
         priority: int = 0,
@@ -94,6 +96,8 @@ class Flow:
         self.schedules = declared
         self.retries = int(retries)
         self.retry_delay = retry_delay
+        self.retry_on = tuple(retry_on) if retry_on else None
+        self.retry_when = retry_when
         self.timeout_seconds = timeout_seconds
         self.crash_retries = crash_retries
         self.priority = int(priority)
@@ -262,6 +266,12 @@ def flow(
         retries (int): How many times a failed run is retried.
         retry_delay (float | list[float] | exponential): Wait before each retry: seconds, a list of per-attempt seconds,
             or `exponential`.
+        retry_on (tuple[type[BaseException], ...] | None): Retry only these exception types; any other failure ends the
+            run on its first attempt. Combined with ``retry_when``, both must
+            allow a retry.
+        retry_when (Callable[[BaseException, int], bool] | None): Called with the exception and the attempt that just
+            failed; return ``False`` to stop retrying. A predicate that raises
+            stops the retry and leaves the original failure recorded.
         timeout_seconds (float | None): End the run as Failed with sub-state ``TimedOut`` after this
             many seconds.
         crash_retries (int | None): How many times a run whose engine died is rerun before it is

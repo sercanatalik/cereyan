@@ -71,7 +71,7 @@ test("histogram buckets runs by state", () => {
 const grouped = (id: number, name: string, project: string, group: string | null, type: string) =>
   ({ ...runs[0], id, name, project, group, state: { ...runs[0].state, type, name: type } }) as any;
 
-test("grouped run table sections runs by group and rolls up their states", async () => {
+test("grouped run table nests runs project then group and rolls up their states", async () => {
   const rows = [
     grouped(1, "one", "warehouse", "nightly", "Completed"),
     grouped(2, "two", "analytics", "nightly", "Failed"),
@@ -93,23 +93,25 @@ test("grouped run table sections runs by group and rolls up their states", async
     );
   }
   renderWithRouter(<Live />);
-  await waitFor(() => expect(screen.getByTestId("group-nightly")).toBeInTheDocument());
-  // A declared group spans projects; an undeclared run falls back to its project.
-  expect(screen.getByTestId("group-nightly")).toHaveTextContent("analytics · warehouse");
-  expect(screen.getByTestId("group-warehouse")).toBeInTheDocument();
-  const nightly = screen.getByTestId("group-nightly");
-  expect(nightly.querySelector("[data-testid=state-bar]")).toHaveAttribute(
+  await waitFor(() => expect(screen.getByTestId("project-warehouse")).toBeInTheDocument());
+  // A group name used in two projects appears under each, never merged.
+  expect(screen.getByTestId("group-warehouse/nightly")).toBeInTheDocument();
+  expect(screen.getByTestId("group-analytics/nightly")).toBeInTheDocument();
+  // The project rolls up every run beneath it, its own rows and its groups'.
+  expect(screen.getByTestId("project-warehouse").querySelector("[data-testid=state-bar]")).toHaveAttribute(
     "aria-label",
-    "1 Completed, 1 Failed",
+    "2 Completed",
   );
+  expect(
+    screen.getByTestId("group-analytics/nightly").querySelector("[data-testid=state-bar]"),
+  ).toHaveAttribute("aria-label", "1 Failed");
 
   // The rollup follows the rows: a state change is reflected in the header.
   screen.getByText("complete it").click();
   await waitFor(() =>
-    expect(screen.getByTestId("group-nightly").querySelector("[data-testid=state-bar]")).toHaveAttribute(
-      "aria-label",
-      "2 Completed",
-    ),
+    expect(
+      screen.getByTestId("group-analytics/nightly").querySelector("[data-testid=state-bar]"),
+    ).toHaveAttribute("aria-label", "1 Completed"),
   );
 });
 
@@ -137,12 +139,12 @@ test("selection works across groups", async () => {
   expect(Array.from(picked).sort()).toEqual([1, 2]);
 });
 
-test("grouped run table: the group header spans exactly the table's columns", async () => {
+test("grouped run table: a header at either level spans exactly the table's columns", async () => {
   const rows = [grouped(1, "one", "warehouse", "nightly", "Completed")];
   renderWithRouter(
     <RunTable runs={rows} grouped selected={new Set()} onSelect={() => {}} onSelectAll={() => {}} />,
   );
-  await waitFor(() => expect(screen.getByTestId("group-nightly")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByTestId("project-warehouse")).toBeInTheDocument());
   const width = (tr: HTMLElement) =>
     Array.from(tr.querySelectorAll(":scope > td")).reduce(
       (n, td) => n + Number(td.getAttribute("colspan") ?? 1),
@@ -150,6 +152,6 @@ test("grouped run table: the group header spans exactly the table's columns", as
     );
   const dataRow = screen.getByText("one").closest("tr") as HTMLElement;
   const headings = document.querySelectorAll("thead th").length;
-  expect(width(screen.getByTestId("group-nightly"))).toBe(width(dataRow));
-  expect(width(screen.getByTestId("group-nightly"))).toBe(headings);
+  expect(width(screen.getByTestId("project-warehouse"))).toBe(width(dataRow));
+  expect(width(screen.getByTestId("group-warehouse/nightly"))).toBe(headings);
 });

@@ -56,6 +56,9 @@ pub struct ArtifactFilter {
     pub flow: Option<String>,
     #[serde(default)]
     pub project: Option<String>,
+    /// The resolved group: the one the flow declared, else its project.
+    #[serde(default)]
+    pub group: Option<String>,
     #[serde(default)]
     pub run_id: Option<i64>,
     #[serde(default)]
@@ -84,6 +87,9 @@ pub struct EventsPage {
 pub struct ListRunsFilter {
     #[serde(default)]
     pub project: Option<String>,
+    /// The resolved group: the one the flow declared, else its project.
+    #[serde(default)]
+    pub group: Option<String>,
     #[serde(default)]
     pub flow: Option<String>,
     #[serde(default)]
@@ -137,6 +143,9 @@ pub struct ListTaskRunsFilter {
     pub pass: Option<i64>,
     #[serde(default)]
     pub project: Option<String>,
+    /// The resolved group: the one the flow declared, else its project.
+    #[serde(default)]
+    pub group: Option<String>,
     #[serde(default)]
     pub flow: Option<String>,
     #[serde(default)]
@@ -260,6 +269,12 @@ impl Store {
         let mut q = Query::new();
         if let Some(p) = &filter.project {
             q.push("f.project = ?", SqlValue::Text(p.clone()));
+        }
+        if let Some(g) = &filter.group {
+            q.push(
+                "COALESCE(f.flow_group, f.project) = ?",
+                SqlValue::Text(g.clone()),
+            );
         }
         if let Some(f) = &filter.flow {
             q.push("f.name = ?", SqlValue::Text(f.clone()));
@@ -451,6 +466,12 @@ impl Store {
         if let Some(p) = &filter.project {
             q.push("f.project = ?", SqlValue::Text(p.clone()));
         }
+        if let Some(g) = &filter.group {
+            q.push(
+                "COALESCE(f.flow_group, f.project) = ?",
+                SqlValue::Text(g.clone()),
+            );
+        }
         if let Some(f) = &filter.flow {
             q.push("f.name = ?", SqlValue::Text(f.clone()));
         }
@@ -563,13 +584,27 @@ impl Store {
     }
 
     pub fn list_flows(&self, project: Option<&str>) -> Result<Vec<Flow>> {
+        self.list_flows_filtered(project, None)
+    }
+
+    /// Flows narrowed by project and by resolved group. A `NULL` `flow_group`
+    /// reads as the flow's project, so a group equal to a project name selects
+    /// that project's flows that declared none, matching what the API returns.
+    pub fn list_flows_filtered(
+        &self,
+        project: Option<&str>,
+        group: Option<&str>,
+    ) -> Result<Vec<Flow>> {
         let sql = format!(
-            "SELECT {FLOW_COLUMNS} FROM flow WHERE (?1 IS NULL OR project = ?1) ORDER BY project, name"
+            "SELECT {FLOW_COLUMNS} FROM flow \
+             WHERE (?1 IS NULL OR project = ?1) \
+               AND (?2 IS NULL OR COALESCE(flow_group, project) = ?2) \
+             ORDER BY project, name"
         );
         self.with_reader(|conn| {
             let mut stmt = conn.prepare_cached(&sql)?;
             let rows = stmt
-                .query_map([project], flow_from_row)?
+                .query_map([project, group], flow_from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })
@@ -958,6 +993,12 @@ impl Store {
         }
         if let Some(p) = &filter.project {
             q.push("f.project = ?", SqlValue::Text(p.clone()));
+        }
+        if let Some(g) = &filter.group {
+            q.push(
+                "COALESCE(f.flow_group, f.project) = ?",
+                SqlValue::Text(g.clone()),
+            );
         }
         if let Some(r) = filter.run_id {
             q.push("a.run_id = ?", SqlValue::Integer(r));

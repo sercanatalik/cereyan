@@ -45,6 +45,66 @@ def whole_run() -> int:
 assert whole_run() == 2
 ```
 
+## Retry only what a retry can fix
+
+A retry helps when the failure was luck: a connection refused, a lock held, a rate limit. It does not help when the input is malformed or the credentials are wrong, and three attempts at a doomed call cost three times as much and fail three times as slowly.
+
+`retry_on` names the failures worth retrying. Anything else ends the attempt at once.
+
+```python
+from cereyan import flow, task
+
+attempts = []
+
+@task(retries=3, retry_delay=0, retry_on=(ConnectionError,))
+def load(value: str) -> str:
+    attempts.append(value)
+    raise ValueError("malformed row")
+
+@flow
+def ingest() -> None:
+    load("bad")
+
+try:
+    ingest()
+except Exception:
+    pass
+assert len(attempts) == 1
+```
+
+`retry_when` decides case by case. It receives the exception and the attempt that just failed, and returning `False` stops the retries; use it when the type alone does not say enough, such as an HTTP error whose status code does.
+
+```python
+from cereyan import flow, task
+
+def worth_retrying(exc: BaseException, attempt: int) -> bool:
+    return "429" in str(exc)
+
+@task(retries=5, retry_delay=0, retry_when=worth_retrying)
+def call_api() -> None:
+    raise RuntimeError("403 forbidden")
+```
+
+Both apply together when both are set, and each can veto. A `retry_when` that raises stops the retry too, and the failure recorded is the original one, not the predicate's.
+
+`Abort` says it at the point of failure, whatever `retries` allows:
+
+```python
+from cereyan import Abort, flow, task
+
+@task(retries=5, retry_delay=0)
+def parse(row: str) -> int:
+    if not row.isdigit():
+        raise Abort(f"not a number: {row!r}")
+    return int(row)
+
+@flow
+def read() -> None:
+    parse("twelve")
+```
+
+The run fails on its first attempt with `abort` in its state details, so a refused retry is distinguishable from an exhausted one in the UI and in rules. `crash_retries` is unaffected: a crash has no exception to judge.
+
 ## Time out
 
 `timeout_seconds` on a task fails the task run as `TimedOut` after the limit; on a flow it fails the run. A timed-out task still counts toward `retries`, so `retries=2, timeout_seconds=30` gives three attempts of thirty seconds each.

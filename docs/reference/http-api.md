@@ -76,6 +76,7 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
 | `project` | query | string or null | no |  |
+| `group` | query | string or null | no | The resolved group: the one the flow declared, else its project. |
 
 | Status | Body |
 |---|---|
@@ -201,6 +202,7 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
 | `project` | query | string or null | no |  |
+| `group` | query | string or null | no | The resolved group: the one the flow declared, else its project. |
 | `flow` | query | string or null | no |  |
 | `flow_id` | query | integer or null (int64) | no |  |
 | `state_type` | query | string or null | no |  |
@@ -358,6 +360,7 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | `run_id` | query | integer or null (int64) | no |  |
 | `pass` | query | integer or null (int64) | no | Only task runs of this execution of the run's body. |
 | `project` | query | string or null | no |  |
+| `group` | query | string or null | no | The resolved group: the one the flow declared, else its project. |
 | `flow` | query | string or null | no |  |
 | `state_type` | query | string or null | no |  |
 | `state_name` | query | string or null | no |  |
@@ -660,6 +663,7 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | `key` | query | string or null | no |  |
 | `flow` | query | string or null | no |  |
 | `project` | query | string or null | no |  |
+| `group` | query | string or null | no | The resolved group: the one the flow declared, else its project. |
 | `run_id` | query | integer or null (int64) | no |  |
 | `limit` | query | integer or null | no |  |
 | `after` | query | integer or null (int64) | no | Keyset cursor: the id of the last artifact of the previous page. |

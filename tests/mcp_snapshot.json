@@ -363,6 +363,10 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "group": {
+            "description": "Only flows of this group: the one a flow declared, else its project",
+            "type": "string"
+          },
           "project": {
             "description": "Only flows of this project",
             "type": "string"
@@ -379,6 +383,10 @@
         "additionalProperties": false,
         "properties": {
           "flow": {
+            "type": "string"
+          },
+          "group": {
+            "description": "Only runs of flows in this group: the one a flow declared, else its project",
             "type": "string"
           },
           "limit": {

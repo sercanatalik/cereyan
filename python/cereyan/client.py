@@ -146,16 +146,20 @@ class Client:
         """``GET /api/server``: version, home, engines, auth state, and listeners."""
         return self._request("GET", "/api/server")
 
-    def flows(self, project: str | None = None) -> list[dict]:
-        """``GET /api/flows``, optionally filtered by ``project``."""
-        return self._request("GET", "/api/flows", params={"project": project})
+    def flows(self, project: str | None = None, group: str | None = None) -> list[dict]:
+        """``GET /api/flows``, optionally filtered by ``project`` and by ``group``.
+
+        ``group`` matches the resolved group: the one a flow declared, else its
+        project, so a project name selects that project's undeclared flows.
+        """
+        return self._request("GET", "/api/flows", params={"project": project, "group": group})
 
     def flow(self, flow_id: int) -> dict:
         """``GET /api/flows/{id}``: one flow with its schedules and summary."""
         return self._request("GET", f"/api/flows/{flow_id}")
 
     def runs(self, **filters: Any) -> dict:
-        """``GET /api/runs`` with the given filters (``flow``, ``project``, ``state_type``, ``tags``, ``limit``, ``cursor``, ...); returns the page."""
+        """``GET /api/runs`` with the given filters (``flow``, ``project``, ``group``, ``state_type``, ``tags``, ``limit``, ``cursor``, ...); returns the page."""
         return self._request("GET", "/api/runs", params=filters)
 
     def get_run(self, run_id: int) -> dict:

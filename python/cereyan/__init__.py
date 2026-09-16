@@ -5,7 +5,7 @@ from __future__ import annotations
 from ._core import StoreLocked, TransitionRejected
 from . import client, runtime
 from .apps import App, get_default_app
-from .exceptions import CereyanError, ParameterError
+from .exceptions import Abort, CereyanError, ParameterError
 from .flows import Flow, flow
 from .logging import get_run_logger
 from . import artifacts, events, states
@@ -25,6 +25,7 @@ __all__ = [
     "wait_for_input",
     "App",
     "CachePolicy",
+    "Abort",
     "CereyanError",
     "Cron",
     "Future",

@@ -1,19 +1,20 @@
 import { Link } from "@tanstack/react-router";
 import { type ColumnDef, flexRender, getCoreRowModel, type Row, useReactTable } from "@tanstack/react-table";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { Run } from "@/api/client";
 import {
   GroupCount,
   GroupSection,
   GroupStateRollup,
   GroupTags,
+  openSections,
   useGroupOpen,
 } from "@/components/grouped-rows";
 import { StateBadge } from "@/components/ported/state-badge";
 import { StateBar } from "@/components/state-bar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
-import { groupBy } from "@/lib/groups";
+import { nestByProject } from "@/lib/groups";
 import { cn, formatDuration, formatTime } from "@/lib/utils";
 
 export function Tags({ tags }: { tags: string[] | null | undefined }) {
@@ -189,9 +190,9 @@ export function RunTable({
 }
 
 /**
- * The runs table in collapsible groups. The state rollup sits in the State
- * column and the group name in the Name column, so a collapsed group reads as
- * the same table zoomed out.
+ * The runs table in collapsible sections, nested project then group. The state
+ * rollup sits in the State column and the section name in the Name column, so a
+ * collapsed section reads as the same table zoomed out.
  */
 function GroupedRunBodies({
   rows,
@@ -204,50 +205,71 @@ function GroupedRunBodies({
   searchActive: boolean;
   hasSelect: boolean;
 }) {
-  const groups = groupBy(rows.map((r) => r.original));
-  const open = useGroupOpen(groups, searchActive);
+  const projects = nestByProject(rows.map((r) => r.original));
+  const open = useGroupOpen(openSections(projects), searchActive);
   const byId = new Map(rows.map((r) => [r.original.id, r]));
+  const renderRuns = (runs: Run[]) =>
+    runs.map((run) => {
+      const row = byId.get(run.id);
+      return row ? renderRow(row) : null;
+    });
+  const leading = (runs: Run[]) => {
+    const counts: Record<string, number> = {};
+    for (const run of runs) counts[run.state.type] = (counts[run.state.type] ?? 0) + 1;
+    return (
+      <>
+        {hasSelect ? <Td className="w-8 pr-0" /> : null}
+        <Td>
+          <GroupStateRollup counts={counts} />
+        </Td>
+      </>
+    );
+  };
+  const rollup = (runs: Run[]) => (
+    <>
+      <Td className="text-xs">
+        <GroupCount shown={runs.length} />
+      </Td>
+      <Td colSpan={3} />
+      <Td>
+        <GroupTags tags={Array.from(new Set(runs.flatMap((r) => r.tags ?? []))).sort()} />
+      </Td>
+    </>
+  );
   return (
     <>
-      {groups.map((group) => {
-        const counts: Record<string, number> = {};
-        for (const run of group.items) counts[run.state.type] = (counts[run.state.type] ?? 0) + 1;
-        const tags = Array.from(new Set(group.items.flatMap((r) => r.tags ?? []))).sort();
-        return (
+      {projects.map((project) => (
+        <Fragment key={project.openKey}>
           <GroupSection
-            key={group.key}
-            group={group}
-            open={open.isOpen(group.key)}
-            onOpenChange={(next) => open.toggle(group.key, next)}
-            // Only worth a line when it says something the group name does not.
-            identity={group.spansProjects ? group.projects.join(" \u00b7 ") : undefined}
-            leading={
-              <>
-                {hasSelect ? <Td className="w-8 pr-0" /> : null}
-                <Td>
-                  <GroupStateRollup counts={counts} />
-                </Td>
-              </>
-            }
-            rollup={
-              <>
-                <Td className="text-xs">
-                  <GroupCount shown={group.items.length} />
-                </Td>
-                <Td colSpan={3} />
-                <Td>
-                  <GroupTags tags={tags} />
-                </Td>
-              </>
-            }
+            name={project.key}
+            testId={`project-${project.key}`}
+            open={open.isOpen(project.openKey)}
+            onOpenChange={(next) => open.toggle(project.openKey, next)}
+            // The project rolls up every run beneath it, across its groups, so a
+            // fold never hides what a group below would have shown.
+            leading={leading(project.items)}
+            rollup={rollup(project.items)}
           >
-            {group.items.map((run) => {
-              const row = byId.get(run.id);
-              return row ? renderRow(row) : null;
-            })}
+            {renderRuns(project.rows)}
           </GroupSection>
-        );
-      })}
+          {open.isOpen(project.openKey)
+            ? project.groups.map((group) => (
+                <GroupSection
+                  key={group.openKey}
+                  name={group.key}
+                  testId={`group-${project.key}/${group.key}`}
+                  indent
+                  open={open.isOpen(group.openKey)}
+                  onOpenChange={(next) => open.toggle(group.openKey, next)}
+                  leading={leading(group.items)}
+                  rollup={rollup(group.items)}
+                >
+                  {renderRuns(group.items)}
+                </GroupSection>
+              ))
+            : null}
+        </Fragment>
+      ))}
     </>
   );
 }

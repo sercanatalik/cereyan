@@ -1,7 +1,8 @@
 /**
- * Collapsible groups inside one table. The header row is a column-aligned
- * rollup of the rows beneath it, so collapsing reads as zooming out: nothing
- * re-flows, and the header stays informative while expanded.
+ * Collapsible sections inside one table, nested project then group. A header
+ * row is a column-aligned rollup of the rows beneath it, so collapsing reads as
+ * zooming out: nothing re-flows, and the header stays informative while
+ * expanded.
  */
 import { ChevronRight, TriangleAlert } from "lucide-react";
 import { type ReactNode, useId, useRef, useState } from "react";
@@ -9,26 +10,56 @@ import type { StateType } from "@/api/client";
 import { DOT_COLORS } from "@/components/ported/state-badge";
 import { StateBar, type StateCounts } from "@/components/state-bar";
 import { Td, Tr } from "@/components/ui/table";
-import type { Group } from "@/lib/groups";
+import type { ProjectGroup } from "@/lib/groups";
 import { cn } from "@/lib/utils";
 
-/** A group holding more rows than this starts collapsed. */
+/** A section holding more rows than this starts collapsed. */
 export const COLLAPSE_OVER = 5;
 
+/** One section's input to the open-state ladder. */
+export interface OpenSection {
+  openKey: string;
+  /** Rows beneath this section, for the collapse threshold. */
+  count: number;
+  /** The only section at its level, which expands it however large. */
+  lone: boolean;
+}
+
 /**
- * Open state per group, by the precedence: an explicit toggle, then an active
- * search, then being the only group, then the row count.
- *
- * The default is fixed the first time a group is seen and never recomputed, so
- * a live update can neither collapse a group being read nor open one that was
- * closed. Toggles live for the mount only; nothing is persisted.
+ * Every section of a nested list, both levels. A project is lone when it is the
+ * only project; a group is lone when it is its project's only group and the
+ * project keeps no rows of its own, so the pair reads as one section.
  */
-export function useGroupOpen<T>(groups: Group<T>[], searchActive = false) {
+export function openSections<T>(projects: ProjectGroup<T>[]): OpenSection[] {
+  const out: OpenSection[] = [];
+  for (const p of projects) {
+    out.push({ openKey: p.openKey, count: p.items.length, lone: projects.length === 1 });
+    for (const g of p.groups) {
+      out.push({
+        openKey: g.openKey,
+        count: g.items.length,
+        lone: p.groups.length === 1 && p.rows.length === 0,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Open state per section, by the precedence: an explicit toggle, then an active
+ * search, then being the only section at its level, then the row count.
+ *
+ * The default is fixed the first time a section is seen and never recomputed,
+ * so a live update can neither collapse a section being read nor open one that
+ * was closed. Toggles live for the mount only; nothing is persisted. Keys carry
+ * their level and project, so one group name in two projects toggles apart.
+ */
+export function useGroupOpen(sections: OpenSection[], searchActive = false) {
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
   const defaults = useRef<Record<string, boolean>>({});
-  for (const g of groups) {
-    if (!(g.key in defaults.current)) {
-      defaults.current[g.key] = groups.length === 1 || g.items.length <= COLLAPSE_OVER;
+  for (const s of sections) {
+    if (!(s.openKey in defaults.current)) {
+      defaults.current[s.openKey] = s.lone || s.count <= COLLAPSE_OVER;
     }
   }
   return {
@@ -37,7 +68,7 @@ export function useGroupOpen<T>(groups: Group<T>[], searchActive = false) {
   };
 }
 
-/** "12", or "3 of 12" while a filter or search hides part of the group. */
+/** "12", or "3 of 12" while a filter or search hides part of the section. */
 export function GroupCount({ shown, total }: { shown: number; total?: number }) {
   const hidden = total !== undefined && total > shown;
   return (
@@ -50,8 +81,8 @@ export function GroupCount({ shown, total }: { shown: number; total?: number }) 
 const COUNT_ORDER: StateType[] = ["Completed", "Failed", "Crashed", "Running", "Paused"];
 
 /**
- * The group's states as a bar with counts, and — as a separate channel — the
- * flows the running server no longer has registered. A group whose flows all
+ * The section's states as a bar with counts, and — as a separate channel — the
+ * flows the running server no longer has registered. A section whose flows all
  * last succeeded but have since deregistered must not read as healthy.
  */
 export function GroupStateRollup({
@@ -95,7 +126,7 @@ export function GroupStateRollup({
   );
 }
 
-/** The union of the group's tags, the first few and a count of the rest. */
+/** The union of the section's tags, the first few and a count of the rest. */
 export function GroupTags({ tags, limit = 3 }: { tags: string[]; limit?: number }) {
   if (tags.length === 0) return null;
   const shown = tags.slice(0, limit);
@@ -117,30 +148,39 @@ export function GroupTags({ tags, limit = 3 }: { tags: string[]; limit?: number 
 }
 
 /**
- * One group: a header row that toggles, and the group's rows in a `<tbody>` of
- * their own so the header can point at them with `aria-controls`.
+ * One section: a header row that toggles, and its rows in a `<tbody>` of their
+ * own so the header can point at them with `aria-controls`. A project's groups
+ * render as sibling sections after it rather than inside its `<tbody>`, because
+ * a `<tbody>` cannot nest; a collapsed project omits them, its header having
+ * already rolled up everything beneath it.
  *
  * Radix `Collapsible` is not used: it renders a wrapper element, and sibling
  * `<tr>`s cannot be wrapped in a `<div>`. The cost is no height animation.
  */
-export function GroupSection<T>({
-  group,
+export function GroupSection({
+  name,
+  testId,
   open,
   onOpenChange,
   identity,
   leading,
   rollup,
+  indent = false,
   children,
 }: {
-  group: Group<T>;
+  /** The name shown in the header. */
+  name: string;
+  testId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Under the group name: the projects it spans, or where it came from. */
+  /** Under the name: where the rows came from, when it says something the name does not. */
   identity?: ReactNode;
   /** Rollup cells that sit before the name column, when a table has any. */
   leading?: ReactNode;
   /** The rollup cells after the name, column-aligned with the rows below. */
   rollup: ReactNode;
+  /** A group sits one level inside its project. */
+  indent?: boolean;
   children: ReactNode;
 }) {
   const bodyId = `${useId()}-rows`;
@@ -149,13 +189,13 @@ export function GroupSection<T>({
     <>
       <tbody>
         <Tr
-          className="cursor-pointer border-b bg-muted/60 hover:bg-muted"
+          className={cn("cursor-pointer border-b hover:bg-muted", indent ? "bg-muted/30" : "bg-muted/60")}
           onClick={toggle}
-          data-testid={`group-${group.key}`}
+          data-testid={testId}
           data-open={open}
         >
           {leading}
-          <Td className="h-[38px] font-medium">
+          <Td className={cn("h-[38px] font-medium", indent && "pl-7")}>
             <button
               type="button"
               aria-expanded={open}
@@ -170,7 +210,7 @@ export function GroupSection<T>({
                 className={cn("size-3.5 text-muted-foreground transition-transform", open && "rotate-90")}
               />
               <span className="flex flex-col gap-px">
-                <span className="font-semibold">{group.key}</span>
+                <span className={cn(indent ? "font-medium" : "font-semibold")}>{name}</span>
                 {identity ? (
                   <span className="text-[11.5px] font-normal text-muted-foreground">{identity}</span>
                 ) : null}

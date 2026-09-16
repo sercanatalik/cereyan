@@ -69,6 +69,8 @@ class Task:
         log_prints: bool = False,
         retries: int = 0,
         retry_delay: Any = 0,
+        retry_on: tuple[type[BaseException], ...] | None = None,
+        retry_when: Callable[[BaseException, int], bool] | None = None,
         timeout_seconds: float | None = None,
         output: Any = None,
         cache: CachePolicy | None = None,
@@ -90,6 +92,8 @@ class Task:
         self.log_prints = bool(log_prints)
         self.retries = int(retries)
         self.retry_delay = retry_delay
+        self.retry_on = tuple(retry_on) if retry_on else None
+        self.retry_when = retry_when
         self.timeout_seconds = timeout_seconds
         self.output = output
         self.cache = cache or CachePolicy.NONE
@@ -161,6 +165,12 @@ def task(
         retries (int): How many times a failed task run is retried.
         retry_delay (float | list[float] | exponential): Wait before each retry: seconds, a list of per-attempt seconds,
             or `exponential`.
+        retry_on (tuple[type[BaseException], ...] | None): Retry only these exception types; any other failure ends the
+            task run on its first attempt. Combined with ``retry_when``, both
+            must allow a retry.
+        retry_when (Callable[[BaseException, int], bool] | None): Called with the exception and the attempt that just
+            failed; return ``False`` to stop retrying. A predicate that raises
+            stops the retry and leaves the original failure recorded.
         timeout_seconds (float | None): Fail the task run with sub-state ``TimedOut`` after this many
             seconds.
         output (Target | Callable[..., Target] | None): A Target, or a callable over the task's arguments returning one; when

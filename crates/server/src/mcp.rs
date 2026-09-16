@@ -304,10 +304,14 @@ pub fn tool_list() -> Vec<Value> {
     let flow_prop = json!({"type": "string", "description": "Flow name, or project/flow when the name exists in several projects"});
     vec![
         tool("list_flows", "List the registered flows with their project, parameters schema, tags, and any registration error. Read-only.",
-            json!({"project": {"type": "string", "description": "Only flows of this project"}}), &[]),
+            json!({
+                "project": {"type": "string", "description": "Only flows of this project"},
+                "group": {"type": "string", "description": "Only flows of this group: the one a flow declared, else its project"}
+            }), &[]),
         tool("list_runs", "List runs, newest first, with optional filters. Read-only.",
             json!({
                 "flow": {"type": "string"}, "project": {"type": "string"},
+                "group": {"type": "string", "description": "Only runs of flows in this group: the one a flow declared, else its project"},
                 "state_type": {"type": "string", "description": "Scheduled, Pending, Running, Completed, Failed, Cancelled, Crashed, Paused, Cancelling"},
                 "state_name": {"type": "string", "description": "A named sub-state such as Late or AwaitingRetry"},
                 "name": {"type": "string", "description": "Exact run name"},
@@ -439,7 +443,10 @@ async fn call_tool(
     match name {
         "list_flows" => {
             let project = arg_str(args, "project");
-            let flows = state.store.list_flows(project.as_deref())?;
+            let group = arg_str(args, "group");
+            let flows = state
+                .store
+                .list_flows_filtered(project.as_deref(), group.as_deref())?;
             let items: Vec<Value> = flows
                 .into_iter()
                 .map(|f| {
@@ -456,6 +463,7 @@ async fn call_tool(
             let filter = ListRunsFilter {
                 flow: arg_str(args, "flow"),
                 project: arg_str(args, "project"),
+                group: arg_str(args, "group"),
                 state_type: arg_str(args, "state_type"),
                 state_name: arg_str(args, "state_name"),
                 name: arg_str(args, "name"),
@@ -504,6 +512,7 @@ async fn call_tool(
                 key: arg_str(args, "key"),
                 flow: arg_str(args, "flow"),
                 project: arg_str(args, "project"),
+                group: None,
                 run_id: args.get("run_id").and_then(|v| v.as_i64()),
                 limit: Some(arg_usize(args, "limit", 50, 200)),
                 after: None,

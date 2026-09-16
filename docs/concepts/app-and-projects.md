@@ -14,7 +14,7 @@ assert daily_etl.project == "warehouse"
 
 An **App** is the registry a module's flows, custom routes, and code rules belong to. Its name is the **project** every one of its flows is identified by: a flow's identity is `(project, name)`, so two projects can each have a flow called `etl` without colliding.
 
-The project is also how flows and runs are listed in the UI, unless a flow declares a [group](#groups) of its own.
+The project is also the outer level the UI lists flows and runs under, with each project's [groups](#groups) inside it.
 
 ## The default App
 
@@ -34,7 +34,7 @@ Two directories with the same basename that both rely on the default App collaps
 
 ## Groups
 
-The UI lists flows and runs in collapsible groups. A flow's group is the one it declares with `group=`, else its project:
+The UI lists flows and runs in collapsible sections, nested project then group. A flow's group is the one it declares with `group=`, else its project:
 
 ```python
 from cereyan import flow
@@ -46,7 +46,17 @@ def daily_etl() -> int:
 assert daily_etl.group == "nightly"
 ```
 
-Groups are a flat axis rather than a level inside the project: flows in different projects that declare the same group form one group, and a group named after a project merges with the flows defaulting to it, which is how a flow joins a group it does not live beside. A run is grouped by its flow's group, read through the flow rather than stored on the run, so renaming a group moves the run history with it. What a collapsed group header shows is on the [tour](../get-started/tour.md#flows).
+A group is a level inside the project. A group name used in two projects appears under each of them, summarising only that project's flows. A flow whose group resolves to its project — one that declared none, or declared its project's own name — is listed directly under the project rather than in a section repeating that name, so every flow appears exactly once and there is no ungrouped bucket.
+
+A run is grouped by its flow's group, read through the flow rather than stored on the run, so renaming a group moves the run history with it. What a collapsed header shows is on the [tour](../get-started/tour.md#flows).
+
+Both pages filter by group, and so do the API, the CLI, and the MCP tools:
+
+```bash
+cereyan runs ls --group nightly
+```
+
+The filter matches the **resolved** group, the same value the payloads carry, so `?group=warehouse` selects the flows of project `warehouse` that declared no group of their own as well as any flow that declared that name.
 
 ## What an App holds
 

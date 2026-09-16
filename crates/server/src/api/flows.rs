@@ -14,6 +14,8 @@ use crate::state::AppState;
 #[derive(Deserialize, utoipa::IntoParams)]
 pub struct FlowsQuery {
     pub project: Option<String>,
+    /// The resolved group: the one the flow declared, else its project.
+    pub group: Option<String>,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -85,7 +87,9 @@ pub async fn list_flows(
     Query(q): Query<FlowsQuery>,
 ) -> ApiResult<Json<Vec<FlowSummary>>> {
     let all = state.store.list_flows(None)?;
-    let flows = state.store.list_flows(q.project.as_deref())?;
+    let flows = state
+        .store
+        .list_flows_filtered(q.project.as_deref(), q.group.as_deref())?;
     let mut out = Vec::with_capacity(flows.len());
     for flow in flows {
         out.push(summarize(&state, flow, &all)?);

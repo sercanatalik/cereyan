@@ -339,3 +339,29 @@ def test_flow_and_run_payloads_carry_the_resolved_group(grouped):
     assert done["group"] == "warehouse"
     listed = grouped.client._request("GET", "/api/runs")["items"]
     assert [r["group"] for r in listed] == ["warehouse"]
+
+
+def test_group_filter_narrows_flows_and_runs(grouped):
+    flows = {f["name"]: f for f in grouped.client.flows()}
+
+    # A declared group gathers its flows from every project that has one.
+    nightly = grouped.client.flows(group="nightly")
+    assert sorted(f["name"] for f in nightly) == ["load", "rollup"]
+
+    # A project name selects that project's flows that declared no group: the
+    # filter matches the resolved group the payload already carries.
+    warehouse = grouped.client.flows(group="warehouse")
+    assert [f["name"] for f in warehouse] == ["reconcile"]
+    assert all(f["group"] == "warehouse" for f in warehouse)
+
+    # Project and group together narrow to the one flow in both.
+    assert [f["name"] for f in grouped.client.flows(project="warehouse", group="nightly")] == ["load"]
+
+    # A group nothing resolves to is an empty list, not an error.
+    assert grouped.client.flows(group="absent") == []
+
+    # The same rule reaches runs through the flow join.
+    run = grouped.client._request("POST", f"/api/flows/{flows['reconcile']['id']}/runs", body={"parameters": {}})
+    grouped.wait_run(run["id"])
+    assert [r["name"] for r in grouped.client.runs(group="warehouse")["items"]] == [run["name"]]
+    assert grouped.client.runs(group="nightly")["items"] == []

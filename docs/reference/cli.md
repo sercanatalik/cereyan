@@ -98,13 +98,14 @@ cereyan runs [-h] {ls} ...
 ### `cereyan runs ls`
 
 ```text
-cereyan runs ls [-h] [--flow FLOW] [--project PROJECT] [--state STATE] [--limit LIMIT] [--json]
+cereyan runs ls [-h] [--flow FLOW] [--project PROJECT] [--group GROUP] [--state STATE] [--limit LIMIT] [--json]
 ```
 
 | Option | Meaning |
 |---|---|
 | `--flow` `FLOW` | only runs of this flow name. |
 | `--project` `PROJECT` | only runs of flows in this project. |
+| `--group` `GROUP` | only runs of flows in this group, declared or defaulted to the project. |
 | `--state` `STATE` | state type, e.g. Failed. |
 | `--limit` `LIMIT` | number of runs to show. Default `20`. |
 | `--json` | print the runs as JSON. |

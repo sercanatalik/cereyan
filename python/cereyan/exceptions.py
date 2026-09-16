@@ -30,6 +30,15 @@ class ParameterError(CereyanError, ValueError):
         )
 
 
+class Abort(CereyanError):
+    """Raised to fail a run or task run at once, with no retry.
+
+    ``retries`` says how many times to try again; this says that trying again
+    cannot help. The failure is recorded with ``abort`` in its state details,
+    so a refused retry is distinguishable from an exhausted one.
+    """
+
+
 class FlowRegistrationError(CereyanError):
     """A flow could not be registered on an App."""
 

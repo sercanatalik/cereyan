@@ -706,6 +706,21 @@ fn latest_runs_timing(total: usize) {
         elapsed < Duration::from_millis(10),
         "project runs query took {elapsed:?} at {total} runs"
     );
+    // The group filter is a second predicate on the same joined flow row, so it
+    // holds the project filter's budget and needs no index of its own.
+    let filter = ListRunsFilter {
+        group: Some("p".into()),
+        limit: Some(50),
+        ..Default::default()
+    };
+    let start = Instant::now();
+    let page = store.list_runs(&filter).unwrap();
+    let elapsed = start.elapsed();
+    assert_eq!(page.items.len(), 50);
+    assert!(
+        elapsed < Duration::from_millis(10),
+        "group runs query took {elapsed:?} at {total} runs"
+    );
 }
 
 #[test]
@@ -862,4 +877,68 @@ fn flows_written_before_the_group_column_read_as_their_project() {
         assert_eq!(f.group, None);
         assert_eq!(f.group_or_project(), f.project);
     }
+}
+
+#[test]
+fn group_filter_matches_the_resolved_group() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+
+    // Two projects sharing a declared group, with undeclared flows either side.
+    let wh_nightly = grouped_flow(&store, "warehouse", "load", Some("nightly"));
+    let an_nightly = grouped_flow(&store, "analytics", "rollup", Some("nightly"));
+    let wh_plain = grouped_flow(&store, "warehouse", "reconcile", None);
+    grouped_flow(&store, "analytics", "audit", None);
+
+    // A declared group gathers its flows from every project that has one.
+    let nightly = store.list_flows_filtered(None, Some("nightly")).unwrap();
+    assert_eq!(nightly.len(), 2);
+    assert!(nightly
+        .iter()
+        .all(|f| f.group.as_deref() == Some("nightly")));
+
+    // A project name selects that project's flows that declared no group,
+    // because the fallback is what the filter matches.
+    let by_project = store.list_flows_filtered(None, Some("warehouse")).unwrap();
+    assert_eq!(
+        by_project
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect::<Vec<_>>(),
+        ["reconcile"]
+    );
+
+    // Project and group together narrow to the one flow in both.
+    let both = store
+        .list_flows_filtered(Some("warehouse"), Some("nightly"))
+        .unwrap();
+    assert_eq!(both.len(), 1);
+    assert_eq!(both[0].id, wh_nightly);
+
+    // A group nothing resolves to is empty rather than an error.
+    assert!(store
+        .list_flows_filtered(None, Some("absent"))
+        .unwrap()
+        .is_empty());
+
+    // The same rule reaches runs through the flow join.
+    store.create_run(wh_nightly, "one", "{}", "[]").unwrap();
+    store.create_run(an_nightly, "two", "{}", "[]").unwrap();
+    store.create_run(wh_plain, "three", "{}", "[]").unwrap();
+    let runs = store
+        .list_runs(&ListRunsFilter {
+            group: Some("nightly".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(runs.items.len(), 2);
+    assert!(runs.items.iter().all(|r| r.group == "nightly"));
+    let plain = store
+        .list_runs(&ListRunsFilter {
+            group: Some("warehouse".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(plain.items.len(), 1);
+    assert_eq!(plain.items[0].name, "three");
 }

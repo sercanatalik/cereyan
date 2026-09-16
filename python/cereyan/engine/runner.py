@@ -18,7 +18,7 @@ from typing import Any
 from .. import _core, context, names
 from .. import logging as run_logging
 from ..config import load_project_config
-from ..exceptions import CereyanError, RunPaused
+from ..exceptions import Abort, CereyanError, RunPaused
 from ..results import ResultStore, cache_key
 from ..runners import Future, ThreadRunner, UpstreamFailed, collect_futures, resolve_futures
 from ..schedules import retry_delay_for
@@ -107,7 +107,49 @@ def _error_message(exc: BaseException) -> str:
 
 
 def _failure_details(exc: BaseException) -> dict:
-    return {"traceback": traceback.format_exc(), "exception": type(exc).__name__}
+    details = {"traceback": traceback.format_exc(), "exception": type(exc).__name__}
+    if isinstance(exc, Abort):
+        # A refused retry, not an exhausted one: the UI and rules can tell them
+        # apart without parsing the message.
+        details["abort"] = str(exc) or True
+    return details
+
+
+def should_retry(
+    exc: BaseException,
+    attempt: int,
+    *,
+    retries: int,
+    retry_on: tuple | None,
+    retry_when: Any = None,
+    timed_out: bool,
+    logger,
+) -> bool:
+    """Whether a failed attempt is tried again.
+
+    Both retry loops ask this rather than deciding inline, so a flow and a task
+    answer the same question. Each loop keeps its own cancellation handling:
+    the flow catches `KeyboardInterrupt` in an earlier arm, while a task run
+    also has `TaskCancelled` to consider.
+    """
+    if attempt >= retries or timed_out:
+        return False
+    if isinstance(exc, Abort):
+        return False
+    if isinstance(exc, KeyboardInterrupt):
+        return False
+    if retry_on is not None and not isinstance(exc, retry_on):
+        return False
+    if retry_when is not None:
+        try:
+            return bool(retry_when(exc, attempt))
+        except BaseException as predicate_error:  # noqa: BLE001 - the original failure is the one that matters
+            logger.warning(
+                "retry_when raised (%s); not retrying, and keeping the original failure",
+                _error_message(predicate_error),
+            )
+            return False
+    return True
 
 
 def register_flow(store: _core.Store, flow) -> int:
@@ -295,7 +337,15 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
             except BaseException as exc:
                 _wait_for_futures(ctx, logger)
                 timed_out = isinstance(exc, TimeoutError) and flow.timeout_seconds and "flow exceeded" in str(exc)
-                if attempt < flow.retries and not timed_out:
+                if should_retry(
+                    exc,
+                    attempt,
+                    retries=flow.retries,
+                    retry_on=flow.retry_on,
+                    retry_when=flow.retry_when,
+                    timed_out=bool(timed_out),
+                    logger=logger,
+                ):
                     delay = retry_delay_for(flow.retry_delay, attempt)
                     attempt += 1
                     # The body runs again in this process: a new pass, so its
@@ -537,7 +587,15 @@ def _run_task_attempts(run: context.RunContext, task, args: tuple, kwargs: dict,
                     state = backend.transition_task_run(external_id, "Cancelled", None, "cancelled", None)
                     run_hooks(task.on_cancellation, task, _run_dict(run), state, logger)
                     raise
-                if attempt < task.retries and not timed_out and not isinstance(exc, KeyboardInterrupt):
+                if should_retry(
+                    exc,
+                    attempt,
+                    retries=task.retries,
+                    retry_on=task.retry_on,
+                    retry_when=task.retry_when,
+                    timed_out=bool(timed_out),
+                    logger=logger,
+                ):
                     delay = retry_delay_for(task.retry_delay, attempt)
                     attempt += 1
                     backend.transition_task_run(

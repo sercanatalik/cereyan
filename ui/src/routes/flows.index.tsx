@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { MoreHorizontal, Play, Search } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { ApiError, api, type Flow, type StateType, unwrap } from "@/api/client";
 import { FilterSelect } from "@/components/filter-select";
 import { FlowGraph } from "@/components/flow-graph";
@@ -10,6 +10,7 @@ import {
   GroupSection,
   GroupStateRollup,
   GroupTags,
+  openSections,
   useGroupOpen,
 } from "@/components/grouped-rows";
 import { DOT_COLORS, StateBadge } from "@/components/ported/state-badge";
@@ -31,7 +32,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
-import { type Group, groupBy, groupOf } from "@/lib/groups";
+import { groupOf, groupOptions, nestByProject } from "@/lib/groups";
 import { useProject } from "@/lib/project";
 import { cn, formatFire, relativeTime } from "@/lib/utils";
 
@@ -92,6 +93,8 @@ function FlowsPage() {
   const navigate = useNavigate();
   const { project, scope, setProject } = useProject();
   const [q, setQ] = useState("");
+  // Group is a question asked of this table, not a scope, so it stays local.
+  const [group, setGroup] = useState("");
   const [target, setTarget] = useState<Flow | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [skipTarget, setSkipTarget] = useState<Flow | null>(null);
@@ -102,6 +105,7 @@ function FlowsPage() {
     queryFn: async () => unwrap(await api.GET("/api/settings", {})),
   });
   const projects = Array.from(new Set((flows.data ?? []).map((f) => f.project))).sort();
+  const groupNames = groupOptions((flows.data ?? []).filter((f) => !project || f.project === project));
   const run = useMutation({
     mutationFn: async ({ flow, body }: { flow: Flow; body: Record<string, unknown> }) =>
       unwrap(
@@ -144,17 +148,31 @@ function FlowsPage() {
   const list = (flows.data ?? []).filter(
     (f) =>
       (!project || f.project === project) &&
+      (!group || groupOf(f) === group) &&
       (!lower || `${f.project}/${f.name}`.toLowerCase().includes(lower)),
   );
-  const groups = groupBy(list);
+  const sections = nestByProject(list);
+  // Unfiltered sizes, so a narrowed section's header can read "n of m".
   const totals = new Map<string, number>();
-  // Unfiltered sizes, so a narrowed group's header can read "n of m".
-  for (const f of flows.data ?? []) {
-    const key = groupOf(f);
-    totals.set(key, (totals.get(key) ?? 0) + 1);
+  for (const s of nestByProject(flows.data ?? [])) {
+    totals.set(s.openKey, s.items.length);
+    for (const g of s.groups) totals.set(g.openKey, g.items.length);
   }
-  const open = useGroupOpen(groups, lower.length > 0);
+  const open = useGroupOpen(openSections(sections), lower.length > 0);
   const served = settings.data?.served_dir;
+  const rowsFor = (items: Flow[]) => (
+    <GroupRows
+      flows={items}
+      onRun={(f) => {
+        setTarget(f);
+        setError(null);
+      }}
+      onDelete={(f) => window.confirm(`Delete flow ${f.project}/${f.name} and its runs?`) && remove.mutate(f)}
+      onSkipNext={(f) => skipNext.mutate(f)}
+      onSkip={setSkipTarget}
+      onReschedule={setRescheduleTarget}
+    />
+  );
   return (
     <Page
       title="Flows"
@@ -186,8 +204,18 @@ function FlowsPage() {
             label="Project"
             anyLabel="All"
             value={scope}
-            onChange={setProject}
+            onChange={(v) => {
+              setProject(v);
+              setGroup("");
+            }}
             options={projects.map((p) => ({ value: p, label: p }))}
+          />
+          <FilterSelect
+            label="Group"
+            anyLabel="All"
+            value={group}
+            onChange={setGroup}
+            options={groupNames.map((g) => ({ value: g, label: g }))}
           />
         </>
       }
@@ -221,29 +249,37 @@ function FlowsPage() {
               <Th className="w-32" />
             </tr>
           </thead>
-          {groups.map((group) => (
-            <GroupSection
-              key={group.key}
-              group={group}
-              open={open.isOpen(group.key)}
-              onOpenChange={(next) => open.toggle(group.key, next)}
-              identity={group.spansProjects ? group.projects.join(" \u00b7 ") : group.items[0]?.source_dir}
-              rollup={<FlowGroupRollup group={group} total={totals.get(group.key)} />}
-            >
-              <GroupRows
-                flows={group.items}
-                onRun={(f) => {
-                  setTarget(f);
-                  setError(null);
-                }}
-                onDelete={(f) =>
-                  window.confirm(`Delete flow ${f.project}/${f.name} and its runs?`) && remove.mutate(f)
-                }
-                onSkipNext={(f) => skipNext.mutate(f)}
-                onSkip={setSkipTarget}
-                onReschedule={setRescheduleTarget}
-              />
-            </GroupSection>
+          {sections.map((section) => (
+            <Fragment key={section.openKey}>
+              <GroupSection
+                name={section.key}
+                testId={`project-${section.key}`}
+                open={open.isOpen(section.openKey)}
+                onOpenChange={(next) => open.toggle(section.openKey, next)}
+                // One project, one source directory, so the subtitle is honest.
+                identity={section.items[0]?.source_dir}
+                // Every flow in the project, across its groups: a collapsed
+                // project must not hide what a group below it would show.
+                rollup={<FlowGroupRollup flows={section.items} total={totals.get(section.openKey)} />}
+              >
+                {rowsFor(section.rows)}
+              </GroupSection>
+              {open.isOpen(section.openKey)
+                ? section.groups.map((g) => (
+                    <GroupSection
+                      key={g.openKey}
+                      name={g.key}
+                      testId={`group-${section.key}/${g.key}`}
+                      indent
+                      open={open.isOpen(g.openKey)}
+                      onOpenChange={(next) => open.toggle(g.openKey, next)}
+                      rollup={<FlowGroupRollup flows={g.items} total={totals.get(g.openKey)} />}
+                    >
+                      {rowsFor(g.items)}
+                    </GroupSection>
+                  ))
+                : null}
+            </Fragment>
           ))}
           {list.length === 0 ? (
             <tbody>
@@ -292,8 +328,7 @@ function FlowsPage() {
  * soonest fire, the group's runs merged, the last-run states with the flows
  * this server no longer has registered, the tag union, and the flow count.
  */
-function FlowGroupRollup({ group, total }: { group: Group<Flow>; total?: number }) {
-  const flows = group.items;
+function FlowGroupRollup({ flows, total }: { flows: Flow[]; total?: number }) {
   const schedules = flows.flatMap((f) => f.schedules);
   const active = schedules.filter((s) => s.active);
   const nexts = active.map((s) => s.next_fire).filter((n): n is number => n != null);

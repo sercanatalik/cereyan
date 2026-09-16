@@ -10,7 +10,7 @@ from datetime import timedelta
 
 import pytest
 
-from cereyan import INPUTS, SOURCE, LocalTarget, ThreadRunner, exponential, flow, task
+from cereyan import INPUTS, SOURCE, Abort, LocalTarget, ThreadRunner, exponential, flow, task
 from cereyan.runners import UpstreamFailed
 
 
@@ -210,6 +210,90 @@ def test_task_retries_then_success_and_exhausted(store):
     _, tasks = last_run(store)
     assert tasks[0]["state"]["type"] == "Failed" and tasks[0]["failure_count"] == 2
     assert len(attempts) == 2
+
+
+def test_retry_on_limits_which_failures_are_retried(store):
+    tries = []
+
+    @task(retries=3, retry_delay=0, retry_on=(ConnectionError,))
+    def picky(exc: BaseException):
+        tries.append(1)
+        raise exc
+
+    @flow
+    def wrong_type():
+        picky(ValueError("malformed input"))
+
+    with pytest.raises(Exception):
+        wrong_type()
+    assert len(tries) == 1, "a failure outside retry_on is not retried"
+
+    tries.clear()
+
+    @flow
+    def right_type():
+        picky(ConnectionError("warehouse asleep"))
+
+    with pytest.raises(Exception):
+        right_type()
+    assert len(tries) == 4, "one attempt and three retries"
+
+
+def test_retry_when_decides_and_a_raising_predicate_stops_the_retry(store):
+    seen = []
+
+    def only_once(exc, attempt):
+        seen.append((type(exc).__name__, attempt))
+        return False
+
+    @task(retries=3, retry_delay=0, retry_when=only_once)
+    def declines():
+        raise ValueError("no use trying")
+
+    @flow
+    def asks():
+        declines()
+
+    with pytest.raises(Exception):
+        asks()
+    assert seen == [("ValueError", 0)], "the predicate sees the exception and the attempt that failed"
+
+    def explodes(exc, attempt):
+        raise RuntimeError("the predicate itself is broken")
+
+    @task(retries=3, retry_delay=0, retry_when=explodes)
+    def judged():
+        raise ValueError("the original failure")
+
+    @flow
+    def judged_flow():
+        judged()
+
+    with pytest.raises(Exception) as err:
+        judged_flow()
+    assert "original failure" in str(err.value), "the original failure is the recorded one"
+
+
+def test_abort_ends_a_task_and_a_run_without_retrying(store):
+    tries = []
+
+    @task(retries=5, retry_delay=0)
+    def refuses():
+        tries.append(1)
+        raise Abort("bad input")
+
+    @flow(retries=5, retry_delay=0)
+    def uses_it():
+        refuses()
+
+    with pytest.raises(Exception):
+        uses_it()
+    assert len(tries) == 1, "neither the task nor the flow retried"
+    run, task_runs = last_run(store)
+    assert run["state"]["type"] == "Failed"
+    assert run["state"]["details"].get("abort") == "bad input"
+    assert [t["state"]["type"] for t in task_runs] == ["Failed"]
+    assert task_runs[0]["state"]["details"].get("abort") == "bad input"
 
 
 def test_flow_retries_and_exponential_delay(store):

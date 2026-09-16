@@ -422,10 +422,10 @@ test("dependency rows: chains and fan-in", () => {
   expect(fan?.key).toBe("day");
 });
 
-test("flows page groups by project, shows the stale row, and still runs a flow", async () => {
+test("flows page nests by project, shows the stale row, and still runs a flow", async () => {
   const { router } = mount("/flows");
-  // No flow declares a group, so each group falls back to its project.
-  const group = await screen.findByTestId("group-warehouse");
+  // No flow declares a group, so every flow is its project's own row.
+  const group = await screen.findByTestId("project-warehouse");
   expect(group).toHaveTextContent("/home/me/warehouse");
   expect(within(group).getByTestId("group-count")).toHaveTextContent("3");
   expect(within(group).getByRole("button", { name: /warehouse/ })).toHaveAttribute("aria-expanded", "true");
@@ -447,22 +447,27 @@ test("flows page groups by project, shows the stale row, and still runs a flow",
   expect(router.state.location.pathname).toMatch(/\/(flows|runs)/);
 });
 
-test("flows page: a declared group spans projects and names them", async () => {
+test("flows page: a group name used in two projects appears under each", async () => {
   flowsOverride = [
     flow(1, "load", "warehouse", { group: "nightly" }),
     flow(2, "rollup", "analytics", { group: "nightly" }),
     flow(3, "adhoc", "warehouse"),
   ];
   mount("/flows");
-  const group = await screen.findByTestId("group-nightly");
-  // A declared group shows what it spans; a derived one shows its source.
-  expect(group).toHaveTextContent("analytics · warehouse");
-  expect(within(group).getByTestId("group-count")).toHaveTextContent("2");
-  expect(screen.getByTestId("group-warehouse")).toHaveTextContent("/home/me/warehouse");
+  // One `nightly` per project, each summarising only that project's flows.
+  const nightly = await screen.findByTestId("group-warehouse/nightly");
+  expect(within(nightly).getByTestId("group-count")).toHaveTextContent("1");
+  expect(within(screen.getByTestId("group-analytics/nightly")).getByTestId("group-count")).toHaveTextContent(
+    "1",
+  );
+  // The project keeps its source directory and rolls up both of its flows.
+  const warehouse = screen.getByTestId("project-warehouse");
+  expect(warehouse).toHaveTextContent("/home/me/warehouse");
+  expect(within(warehouse).getByTestId("group-count")).toHaveTextContent("2");
 });
 
-test("flows page: a collapsed group still reports its stale flows", async () => {
-  // Six flows so the group starts collapsed, all last completed, three not live.
+test("flows page: a collapsed project still reports its stale flows", async () => {
+  // Six flows so the project starts collapsed, all last completed, three not live.
   flowsOverride = Array.from({ length: 6 }, (_, i) =>
     flow(i + 1, `f${i}`, "big", {
       live: i >= 3,
@@ -470,17 +475,17 @@ test("flows page: a collapsed group still reports its stale flows", async () => 
     }),
   ).concat([flow(99, "other", "second")]);
   mount("/flows");
-  const group = await screen.findByTestId("group-big");
+  const group = await screen.findByTestId("project-big");
   expect(group).toHaveAttribute("data-open", "false");
   // An all-green state bar must not let a deregistered flow hide behind it.
   expect(within(group).getByTestId("state-bar")).toHaveAttribute("aria-label", "6 Completed");
   expect(within(group).getByTestId("group-stale")).toHaveTextContent("3 stale");
 });
 
-test("flows page: the group header spans exactly the table's columns", async () => {
+test("flows page: the section header spans exactly the table's columns", async () => {
   // A cell too many in the header silently shifts every rollup out of its column.
   mount("/flows");
-  const header = await screen.findByTestId("group-warehouse");
+  const header = await screen.findByTestId("project-warehouse");
   const width = (tr: HTMLElement) =>
     Array.from(tr.querySelectorAll(":scope > td")).reduce(
       (n, td) => n + Number(td.getAttribute("colspan") ?? 1),

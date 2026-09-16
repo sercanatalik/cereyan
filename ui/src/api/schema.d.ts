@@ -2063,6 +2063,8 @@ export interface operations {
                 /** @description Keyset cursor: the id of the last artifact of the previous page. */
                 after?: number | null;
                 flow?: string | null;
+                /** @description The resolved group: the one the flow declared, else its project. */
+                group?: string | null;
                 key?: string | null;
                 kind?: string | null;
                 limit?: number | null;
@@ -2451,6 +2453,8 @@ export interface operations {
     list_flows: {
         parameters: {
             query?: {
+                /** @description The resolved group: the one the flow declared, else its project. */
+                group?: string | null;
                 project?: string | null;
             };
             header?: never;
@@ -3102,6 +3106,8 @@ export interface operations {
                 cursor?: number | null;
                 flow?: string | null;
                 flow_id?: number | null;
+                /** @description The resolved group: the one the flow declared, else its project. */
+                group?: string | null;
                 limit?: number | null;
                 name?: string | null;
                 project?: string | null;
@@ -3762,6 +3768,8 @@ export interface operations {
             query?: {
                 cursor?: number | null;
                 flow?: string | null;
+                /** @description The resolved group: the one the flow declared, else its project. */
+                group?: string | null;
                 limit?: number | null;
                 name?: string | null;
                 /** @description Only task runs of this execution of the run's body. */

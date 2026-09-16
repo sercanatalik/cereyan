@@ -14,6 +14,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { groupOptions } from "@/lib/groups";
 import { useProject } from "@/lib/project";
 import { formatDuration, formatTime } from "@/lib/utils";
 
@@ -22,6 +23,7 @@ type Search = {
   state?: string;
   flow?: string;
   project?: string;
+  group?: string;
   q?: string;
   tag?: string;
 };
@@ -32,6 +34,7 @@ export const Route = createFileRoute("/runs/")({
     state: typeof s.state === "string" ? s.state : undefined,
     flow: typeof s.flow === "string" ? s.flow : undefined,
     project: typeof s.project === "string" ? s.project : undefined,
+    group: typeof s.group === "string" ? s.group : undefined,
     q: typeof s.q === "string" ? s.q : undefined,
     tag: typeof s.tag === "string" ? s.tag : undefined,
   }),
@@ -71,6 +74,7 @@ function RunsPage() {
   const { project } = useProject(search.project);
   const flows = useQuery({ queryKey: ["flows"], queryFn: async () => unwrap(await api.GET("/api/flows")) });
   const projects = Array.from(new Set((flows.data ?? []).map((f) => f.project))).sort();
+  const groupNames = groupOptions((flows.data ?? []).filter((f) => !project || f.project === project));
   const tab = search.tab ?? "runs";
   return (
     <Page
@@ -105,8 +109,15 @@ function RunsPage() {
           label="Project"
           anyLabel="All"
           value={search.project ?? ""}
-          onChange={(v) => set({ project: v || undefined, flow: undefined })}
+          onChange={(v) => set({ project: v || undefined, flow: undefined, group: undefined })}
           options={projects.map((p) => ({ value: p, label: p }))}
+        />
+        <FilterSelect
+          label="Group"
+          anyLabel="All"
+          value={search.group ?? ""}
+          onChange={(v) => set({ group: v || undefined })}
+          options={groupNames.map((g) => ({ value: g, label: g }))}
         />
         <FilterSelect
           label="Flow"
@@ -193,7 +204,19 @@ function RunsTab({
   const [history, setHistory] = useState<number[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const query = useQuery({
-    queryKey: ["runs", "list", search.state, search.flow, project, search.q, tags, start, sort, cursor],
+    queryKey: [
+      "runs",
+      "list",
+      search.state,
+      search.flow,
+      project,
+      search.group,
+      search.q,
+      tags,
+      start,
+      sort,
+      cursor,
+    ],
     queryFn: async () =>
       unwrap(
         await api.GET("/api/runs", {
@@ -202,6 +225,7 @@ function RunsTab({
               state_type: search.state,
               flow: search.flow,
               project,
+              group: search.group,
               name: search.q,
               tags: tags.join(",") || undefined,
               start_after: start,
@@ -305,7 +329,7 @@ function TaskRunsTab({ search, project, start }: { search: Search; project?: str
   const [cursor, setCursor] = useState<number | undefined>();
   const [history, setHistory] = useState<number[]>([]);
   const query = useQuery({
-    queryKey: ["task-runs", search.state, search.flow, project, search.q, start, cursor],
+    queryKey: ["task-runs", search.state, search.flow, project, search.group, search.q, start, cursor],
     queryFn: async () =>
       unwrap(
         await api.GET("/api/task-runs", {
@@ -314,6 +338,7 @@ function TaskRunsTab({ search, project, start }: { search: Search; project?: str
               state_type: search.state,
               flow: search.flow,
               project,
+              group: search.group,
               name: search.q,
               start_after: start,
               limit: PAGE,

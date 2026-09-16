@@ -75,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     ls = runs_sub.add_parser("ls", help="list recent runs")
     ls.add_argument("--flow", help="only runs of this flow name")
     ls.add_argument("--project", help="only runs of flows in this project")
+    ls.add_argument("--group", help="only runs of flows in this group, declared or defaulted to the project")
     ls.add_argument("--state", help="state type, e.g. Failed")
     ls.add_argument("--limit", type=int, default=20, help="number of runs to show")
     ls.add_argument("--json", action="store_true", help="print the runs as JSON")
@@ -319,6 +320,8 @@ def cmd_runs_ls(args) -> int:
         filt["flow"] = args.flow
     if args.project:
         filt["project"] = args.project
+    if args.group:
+        filt["group"] = args.group
     if args.state:
         filt["state_type"] = args.state
     server = client_module.find_server(engine.resolved_home())

@@ -3594,6 +3594,18 @@
             }
           },
           {
+            "description": "The resolved group: the one the flow declared, else its project.",
+            "in": "query",
+            "name": "group",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "in": "query",
             "name": "run_id",
             "required": false,
@@ -4186,6 +4198,18 @@
           {
             "in": "query",
             "name": "project",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "The resolved group: the one the flow declared, else its project.",
+            "in": "query",
+            "name": "group",
             "required": false,
             "schema": {
               "type": [
@@ -5007,6 +5031,18 @@
           {
             "in": "query",
             "name": "project",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "The resolved group: the one the flow declared, else its project.",
+            "in": "query",
+            "name": "group",
             "required": false,
             "schema": {
               "type": [
@@ -6077,6 +6113,18 @@
           {
             "in": "query",
             "name": "project",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "The resolved group: the one the flow declared, else its project.",
+            "in": "query",
+            "name": "group",
             "required": false,
             "schema": {
               "type": [
