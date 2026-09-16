@@ -26,7 +26,7 @@ A **schedule** tells the server when to create runs of a flow. It is declared in
 |---|---|---|
 | Cron | `Cron("0 9 * * *", timezone=..., day_or=True)` | Five fields, evaluated by wall clock in the timezone. `day_or` keeps cron's rule that day-of-month and day-of-week are ORed. |
 | Interval | `Interval(seconds or timedelta, anchor=..., timezone=...)` | Fires every interval from the anchor. Intervals under a day are elapsed time; longer ones keep their local wall-clock time across DST changes. |
-| RRule | `RRule("DTSTART:...\nRRULE:...", timezone=...)` | An iCalendar recurrence rule set; must include `DTSTART`. |
+| RRule | `RRule("DTSTART:...\nRRULE:...", timezone=...)` | An iCalendar recurrence rule set; must include `DTSTART`. A `DTSTART` that ends in `Z` or carries `TZID=` keeps that zone and `timezone` only affects how fires are shown; one with neither is read in `timezone`. |
 
 Timezones are IANA names and default to the machine's local zone. Each schedule may carry a `key` so a code declaration and its runtime edits stay matched; keys default to `code-0`, `code-1`, and so on.
 
@@ -53,6 +53,8 @@ Twice a year a timezone loses an hour and gains one back, so a wall-clock time c
 | RRule | Follows the recurrence rule's own instants | Follows the recurrence rule's own instants |
 
 A daily schedule at 02:30 `America/New_York` on the day the clocks jump from 02:00 to 03:00 therefore fires at 03:00, and the day is never missing from its history. The gap is resolved by the zone's own shift, which is not always an hour: `Australia/Lord_Howe` moves thirty minutes, and a 02:15 schedule there fires at 02:30.
+
+One fire has at most one run. A fire the look-ahead already materialised is not created again by catch-up, and the store refuses a second run for the same schedule and time, so a machine that sleeps through its own look-ahead comes back with the runs it had rather than two of each. A database that already held duplicates keeps both runs — they happened — but only the earlier one stays attached to its schedule.
 
 ## Catch-up
 

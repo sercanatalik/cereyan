@@ -24,8 +24,9 @@ Cereyan borrows its vocabulary from Prefect and its file-oriented idempotency fr
 | Assets, SLAs, incident management | none | Not planned. |
 | `prefect-*` integration packages | none | Use the library directly inside tasks. |
 | Prefect MCP server | Built-in MCP server | `cereyan mcp` for stdio hosts, `POST /mcp` over HTTP. |
+| `prefect.runtime` | `cereyan.runtime` | `runtime.run`, `runtime.task_run` and `runtime.flow`; each is `None` outside a run. |
 
-What changes in practice: delete the deployment step and the worker, keep the decorators, move settings into `cereyan.toml`, and replace `Secret.load` with `Variable.get`. Flows that used `prefect.runtime` read the run through `get_run_logger()` and the hooks' `run` argument.
+What changes in practice: delete the deployment step and the worker, keep the decorators, move settings into `cereyan.toml`, and replace `Secret.load` with `Variable.get`. Flows that used `prefect.runtime` use [`cereyan.runtime`](../reference/python-api.md), which reads the run in progress the same way.
 
 ## From Luigi
 

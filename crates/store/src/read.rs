@@ -652,6 +652,26 @@ impl Store {
     }
 
     /// Scheduled runs of a schedule with a scheduled time after `after`, ascending.
+    /// The fire times a schedule already has runs for, between `from` and `to`
+    /// inclusive, whatever state those runs are in.
+    ///
+    /// Catch-up walks fires that have passed, and `future_runs_of_schedule`
+    /// cannot see them: it looks forward, and only at Scheduled runs. Without
+    /// this a fire the look-ahead had already materialised was given a second
+    /// run every time a machine slept through it.
+    pub fn fire_times_of_schedule(&self, schedule_id: i64, from: i64, to: i64) -> Result<Vec<i64>> {
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT scheduled_time FROM run
+                  WHERE schedule_id = ?1 AND scheduled_time BETWEEN ?2 AND ?3",
+            )?;
+            let rows = stmt
+                .query_map(rusqlite::params![schedule_id, from, to], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<i64>>>()?;
+            Ok(rows)
+        })
+    }
+
     pub fn future_runs_of_schedule(&self, schedule_id: i64, after: i64) -> Result<Vec<Run>> {
         let sql = format!(
             "SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id

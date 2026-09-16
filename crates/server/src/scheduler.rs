@@ -279,9 +279,21 @@ fn catch_up(state: &Arc<AppState>, row: &ScheduleRow, last: i64, now: i64) {
         .unwrap_or_default()
         .into_iter()
         .collect();
+    // A fire the look-ahead already materialised is not missed, whatever state
+    // its run reached. Without this a machine that slept through its own
+    // look-ahead gave every one of those fires a second run.
+    let taken: HashSet<i64> = state
+        .store
+        .fire_times_of_schedule(row.id, last, now)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let fires: Vec<_> = fires
         .into_iter()
-        .filter(|f| !skips.contains(&to_micros(*f)))
+        .filter(|f| {
+            let at = to_micros(*f);
+            !skips.contains(&at) && !taken.contains(&at)
+        })
         .collect();
     if fires.is_empty() {
         return;

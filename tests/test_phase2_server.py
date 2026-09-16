@@ -298,6 +298,46 @@ def test_catchup_policies_on_restart(isolated_home, sched_dir):
         srv2.stop()
 
 
+def test_a_fire_the_lookahead_made_is_not_caught_up_again(isolated_home, sched_dir):
+    from cereyan import engine
+
+    engine.close_store()
+    port = free_port()
+    srv = ServerProcess(str(isolated_home), str(sched_dir), port=port)
+    c = srv.client
+    flow_id = fid(srv, "daily")
+    now = int(time.time() * 1_000_000)
+    c._request(
+        "POST",
+        f"/api/flows/{flow_id}/schedules",
+        body={"kind": "interval", "interval": 5, "anchor": now, "timezone": "UTC", "catchup": "all", "catchup_max": 10},
+    )
+    materialised = [r["scheduled_time"] for r in c.runs(flow="daily", limit=200)["items"] if r["scheduled_time"]]
+    assert materialised, "the look-ahead made no runs for catch-up to collide with"
+    srv.stop()
+
+    import sqlite3
+
+    db = sqlite3.connect(str(isolated_home / "db.sqlite"))
+    db.execute("UPDATE kv SET value = ? WHERE key = 'scheduler.last_wakeup'", (str(now - 60 * 1_000_000),))
+    db.commit()
+    db.close()
+    # Come back after those fires were due: a machine that slept through its own
+    # look-ahead, which used to give each of those fires a second run.
+    time.sleep(12)
+
+    srv2 = ServerProcess(str(isolated_home), str(sched_dir), port=port)
+    try:
+        by_time: dict[int, list[int]] = {}
+        for r in srv2.client.runs(flow="daily", limit=500)["items"]:
+            if r["scheduled_time"]:
+                by_time.setdefault(r["scheduled_time"], []).append(r["id"])
+        dupes = {t: ids for t, ids in by_time.items() if len(ids) > 1}
+        assert not dupes, f"two runs share a fire time: {dupes}"
+    finally:
+        srv2.stop()
+
+
 def test_late_marking_when_engines_busy(isolated_home, sched_dir):
     from cereyan import engine
 

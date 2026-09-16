@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use cereyan_core::{new_id, State, StateType};
-use cereyan_store::{ListRunsFilter, NewLog, ReportEvent, Store, StoreError};
+use cereyan_store::{CreateRun, ListRunsFilter, NewLog, ReportEvent, Store, StoreError};
 use tempfile::TempDir;
 
 fn open(dir: &TempDir) -> Store {
@@ -153,6 +153,84 @@ fn migration_upgrade_from_empty_db() {
         .with_reader(|c| Ok(c.query_row("PRAGMA user_version", [], |r| r.get(0))?))
         .unwrap();
     assert_eq!(v, cereyan_store::latest_schema_version());
+}
+
+#[test]
+fn one_fire_of_a_schedule_holds_one_run() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+    let f = flow(&store, "etl", "daily");
+    let make = |schedule_id: Option<i64>, at: Option<i64>| {
+        store.create_run_full(CreateRun {
+            flow_id: f,
+            name: "r".into(),
+            parameters: "{}".into(),
+            tags: "[]".into(),
+            created_by: "schedule".into(),
+            schedule_id,
+            scheduled_time: at,
+            ..Default::default()
+        })
+    };
+    assert!(make(Some(7), Some(1_000)).is_ok());
+    assert!(
+        make(Some(7), Some(1_000)).is_err(),
+        "a second run for one fire is refused"
+    );
+    assert!(make(Some(7), Some(2_000)).is_ok(), "another fire is fine");
+    assert!(
+        make(Some(8), Some(1_000)).is_ok(),
+        "another schedule is fine"
+    );
+    // Runs that are not a schedule's fires may share a moment.
+    assert!(make(None, None).is_ok());
+    assert!(make(None, None).is_ok());
+}
+
+#[test]
+fn duplicate_fires_are_unlinked_by_the_migration() {
+    let dir = TempDir::new().unwrap();
+    {
+        // A store as an earlier release left it: schema 10, two runs for one fire.
+        let conn = rusqlite::Connection::open(dir.path().join("db.sqlite")).unwrap();
+        for sql in [
+            include_str!("../migrations/0001_init.sql"),
+            include_str!("../migrations/0002_server.sql"),
+            include_str!("../migrations/0003_scheduling.sql"),
+            include_str!("../migrations/0004_observability.sql"),
+            include_str!("../migrations/0005_counts_index.sql"),
+            include_str!("../migrations/0006_expectations.sql"),
+            include_str!("../migrations/0007_flow_group.sql"),
+            include_str!("../migrations/0008_schedule_skips.sql"),
+            include_str!("../migrations/0009_event_flow_index.sql"),
+            include_str!("../migrations/0010_task_run_pass.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO flow (id, external_id, project, name, module, source_dir, created_at, last_seen_at)
+                 VALUES (1, randomblob(16), 'etl', 'daily', 'pipeline', '.', 0, 0);
+             INSERT INTO run (id, external_id, flow_id, name, created_at, schedule_id, scheduled_time)
+                 VALUES (1, randomblob(16), 1, 'first', 0, 7, 1000),
+                        (2, randomblob(16), 1, 'second', 0, 7, 1000);
+             PRAGMA user_version = 10;",
+        )
+        .unwrap();
+    }
+
+    let store = open(&dir);
+    let count = |sql: &str| -> i64 {
+        store
+            .with_reader(|c| Ok(c.query_row(sql, [], |r| r.get(0))?))
+            .unwrap()
+    };
+    // Both runs happened, so both stay; only the earlier one still claims the fire.
+    assert_eq!(count("SELECT COUNT(*) FROM run"), 2);
+    assert_eq!(
+        count("SELECT COUNT(*) FROM run WHERE schedule_id IS NOT NULL"),
+        1
+    );
+    assert_eq!(count("SELECT id FROM run WHERE schedule_id IS NOT NULL"), 1);
 }
 
 #[test]

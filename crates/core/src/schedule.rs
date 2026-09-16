@@ -154,8 +154,8 @@ impl Schedule {
                 Ok(())
             }
             Schedule::RRule { rrule, timezone } => {
-                resolve_tz(timezone.as_deref())?;
-                parse_rrule(rrule)?;
+                let tz = resolve_tz(timezone.as_deref())?;
+                parse_rrule(rrule, tz)?;
                 Ok(())
             }
         }
@@ -237,9 +237,14 @@ impl Schedule {
             }
             Schedule::RRule { rrule, timezone } => {
                 let tz = resolve_tz(timezone.as_deref())?;
-                let set = parse_rrule(rrule)?;
+                let set = parse_rrule(rrule, tz)?;
                 let after_tz: DateTime<rrule::Tz> = after.with_timezone(&rrule::Tz::Tz(tz));
-                let result = set.after(after_tz).all(1);
+                // `after` is an inclusive filter, so asking for one occurrence
+                // answers with the cursor's own when the cursor sits on one —
+                // which is precisely what the scheduler asks once it has made a
+                // run. Look past it. A set carrying RDATEs can stack several
+                // occurrences on one instant, so one spare is not enough.
+                let result = set.after(after_tz).all(8);
                 Ok(result
                     .dates
                     .into_iter()
@@ -306,12 +311,35 @@ fn parse_cron(expr: &str, day_or: bool) -> Result<croner::Cron, ScheduleError> {
     })
 }
 
-fn parse_rrule(text: &str) -> Result<rrule::RRuleSet, ScheduleError> {
-    if !text.to_ascii_uppercase().contains("DTSTART") {
+/// Parse an rrule set, resolving a `DTSTART` that names no zone in `tz`.
+///
+/// iCalendar lets `DTSTART` carry its own zone, as a trailing `Z` or a `TZID=`,
+/// and one that does keeps it. One that does not is resolved by the rrule crate
+/// against the machine's zone, which ignores the schedule's `timezone` and is
+/// how a schedule documented as 02:30 New York came to fire at 02:30 UTC. So
+/// the zone is written in before parsing.
+fn parse_rrule(text: &str, tz: Tz) -> Result<rrule::RRuleSet, ScheduleError> {
+    let upper = text.to_ascii_uppercase();
+    if !upper.contains("DTSTART") {
         return Err(ScheduleError::RRule("rrule must include DTSTART".into()));
     }
     let normalized = text.replace("\\n", "\n");
+    let normalized = if dtstart_names_a_zone(&normalized) {
+        normalized
+    } else {
+        normalized.replacen("DTSTART:", &format!("DTSTART;TZID={}:", tz.name()), 1)
+    };
     rrule::RRuleSet::from_str(&normalized).map_err(|e| ScheduleError::RRule(e.to_string()))
+}
+
+/// Whether the `DTSTART` line states a zone of its own.
+fn dtstart_names_a_zone(text: &str) -> bool {
+    text.lines()
+        .find(|line| line.to_ascii_uppercase().starts_with("DTSTART"))
+        .is_some_and(|line| {
+            let upper = line.to_ascii_uppercase();
+            upper.contains("TZID=") || upper.trim_end().ends_with('Z')
+        })
 }
 
 #[cfg(test)]
@@ -490,6 +518,93 @@ mod tests {
         assert_eq!(
             days,
             ["2026-03-07", "2026-03-08", "2026-03-09", "2026-03-10"]
+        );
+    }
+
+    #[test]
+    fn rrule_fire_after_one_of_its_own_occurrences() {
+        // What the scheduler asks every time it has just materialised a run.
+        // The underlying filter is inclusive, so fetching one occurrence used
+        // to answer with the cursor itself and the series stopped after one.
+        let s = Schedule::RRule {
+            rrule: "DTSTART:20260301T073000Z\nRRULE:FREQ=DAILY".into(),
+            timezone: Some("UTC".into()),
+        };
+        let on_occurrence = utc("2026-03-07T07:30:00Z");
+        assert_eq!(
+            s.next_after(on_occurrence).unwrap().unwrap(),
+            utc("2026-03-08T07:30:00Z")
+        );
+        // A cursor between occurrences already worked, and still must.
+        assert_eq!(
+            s.next_after(utc("2026-03-07T09:00:00Z")).unwrap().unwrap(),
+            utc("2026-03-08T07:30:00Z")
+        );
+    }
+
+    #[test]
+    fn rrule_fires_between_returns_the_series() {
+        // fires_between walks with `cursor = next`, so every step after the
+        // first is the on-boundary case: this came back with one date.
+        let s = Schedule::RRule {
+            rrule: "DTSTART:20260301T073000Z\nRRULE:FREQ=DAILY".into(),
+            timezone: Some("UTC".into()),
+        };
+        let fires = s
+            .fires_between(utc("2026-03-06T00:00:00Z"), utc("2026-03-10T00:00:00Z"), 10)
+            .unwrap();
+        assert_eq!(
+            fires,
+            [
+                utc("2026-03-06T07:30:00Z"),
+                utc("2026-03-07T07:30:00Z"),
+                utc("2026-03-08T07:30:00Z"),
+                utc("2026-03-09T07:30:00Z"),
+            ]
+        );
+    }
+
+    #[test]
+    fn rrule_dtstart_without_a_zone_uses_the_schedules_timezone() {
+        // The documented form: a plain DTSTART and a separate timezone. This
+        // fired at 02:30 UTC, five hours from where the schedule said.
+        let s = Schedule::RRule {
+            rrule: "DTSTART:20260301T023000\nRRULE:FREQ=DAILY".into(),
+            timezone: Some("America/New_York".into()),
+        };
+        let tz: Tz = "America/New_York".parse().unwrap();
+        let next = s.next_after(utc("2026-03-05T00:00:00Z")).unwrap().unwrap();
+        let local = next.with_timezone(&tz);
+        assert_eq!(local.time().to_string(), "02:30:00");
+        assert_eq!(next, utc("2026-03-05T07:30:00Z"), "02:30 EST is 07:30Z");
+    }
+
+    #[test]
+    fn rrule_dtstart_with_its_own_zone_keeps_it() {
+        // iCalendar lets DTSTART carry a zone; when it does, the schedule's
+        // timezone does not move the instants.
+        let utc_form = Schedule::RRule {
+            rrule: "DTSTART:20260301T073000Z\nRRULE:FREQ=DAILY".into(),
+            timezone: Some("America/New_York".into()),
+        };
+        assert_eq!(
+            utc_form
+                .next_after(utc("2026-03-05T00:00:00Z"))
+                .unwrap()
+                .unwrap(),
+            utc("2026-03-05T07:30:00Z")
+        );
+        let tzid_form = Schedule::RRule {
+            rrule: "DTSTART;TZID=America/New_York:20260301T023000\nRRULE:FREQ=DAILY".into(),
+            timezone: Some("UTC".into()),
+        };
+        assert_eq!(
+            tzid_form
+                .next_after(utc("2026-03-05T00:00:00Z"))
+                .unwrap()
+                .unwrap(),
+            utc("2026-03-05T07:30:00Z"),
+            "02:30 New York, not 02:30 UTC"
         );
     }
 
