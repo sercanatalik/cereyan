@@ -1,17 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { ChevronDown, ChevronRight, Moon, Search, Sun } from "lucide-react";
+import { ChevronRight, Moon, Search, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { CommandPalette } from "@/components/command-palette";
+import { ScopeSidebar } from "@/components/scope-sidebar";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Kbd } from "@/components/ui/kbd";
 import { useLiveUpdates } from "@/lib/live";
 import { NAV } from "@/lib/nav";
@@ -69,38 +63,6 @@ export function LiveIndicator() {
   );
 }
 
-function ProjectSwitcher() {
-  const { scope, setProject } = useProject();
-  const flows = useQuery({ queryKey: ["flows"], queryFn: async () => unwrap(await api.GET("/api/flows")) });
-  const projects = Array.from(new Set((flows.data ?? []).map((f) => f.project))).sort();
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-[30px] gap-2 font-medium"
-          data-testid="project-switcher"
-        >
-          <span className="font-normal text-muted-foreground">Project</span>
-          {scope || "All"}
-          <ChevronDown className="size-3.5 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuRadioGroup value={scope} onValueChange={setProject}>
-          <DropdownMenuRadioItem value="">All projects</DropdownMenuRadioItem>
-          {projects.map((p) => (
-            <DropdownMenuRadioItem key={p} value={p}>
-              {p}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
 // The server writes the UI title into index.html's <title>, so the first paint needs no request.
@@ -119,11 +81,16 @@ export function useUiTitle(): string {
   return title;
 }
 
+/** The list pages the project scope narrows, which carry the scope sidebar. */
+const SCOPED = ["/", "/runs", "/flows", "/events", "/artifacts"];
+
 export function Shell({ children }: { children: React.ReactNode }) {
   const { dark, toggle } = useTheme();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const title = useUiTitle();
+  const { scope, group } = useProject();
+  const scoped = SCOPED.includes(path.replace(/(.)\/$/, "$1"));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
@@ -135,7 +102,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   return (
-    <div className="flex h-full min-w-[960px] flex-col">
+    <div
+      className="flex h-full min-w-[960px] flex-col"
+      data-testid="shell"
+      data-scope-project={scope}
+      data-scope-group={group}
+    >
       <header className="shrink-0 border-b bg-card">
         <div className="frame flex h-[52px] items-center gap-7" data-testid="top-bar-row">
           <Link to="/" className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight">
@@ -163,7 +135,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
           <div className="ml-auto flex items-center gap-2">
-            <ProjectSwitcher />
             <Button
               variant="outline"
               size="sm"
@@ -182,7 +153,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="flex min-w-0 flex-1 flex-col overflow-auto">{children}</main>
+      {scoped ? (
+        <div className="grid min-h-0 flex-1 grid-cols-[248px_minmax(0,1fr)]">
+          <ScopeSidebar />
+          <main className="flex min-w-0 flex-col overflow-auto">{children}</main>
+        </div>
+      ) : (
+        <main className="flex min-w-0 flex-1 flex-col overflow-auto">{children}</main>
+      )}
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </div>
   );

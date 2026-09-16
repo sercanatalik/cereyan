@@ -103,7 +103,8 @@ beforeEach(() => {
   fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
     const url = new URL(input instanceof Request ? input.url : String(input), "http://x");
     const p = url.pathname;
-    if (p === "/api/flows") return json([{ id: 1, name: "etl", project: "proj" }]);
+    if (p === "/api/flows")
+      return json([{ id: 1, name: "etl", project: "proj", live: true, recent_runs: [] }]);
     if (p === "/api/events") return json({ items: EVENTS, next_cursor: null });
     if (p === "/api/counts") return json({ runs: { Running: 1 }, task_runs: {}, active: 1, flows: {} });
     if (p === "/api/runs")

@@ -6,7 +6,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ProjectProvider, useProject } from "@/lib/project";
 import { routeTree } from "@/routeTree.gen";
 import { FilterSelect } from "./filter-select";
-import { dependencyRows } from "./flow-graph";
 import { StateBadge } from "./ported/state-badge";
 import { retryLine, TaskRail } from "./task-rail";
 
@@ -263,7 +262,7 @@ test("state badge colours are the 1.3 colours", () => {
   expect(screen.getByText("Skipped").className).toContain("bg-teal-100");
 });
 
-test("top bar carries the eight sections, no sidebar, and the theme toggle persists", async () => {
+test("top bar carries the eight sections, a list page the scope sidebar, and the theme toggle persists", async () => {
   mount("/runs");
   const nav = await screen.findByRole("navigation", { name: "Sections" });
   const links = within(nav).getAllByRole("link");
@@ -278,7 +277,7 @@ test("top bar carries the eight sections, no sidebar, and the theme toggle persi
     "Settings",
   ]);
   expect(within(nav).getByText("Runs")).toHaveAttribute("aria-current", "page");
-  expect(document.querySelector("aside")).toBeNull();
+  expect(screen.getByRole("complementary", { name: "Scope" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Toggle theme" }));
   await waitFor(() => expect(localStorage.getItem("cereyan-theme")).toBe("dark"));
   expect(document.documentElement.classList.contains("dark")).toBe(true);
@@ -412,27 +411,22 @@ test("run page: tasks rail filters logs, Delete lives in the overflow menu", asy
   await waitFor(() => expect(screen.queryByTestId("log-task-chip")).toBeNull());
 });
 
-test("dependency rows: chains and fan-in", () => {
-  const rows = dependencyRows(FLOWS as any);
-  const chain = rows.find((r) => r.kind === "chain");
-  expect(chain?.flows.map((f) => f.name)).toEqual(["stripe_sync", "daily_orders"]);
-  const fan = rows.find((r) => r.kind === "fan-in");
-  expect(fan?.flows.map((f) => f.name)).toEqual(["a", "b"]);
-  expect(fan?.into?.name).toBe("train_churn");
-  expect(fan?.key).toBe("day");
-});
-
-test("flows page nests by project, shows the stale row, and still runs a flow", async () => {
+test("flows page bands each group, shows the stale row, and still runs a flow", async () => {
   const { router } = mount("/flows");
-  // No flow declares a group, so every flow is its project's own row.
-  const group = await screen.findByTestId("project-warehouse");
-  expect(group).toHaveTextContent("/home/me/warehouse");
-  expect(within(group).getByTestId("group-count")).toHaveTextContent("3");
-  expect(within(group).getByRole("button", { name: /warehouse/ })).toHaveAttribute("aria-expanded", "true");
-  expect(screen.getByTestId("fan-in")).toHaveTextContent("fan-in, key=day");
+  // Three projects and no declared groups, so each project is one band.
+  const band = await screen.findByTestId("section-warehouse/warehouse");
+  expect(within(band).getByTestId("section-meta")).toHaveTextContent(
+    "3 flows · 0 scheduled · has dependencies",
+  );
+  expect(screen.getByRole("heading", { name: "All flows" })).toBeInTheDocument();
+  const churn = screen.getByText("train_churn").closest("tr") as HTMLElement;
+  expect(within(churn).getByTestId("starts-after")).toHaveTextContent("abkey=day");
   const stale = screen.getByText("nightly_export").closest("tr");
   expect(stale).toHaveAttribute("data-flow-live", "false");
   expect(stale).toHaveTextContent("Not registered by this server");
+  expect(within(screen.getByTestId("section-legacy/legacy")).getByTestId("section-stale")).toHaveTextContent(
+    "1 stale",
+  );
   expect(within(stale as HTMLElement).getByRole("button", { name: "Delete" })).toBeInTheDocument();
   const row = screen.getByText("customer_dim").closest("tr") as HTMLElement;
   fireEvent.click(within(row).getByRole("button", { name: /Run/ }));
@@ -447,45 +441,77 @@ test("flows page nests by project, shows the stale row, and still runs a flow", 
   expect(router.state.location.pathname).toMatch(/\/(flows|runs)/);
 });
 
-test("flows page: a group name used in two projects appears under each", async () => {
+test("flows page: a group name used in two projects is a scope under each", async () => {
   flowsOverride = [
     flow(1, "load", "warehouse", { group: "nightly" }),
     flow(2, "rollup", "analytics", { group: "nightly" }),
     flow(3, "adhoc", "warehouse"),
   ];
   mount("/flows");
-  // One `nightly` per project, each summarising only that project's flows.
-  const nightly = await screen.findByTestId("group-warehouse/nightly");
-  expect(within(nightly).getByTestId("group-count")).toHaveTextContent("1");
-  expect(within(screen.getByTestId("group-analytics/nightly")).getByTestId("group-count")).toHaveTextContent(
-    "1",
+  // One `nightly` band per project, each counting only that project's flows.
+  const nightly = await screen.findByTestId("section-warehouse/nightly");
+  expect(within(nightly).getByTestId("section-meta")).toHaveTextContent("1 flow ·");
+  expect(screen.getByTestId("section-analytics/nightly")).toBeInTheDocument();
+  // The sidebar lists the project's own flows beside its declared group.
+  expect(screen.getByTestId("scope-group-warehouse/warehouse")).toHaveTextContent("(project)1");
+  fireEvent.click(screen.getByTestId("scope-group-warehouse/nightly"));
+  // Scoped to one group: no bands, the group's summary, and the top bar follows.
+  await waitFor(() => expect(screen.getByTestId("group-stats")).toBeInTheDocument());
+  expect(screen.queryByTestId("section-warehouse/nightly")).toBeNull();
+  expect(screen.getByText("load")).toBeInTheDocument();
+  expect(screen.queryByText("rollup")).toBeNull();
+  expect(screen.getByTestId("shell")).toHaveAttribute("data-scope-group", "nightly");
+  expect(localStorage.getItem("cereyan-group")).toBe("nightly");
+  expect(screen.getByTestId("flow-count")).toHaveTextContent("1 flows");
+});
+
+test("the scope sidebar narrows Runs by group, replacing a linked project, and stays off other pages", async () => {
+  flowsOverride = [
+    flow(1, "load", "warehouse", { group: "nightly" }),
+    flow(2, "adhoc", "warehouse"),
+    flow(3, "train", "ml"),
+  ];
+  const { router } = mount("/runs?project=ml");
+  const sidebar = await screen.findByRole("complementary", { name: "Scope" });
+  // The linked project is the one marked, not the stored scope.
+  const ml = await within(sidebar).findByRole("button", { name: /^ml/ });
+  expect(ml).toHaveAttribute("aria-current", "true");
+  expect(within(sidebar).getByRole("button", { name: /All projects/ })).not.toHaveAttribute("aria-current");
+  fireEvent.click(await within(sidebar).findByTestId("scope-group-warehouse/nightly"));
+  await waitFor(() =>
+    expect(
+      calls.some(
+        (c) =>
+          c.url.startsWith("/api/runs?") && /project=warehouse/.test(c.url) && /group=nightly/.test(c.url),
+      ),
+    ).toBe(true),
   );
-  // The project keeps its source directory and rolls up both of its flows.
-  const warehouse = screen.getByTestId("project-warehouse");
-  expect(warehouse).toHaveTextContent("/home/me/warehouse");
-  expect(within(warehouse).getByTestId("group-count")).toHaveTextContent("2");
+  expect(router.state.location.search).not.toHaveProperty("project");
+  await act(async () => {
+    await router.navigate({ to: "/rules" });
+  });
+  expect(screen.queryByRole("complementary", { name: "Scope" })).toBeNull();
 });
 
-test("flows page: a collapsed project still reports its stale flows", async () => {
-  // Six flows so the project starts collapsed, all last completed, three not live.
-  flowsOverride = Array.from({ length: 6 }, (_, i) =>
-    flow(i + 1, `f${i}`, "big", {
-      live: i >= 3,
-      recent_runs: [[100 + i, "Completed", "Completed", 1_000_000]],
-    }),
-  ).concat([flow(99, "other", "second")]);
+test("flows page: facets narrow within the scope and count against it", async () => {
   mount("/flows");
-  const group = await screen.findByTestId("project-big");
-  expect(group).toHaveAttribute("data-open", "false");
-  // An all-green state bar must not let a deregistered flow hide behind it.
-  expect(within(group).getByTestId("state-bar")).toHaveAttribute("aria-label", "6 Completed");
-  expect(within(group).getByTestId("group-stale")).toHaveTextContent("3 stale");
+  await screen.findByTestId("section-warehouse/warehouse");
+  fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+  // No flow has tags; the state facet is the one with options.
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+  fireEvent.change(screen.getByLabelText("Search flows"), { target: { value: "sync" } });
+  expect(screen.getByTestId("flow-count")).toHaveTextContent("1 of 7 flows");
+  expect(
+    within(screen.getByTestId("section-warehouse/warehouse")).getByTestId("section-meta"),
+  ).toHaveTextContent("1 of 3 flows");
+  fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+  expect(screen.getByTestId("flow-count")).toHaveTextContent("7 flows");
 });
 
-test("flows page: the section header spans exactly the table's columns", async () => {
-  // A cell too many in the header silently shifts every rollup out of its column.
+test("flows page: a group band spans exactly the table's columns", async () => {
+  // A cell too many in a row silently shifts every value out of its column.
   mount("/flows");
-  const header = await screen.findByTestId("project-warehouse");
+  const band = await screen.findByTestId("section-warehouse/warehouse");
   const width = (tr: HTMLElement) =>
     Array.from(tr.querySelectorAll(":scope > td")).reduce(
       (n, td) => n + Number(td.getAttribute("colspan") ?? 1),
@@ -493,6 +519,6 @@ test("flows page: the section header spans exactly the table's columns", async (
     );
   const dataRow = screen.getByText("customer_dim").closest("tr") as HTMLElement;
   const headings = document.querySelectorAll("thead th").length;
-  expect(width(header)).toBe(width(dataRow));
-  expect(width(header)).toBe(headings);
+  expect(width(band)).toBe(headings);
+  expect(width(dataRow)).toBe(headings);
 });

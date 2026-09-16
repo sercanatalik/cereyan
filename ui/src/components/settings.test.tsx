@@ -177,7 +177,9 @@ beforeEach(() => {
         active_runs: 0,
       });
     if (p === "/api/flows")
-      return json(projects.map((x, i) => ({ id: i + 1, project: x.name, name: `f${i}` })));
+      return json(
+        projects.map((x, i) => ({ id: i + 1, project: x.name, name: `f${i}`, live: true, recent_runs: [] })),
+      );
     return json({ error: `unmocked ${method} ${p}` }, 404);
   });
 });
@@ -237,7 +239,7 @@ test("the served project cannot be removed", async () => {
 
 test("removing a project needs its name typed, and the switcher falls back to all projects", async () => {
   mount("/settings?tab=data", "alpha");
-  await waitFor(() => expect(screen.getByTestId("project-switcher").textContent).toContain("alpha"));
+  await waitFor(() => expect(screen.getByTestId("shell")).toHaveAttribute("data-scope-project", "alpha"));
   fireEvent.click(await button("Remove alpha"));
   const remove = await button("Remove project");
   expect((await screen.findByTestId("removal-preview")).textContent).toContain("4");
@@ -250,7 +252,7 @@ test("removing a project needs its name typed, and the switcher falls back to al
   await waitFor(() =>
     expect(calls).toContainEqual({ method: "DELETE", path: "/api/projects/alpha", body: null }),
   );
-  await waitFor(() => expect(screen.getByTestId("project-switcher").textContent).toContain("All"));
+  await waitFor(() => expect(screen.getByTestId("shell")).toHaveAttribute("data-scope-project", ""));
   await waitFor(() => expect(screen.queryByRole("button", { name: "Remove alpha" })).toBeNull());
 });
 

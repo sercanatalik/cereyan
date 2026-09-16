@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils";
 export interface FilterOption {
   value: string;
   label: string;
+  /** Rows this option would match, shown at the end of its line. */
+  count?: number;
 }
 
 /**
@@ -27,6 +29,7 @@ export function FilterSelect({
   options,
   onChange,
   anyLabel = "Any",
+  anyCount,
   allowAny = true,
   searchable,
   className,
@@ -37,6 +40,7 @@ export function FilterSelect({
   options: FilterOption[];
   onChange: (value: string) => void;
   anyLabel?: string;
+  anyCount?: number;
   /** Offer an "any" row that clears the filter. Off for sorts and ranges. */
   allowAny?: boolean;
   searchable?: boolean;
@@ -78,6 +82,7 @@ export function FilterSelect({
                 >
                   <Check className={cn("size-4", value ? "opacity-0" : "opacity-100")} />
                   {anyLabel}
+                  <OptionCount count={anyCount} />
                 </CommandItem>
               ) : null}
               {options.map((o) => (
@@ -91,6 +96,7 @@ export function FilterSelect({
                 >
                   <Check className={cn("size-4", o.value === value ? "opacity-100" : "opacity-0")} />
                   {o.label}
+                  <OptionCount count={o.count} />
                 </CommandItem>
               ))}
             </CommandGroup>
@@ -98,5 +104,11 @@ export function FilterSelect({
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function OptionCount({ count }: { count?: number }) {
+  return count === undefined ? null : (
+    <span className="ml-auto pl-3 text-xs tabular-nums text-muted-foreground">{count}</span>
   );
 }

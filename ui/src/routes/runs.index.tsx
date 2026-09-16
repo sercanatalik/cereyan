@@ -14,7 +14,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { groupOptions } from "@/lib/groups";
+import { groupOf } from "@/lib/groups";
 import { useProject } from "@/lib/project";
 import { formatDuration, formatTime } from "@/lib/utils";
 
@@ -71,10 +71,11 @@ function RunsPage() {
   const [range, setRange] = useState<RangePreset>("7d");
   const [tags, setTags] = useState<string[]>(search.tag ? [search.tag] : []);
   const [sort, setSort] = useState("created_desc");
-  const { project } = useProject(search.project);
+  // Project and group come from the scope sidebar; link parameters override them.
+  const { project, group: scopeGroup } = useProject(search.project);
+  const group = search.group ?? (scopeGroup || undefined);
+  const scoped = { ...search, group };
   const flows = useQuery({ queryKey: ["flows"], queryFn: async () => unwrap(await api.GET("/api/flows")) });
-  const projects = Array.from(new Set((flows.data ?? []).map((f) => f.project))).sort();
-  const groupNames = groupOptions((flows.data ?? []).filter((f) => !project || f.project === project));
   const tab = search.tab ?? "runs";
   return (
     <Page
@@ -106,27 +107,13 @@ function RunsPage() {
           options={STATE_TYPES.map((s) => ({ value: s, label: s }))}
         />
         <FilterSelect
-          label="Project"
-          anyLabel="All"
-          value={search.project ?? ""}
-          onChange={(v) => set({ project: v || undefined, flow: undefined, group: undefined })}
-          options={projects.map((p) => ({ value: p, label: p }))}
-        />
-        <FilterSelect
-          label="Group"
-          anyLabel="All"
-          value={search.group ?? ""}
-          onChange={(v) => set({ group: v || undefined })}
-          options={groupNames.map((g) => ({ value: g, label: g }))}
-        />
-        <FilterSelect
           label="Flow"
           anyLabel="All"
           searchable
           value={search.flow ?? ""}
           onChange={(v) => set({ flow: v || undefined })}
           options={(flows.data ?? [])
-            .filter((f) => !project || f.project === project)
+            .filter((f) => (!project || f.project === project) && (!group || groupOf(f) === group))
             .map((f) => ({ value: f.name, label: `${f.project}/${f.name}` }))}
         />
         <TagInput value={tags} onChange={setTags} placeholder="Tags" />
@@ -144,9 +131,9 @@ function RunsPage() {
         ) : null}
       </div>
       {tab === "runs" ? (
-        <RunsTab search={search} project={project} tags={tags} start={rangeStart(range)} sort={sort} />
+        <RunsTab search={scoped} project={project} tags={tags} start={rangeStart(range)} sort={sort} />
       ) : (
-        <TaskRunsTab search={search} project={project} start={rangeStart(range)} />
+        <TaskRunsTab search={scoped} project={project} start={rangeStart(range)} />
       )}
     </Page>
   );
