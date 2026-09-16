@@ -48,6 +48,6 @@ A run skipped by a person, a [skipped fire](schedules.md#skipping-fires) of its 
 
 ## Visibility
 
-The flow page lists upstreams under *Triggered by* and downstreams under *Triggers*, the dependency graph draws one edge per upstream, and a run created by a dependency links to the run that triggered it. An `after=` naming a flow the server has not registered is reported as a flow error at start without stopping other flows.
+The flow page lists upstreams under *Triggered by* and downstreams under *Triggers*, the Flows page names every upstream in the flow's **Starts after** column, and a run created by a dependency links to the run that triggered it. An `after=` naming a flow the server has not registered is reported as a flow error at start without stopping other flows.
 
 Related: [Chain flows](../guides/chain-flows.md), [Events and rules](events-and-rules.md) for the more general way to run a flow when something happens.

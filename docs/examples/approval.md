@@ -32,25 +32,31 @@ def release(rows: int) -> str:
 
 ## The flow
 
-The question carries a JSON schema, which the run page turns into a form.
+Each question carries a JSON schema, which the run page turns into a form. The flow
+asks twice: whether to load the day, then whether to publish it. Every answer is
+stored against the question it answered, so the replay after the second answer gets
+`approve` for the first question and `publish` for the second. The flow is listed in
+the `releases` group of its project.
 
 ```python
-@flow
+APPROVE = {"type": "object", "properties": {"approve": {"type": "boolean"}}, "required": ["approve"]}
+
+
+@flow(group="releases")
 def publish(day: date) -> str:
     rows = prepare(day)
-    decision = wait_for_input(
-        f"Release {rows} rows for {day}?",
-        schema={"type": "object", "properties": {"approve": {"type": "boolean"}}, "required": ["approve"]},
-    )
-    if not decision["approve"]:
+    if not wait_for_input(f"Release {rows} rows for {day}?", schema=APPROVE)["approve"]:
         return "held"
-    return release(rows)
+    released = release(rows)
+    if not wait_for_input(f"Publish {day} to the dashboard?", schema=APPROVE)["approve"]:
+        return f"{released}, not published"
+    return f"{released}, published"
 ```
 
 ## Driving it from a script
 
-Start the run, wait until it pauses, read the question, answer it, and wait for
-the result.
+Start the run, answer each question as the run pauses on it, and wait for the
+result.
 
 ```python
 def wait_for(run_id: int, predicate, timeout: float = 30.0) -> dict:
@@ -65,9 +71,13 @@ def wait_for(run_id: int, predicate, timeout: float = 30.0) -> dict:
 
 if __name__ == "__main__":
     run = client.run("publish", day="2026-03-01")
-    paused = wait_for(run["id"], lambda r: r["state"]["type"] == "Paused")
-    print("question:", paused["state"]["details"]["prompt"])
-    client.default_client().resume(run["id"], {"approve": True})
+    for question in ("Release", "Publish"):
+        paused = wait_for(
+            run["id"],
+            lambda r: r["state"]["type"] == "Paused" and r["state"]["details"]["prompt"].startswith(question),
+        )
+        print("question:", paused["state"]["details"]["prompt"])
+        client.default_client().resume(run["id"], {"approve": True})
     done = wait_for(run["id"], lambda r: r["state"]["type"] in ("Completed", "Failed", "Crashed", "Cancelled"))
     assert done["state"]["type"] == "Completed", done["state"]
     print("state:", done["state"]["type"])

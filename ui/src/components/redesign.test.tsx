@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ProjectProvider, useProject } from "@/lib/project";
 import { routeTree } from "@/routeTree.gen";
 import { FilterSelect } from "./filter-select";
-import { StateBadge } from "./ported/state-badge";
+import { StateBadge } from "./state-badge";
 import { retryLine, TaskRail } from "./task-rail";
 
 // The API client captures globalThis.fetch when it loads, so the stub must exist first.

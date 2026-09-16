@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, unwrap } from "@/api/client";
-import { KeyValueList } from "@/components/ported/key-value-list";
+import { KeyValueList } from "@/components/key-value-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHead } from "@/components/ui/card";
 import { Table, TableBody, TableHeader, Td, Th, Tr } from "@/components/ui/table";

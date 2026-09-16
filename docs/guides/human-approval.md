@@ -30,14 +30,16 @@ The first call to `wait_for_input` moves the run to `Paused` with the prompt and
 
 ## Answer it
 
-On the run page, the Details tab shows the question with a form built from the schema and a **Resume** button. Programmatically:
+On the run page, the Details tab shows the question with a form built from the schema and a **Resume** button. Programmatically, against the [Approval example](../examples/approval.md), whose `publish` asks a second question after the first is answered:
 
 ```{.python fixture:served}
 run = served.client.run("publish", day="2026-03-01")
-paused = served.wait_run(run["id"], until=lambda r: r["state"]["type"] == "Paused")
-assert "Release" in paused["state"]["details"]["prompt"]
-
-served.client.resume(run["id"], {"approve": True})
+for question in ("Release", "Publish"):
+    paused = served.wait_run(
+        run["id"],
+        until=lambda r: r["state"]["type"] == "Paused" and r["state"]["details"]["prompt"].startswith(question),
+    )
+    served.client.resume(run["id"], {"approve": True})
 done = served.wait_run(run["id"])
 assert done["state"]["type"] == "Completed"
 ```

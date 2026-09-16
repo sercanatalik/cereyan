@@ -30,11 +30,11 @@ def etl() -> int:
 print(etl.project)   # the basename of the directory this module lives in
 ```
 
-Two directories with the same basename that both rely on the default App collapse into one project. Give them an explicit `App(name=)` when that matters.
+Two directories with the same basename that both rely on the default App collapse into one project, and so do the subdirectories of one served directory, which share a process and its one default App. Give each an explicit `App(name=)`; [How to organise flows into projects and groups](../guides/organise-projects-and-groups.md) shows the layout.
 
 ## Groups
 
-The UI lists flows and runs in collapsible sections, nested project then group. A flow's group is the one it declares with `group=`, else its project:
+A group is a level inside a project, for reading the list: it changes no schedule, resource, or dependency. A flow's group is the one it declares with `group=`, else its project:
 
 ```python
 from cereyan import flow
@@ -46,11 +46,11 @@ def daily_etl() -> int:
 assert daily_etl.group == "nightly"
 ```
 
-A group is a level inside the project. A group name used in two projects appears under each of them, summarising only that project's flows. A flow whose group resolves to its project — one that declared none, or declared its project's own name — is listed directly under the project rather than in a section repeating that name, so every flow appears exactly once and there is no ungrouped bucket.
+A group name used in two projects appears under each of them, summarising only that project's flows. A flow whose group resolves to its project — one that declared none, or declared its project's own name — is listed directly under the project rather than in a section repeating that name, so every flow appears exactly once and there is no ungrouped bucket.
 
-A run is grouped by its flow's group, read through the flow rather than stored on the run, so renaming a group moves the run history with it. What a collapsed header shows is on the [tour](../get-started/tour.md#flows).
+A run is grouped by its flow's group, read through the flow rather than stored on the run, so renaming a group moves the run history with it.
 
-Both pages filter by group, and so do the API, the CLI, and the MCP tools:
+In the UI, the scope sidebar beside Dashboard, Runs, Flows, Events, and Artifacts lists each project with its groups; picking a group narrows Runs and Flows to it, and picking a project narrows every scoped page. The Runs page nests its rows project then group in collapsible sections, and the Flows page bands its rows by group; both are on the [tour](../get-started/tour.md#flows). The API, the CLI, and the MCP tools filter by group too:
 
 ```bash
 cereyan runs ls --group nightly

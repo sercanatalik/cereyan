@@ -25,13 +25,17 @@ def load(source: str, day: date) -> int:
 
 ## Upstream flows
 
+Both loads sit in the `sources` group of the `reporting` project, so the sidebar
+lists them together, apart from the report, which stays one of the project's own
+flows and carries the sidebar's dependency marker.
+
 ```python
-@app.flow
+@app.flow(group="sources")
 def sales(day: date) -> int:
     return load("sales", day)
 
 
-@app.flow
+@app.flow(group="sources")
 def inventory(day: date) -> int:
     return load("inventory", day)
 ```

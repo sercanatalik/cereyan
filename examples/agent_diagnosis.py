@@ -1,7 +1,7 @@
 # ---
 # title: Agent diagnosis
 # description: Start a failing run through the MCP endpoint and ask the server to explain it, the way an agent would.
-# order: 7
+# order: 8
 # fixture: served
 # ---
 #

@@ -12,7 +12,9 @@ every morning once a server is running.
 ```python
 from datetime import date, timedelta
 
-from cereyan import Cron, LocalTarget, exponential, flow, get_run_logger, task
+from cereyan import Abort, Cron, LocalTarget, exponential, flow, get_run_logger, task
+
+FIRST_DAY = date(2024, 1, 1)
 
 
 def output_for(day: date) -> LocalTarget:
@@ -32,11 +34,22 @@ def already_built(values: list[date]) -> set[date]:
 ## The task
 
 `output=` names the target; when it exists the task run ends Skipped and the body
-does not execute. Retries with an exponential delay cover transient failures.
+does not execute. Retries with an exponential delay cover transient failures, and
+`retry_on` says which those are: an `OSError` from the disk or the network is worth
+another attempt, any other exception fails the task run at once. A day before the
+source has data can never succeed, so `Abort` ends the task run without retrying and
+records `abort` in its state details.
 
 ```python
-@task(output=output_for, retries=2, retry_delay=exponential(base=0.5, maximum=30))
+@task(
+    output=output_for,
+    retries=2,
+    retry_delay=exponential(base=0.5, maximum=30),
+    retry_on=(OSError,),
+)
 def build(day: date) -> str:
+    if day < FIRST_DAY:
+        raise Abort(f"no source data before {FIRST_DAY}")
     target = output_for(day)
     get_run_logger().info("building %s", target.path)
     with target.open("w") as fh:
@@ -49,10 +62,12 @@ def build(day: date) -> str:
 ## The flow
 
 Fires at 06:30 Istanbul time every day when served, never overlaps itself, and
-defaults to yesterday so a manual run does the most recent complete day.
+defaults to yesterday so a manual run does the most recent complete day. It is
+listed in the `nightly` group of its project.
 
 ```python
 @flow(
+    group="nightly",
     schedule=Cron("30 6 * * *", timezone="Europe/Istanbul"),
     max_concurrent=1,
     on_overlap="skip",

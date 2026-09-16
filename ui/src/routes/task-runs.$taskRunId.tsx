@@ -2,11 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { api, unwrap } from "@/api/client";
 import { ArtifactsTab } from "@/components/artifacts";
-import { JsonView } from "@/components/ported/json-view";
-import { KeyValueList } from "@/components/ported/key-value-list";
-import { RunLogs } from "@/components/ported/run-logs";
-import { StateBadge } from "@/components/ported/state-badge";
+import { JsonView } from "@/components/json-view";
+import { KeyValueList } from "@/components/key-value-list";
+import { RunLogs } from "@/components/run-logs";
 import { Page } from "@/components/shell";
+import { StateBadge } from "@/components/state-badge";
 import { formatDuration, formatTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/task-runs/$taskRunId")({ component: TaskRunDetail });

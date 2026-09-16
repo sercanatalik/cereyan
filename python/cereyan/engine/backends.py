@@ -64,8 +64,7 @@ class Backend:
     def get_input(self, index: int = 0):
         """The answer given to question `index` of this run, or None.
 
-        The answer comes back as ``{"prompt": ..., "input": ...}``; the prompt
-        is absent for an answer stored before questions were numbered.
+        The answer comes back as ``{"prompt": ..., "input": ...}``.
         """
         return None
 

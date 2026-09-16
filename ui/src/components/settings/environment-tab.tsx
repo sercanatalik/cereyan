@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
-import { KeyValueList } from "@/components/ported/key-value-list";
+import { KeyValueList } from "@/components/key-value-list";
 import { Card, CardContent, CardHead } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";

@@ -27,6 +27,7 @@ just dev     # uv sync and maturin develop: builds the extension in place
 | `just bench` | Criterion benchmarks, the wall-clock tests `just test` skips, and the end-to-end benchmark against the checked-in baseline. Only the end-to-end benchmark gates; criterion's baselines are not committed, so it compares against the previous run on the same machine and is what you use while changing the store. Run it on calibrated hardware: CI runs the criterion benchmarks and the end-to-end targets advisorily, and does not run the wall-clock tests at all |
 | `just soak` | The one-hour overlap soak: fifteen scheduled flows whose runs outlast their interval, checked against the overlap invariants at the end. `just soak --quick` takes twelve minutes; `--keep` leaves the UI up. Not a regression gate and not on the default CI path |
 | `just build` | Build a release wheel into `dist/` |
+| `node scripts/capture_screenshots.mjs` | Recapture the screenshots under `docs/images/` from a seeded demo server; name images to capture only those. Needs a built UI and Chrome; see `docs/images/README.md` |
 
 ## Where things are
 
@@ -76,9 +77,10 @@ just docs
     just docs
     ```
 4. Move the `CHANGELOG.md` entries under a heading for the new version. Every change to the Python API, the HTTP API, the CLI, the MCP surface, the UI, or the behaviour of a running server needs an entry, and an entry that removes or reverses documented behaviour says what a reader relying on it must do.
-5. CI builds the UI, then wheels for macOS arm64 and x86_64 (the Intel one cross-built from the arm64 runner), Linux x86_64 and aarch64 (manylinux 2.28), and Windows x86_64, plus the sdist.
-6. The smoke stage installs each wheel into a fresh virtual environment on its platform and runs `scripts/smoke.sh`: import, offline run, `cereyan runs ls`.
-7. Tag the release as `v<version>`. The `docs` job uploads the built site as a Pages artifact, `deploy-docs` publishes it, and only then does `publish` upload the wheels and the sdist to PyPI — so the package page never goes live linking to a site that does not yet exist.
+5. When the UI changed since the last release, run `node scripts/capture_screenshots.mjs`, look at every image, and bring the alt text on the pages that use them in line with what they now show.
+6. CI builds the UI, then wheels for macOS arm64 and x86_64 (the Intel one cross-built from the arm64 runner), Linux x86_64 and aarch64 (manylinux 2.28), and Windows x86_64, plus the sdist.
+7. The smoke stage installs each wheel into a fresh virtual environment on its platform and runs `scripts/smoke.sh`: import, offline run, `cereyan runs ls`.
+8. Tag the release as `v<version>`. The `docs` job uploads the built site as a Pages artifact, `deploy-docs` publishes it, and only then does `publish` upload the wheels and the sdist to PyPI — so the package page never goes live linking to a site that does not yet exist.
 
 ### One-time setup
 
@@ -101,4 +103,4 @@ gh api -X POST repos/<owner>/<repo>/environments/github-pages/deployment-branch-
 
 ## License
 
-MIT. UI components adapted from Prefect are listed in `NOTICE` and remain under the Apache License 2.0 of their origin.
+MIT. The UI bundles the Geist and Geist Mono typefaces, which stay under the SIL Open Font License 1.1; their terms are in the third-party section at the end of `LICENSE`.

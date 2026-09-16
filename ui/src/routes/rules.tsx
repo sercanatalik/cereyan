@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { ApiError, api, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
-import { JsonView } from "@/components/ported/json-view";
+import { JsonView } from "@/components/json-view";
 import { RuleForm, summarizeDo, summarizeUnless, summarizeWhen } from "@/components/rule-form";
 import { Page } from "@/components/shell";
 import { Button } from "@/components/ui/button";

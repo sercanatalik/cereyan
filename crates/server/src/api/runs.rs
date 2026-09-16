@@ -503,24 +503,21 @@ pub async fn resume_inner(state: &Arc<AppState>, id: i64, input: Value) -> ApiRe
     }
 }
 
-/// The answers stored for a run: question index to `{prompt, input}`. A value
-/// written before questions were numbered is the bare answer to the first one,
-/// with no prompt to match against. The `v` marker tells the two apart, so an
-/// answer that happens to be an object is not mistaken for the map.
+/// The answers stored for a run: question index to `{prompt, input}`. Anything
+/// else under the key, including a value without the `v` marker, holds no answers.
 fn stored_answers(state: &AppState, id: i64) -> ApiResult<Map<String, Value>> {
     let Some(raw) = state.store.kv_get(&crate::state::run_input_key(id))? else {
         return Ok(Map::new());
     };
     let value: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
-    let is_map = value.get("v").and_then(|v| v.as_i64()) == Some(1);
-    if is_map {
-        if let Some(answers) = value.get("answers").and_then(|a| a.as_object()) {
-            return Ok(answers.clone());
-        }
+    if value.get("v").and_then(|v| v.as_i64()) != Some(1) {
+        return Ok(Map::new());
     }
-    let mut legacy = Map::new();
-    legacy.insert("0".into(), serde_json::json!({ "input": value }));
-    Ok(legacy)
+    Ok(value
+        .get("answers")
+        .and_then(|a| a.as_object())
+        .cloned()
+        .unwrap_or_default())
 }
 
 fn answers_value(answers: &Map<String, Value>) -> String {

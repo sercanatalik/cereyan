@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import type { components } from "@/api/schema";
-import { StateBadge } from "@/components/ported/state-badge";
+import { StateBadge } from "@/components/state-badge";
 import { Button } from "@/components/ui/button";
 import { cn, formatDuration, formatTime } from "@/lib/utils";
 

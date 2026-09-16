@@ -1,7 +1,7 @@
 # ---
 # title: Fan-in
 # description: A report that runs once per day after both of its upstream flows finished that day.
-# order: 3
+# order: 4
 # fixture: offline
 # ---
 #
@@ -24,14 +24,18 @@ def load(source: str, day: date) -> int:
 
 
 # ## Upstream flows
+#
+# Both loads sit in the `sources` group of the `reporting` project, so the sidebar
+# lists them together, apart from the report, which stays one of the project's own
+# flows and carries the sidebar's dependency marker.
 
 
-@app.flow
+@app.flow(group="sources")
 def sales(day: date) -> int:
     return load("sales", day)
 
 
-@app.flow
+@app.flow(group="sources")
 def inventory(day: date) -> int:
     return load("inventory", day)
 

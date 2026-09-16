@@ -153,6 +153,7 @@ nav:
           - Make reruns idempotent with targets: guides/idempotent-reruns.md
           - Cache task results: guides/cache-results.md
       - Running work:
+          - Organise flows into projects and groups: guides/organise-projects-and-groups.md
           - Run tasks concurrently: guides/concurrent-tasks.md
           - Fetch from an HTTP API: guides/fetch-from-an-api.md
           - Schedule a flow: guides/schedule-a-flow.md
@@ -186,6 +187,7 @@ nav:
       - Exit codes and the discovery file: reference/exit-codes.md
   - Examples:
       - Quickstart pipeline: examples/pipeline.md
+      - Projects and groups: examples/projects_and_groups.md
       - Daily ETL: examples/daily_etl.md
       - Fan-in: examples/fan_in.md
       - Approval: examples/approval.md

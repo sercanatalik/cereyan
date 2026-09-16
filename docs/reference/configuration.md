@@ -63,7 +63,6 @@ title = "Data Platform"   # optional: shown in the top bar and the browser tab
 | `catchup` | string | `skip` | Catch-up policy for schedules that do not set one: `skip`, `latest`, or `all`. |
 | `crash_retries` | integer | `5` | Reruns of a crashed run before it is marked Failed. |
 | `retain_days` | integer | `30` | Days of logs and events kept by retention. |
-| `max_engines`, `engine_max_runs` | integer | as `[server]` | Accepted here for compatibility; `[server]` takes precedence. |
 
 ### `[resources]`
 

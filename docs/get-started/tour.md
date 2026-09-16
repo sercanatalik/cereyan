@@ -1,12 +1,14 @@
 # Tour of the UI
 
-`cereyan serve` opens the UI at `http://127.0.0.1:4200`. It is built for a desktop browser and updates live from the server's event stream. One top bar carries everything that is not a page: the eight sections (Dashboard, Runs, Flows, Events, Artifacts, Rules, Variables, and Settings), a **Project** switcher that scopes every list to one project, a search box (or **⌘K**, **Ctrl+K** elsewhere) that jumps to a section, a flow, a run by name, or an artifact by key, the connection indicator that reads **live** while the stream is connected, and the theme toggle.
+`cereyan serve` opens the UI at `http://127.0.0.1:4200`. It is built for a desktop browser and updates live from the server's event stream. One top bar carries everything that is not a page: the eight sections (Dashboard, Runs, Flows, Events, Artifacts, Rules, Variables, and Settings), a search box (or **⌘K**, **Ctrl+K** elsewhere) that jumps to a section, a flow, a run by name, or an artifact by key, the connection indicator that reads **live** while the stream is connected, and the theme toggle.
+
+Dashboard, Runs, Flows, Events, and Artifacts carry the **scope sidebar** on the left: **All projects**, then every project with a bar of its flows' last-run states and its flow count, and under each project its groups, marked when their flows have upstream dependencies. A project with both its own flows and groups lists its own flows as **(project)**. Picking an entry scopes the page and is kept across reloads: Runs and Flows narrow to the group, and Dashboard, Events, and Artifacts to its project. A link carrying `?project=` or `?group=` overrides the sidebar for that page. How projects and groups are declared is in [How to organise flows into projects and groups](../guides/organise-projects-and-groups.md).
 
 The palette is a warm neutral in light and dark. Ink is the only brand colour; every other colour on a page belongs to a run state, so a glance tells you what is running, failed, waiting, or late.
 
 ## Dashboard
 
-![Dashboard with counts by state, a proportion bar and a histogram by state, the Needs attention and Running now lists, then the Recently completed and Upcoming tables](../images/dashboard.png)
+![Dashboard beside the scope sidebar of projects and groups: counts by state, a proportion bar and a histogram by state, the Needs attention list with a paused and a failed run, Running now, and the Recently completed table](../images/dashboard.png)
 
 Counts for the selected range (Running, Completed, Failed, Crashed, Waiting for input, Late, Scheduled) with a proportion bar and a histogram by state across the width of its card. **Needs attention** lists the runs waiting on you: paused runs with their question and an **Answer** button, failed runs with **Run again**, crashed and late runs with **Open**. **Running now** shows each active run with its elapsed time and how many of its tasks are done. **Recently completed** lists the eight runs in the range that finished last, with when each finished, its task bar, duration, and parameters. **Upcoming** lists the next scheduled runs with a **Run now** shortcut. On a screen 1680 px wide or wider, Needs attention, Running now, and Upcoming sit side by side above Recently completed, and the histogram shows twice as many bars. The range selector and the tag filter apply to the whole page.
 
@@ -14,13 +16,13 @@ Counts for the selected range (Running, Completed, Failed, Crashed, Waiting for 
 
 ## Runs
 
-![Runs list in collapsible groups, each header rolling up its runs' states, over rows with state, name, flow, a task-state bar, start, duration, and tags, plus popover filters](../images/runs.png)
+![Runs list beside the scope sidebar, in collapsible sections by project and group, each header rolling up its runs' states, over rows with state, name, flow, a task-state bar, start, duration, and tags, under popover filters](../images/runs.png)
 
-Every run, newest first, in collapsible sections nested project then group. Filters are popover buttons for state, project, group, flow, tags, and range, plus a name search and a sort; the group options narrow to the selected project. The **Tasks** column is a bar of the run's task runs by state. The **Task runs** tab lists task runs across runs the same way. Selecting rows raises a bar at the bottom of the window with **Cancel** and **Delete** for the selection; a selection may span sections.
+Every run in the sidebar's scope, newest first, in collapsible sections nested project then group. Filters are popover buttons for state and flow, a tag field, range, a name search, and a sort; the flow options narrow to the flows in scope. The **Tasks** column is a bar of the run's task runs by state. The **Task runs** tab lists task runs across runs the same way. Selecting rows raises a bar at the bottom of the window with **Cancel** and **Delete** for the selection; a selection may span sections.
 
 ## Run detail
 
-![Run detail as a workbench: the header band, the tasks rail on the left, and the Logs tab with the level filter, search, task chip, and Follow switch](../images/run-detail.png)
+![Run detail as a workbench: the header band, the tasks rail on the left, and the Logs tab with the level filter, search, and Follow switch over the run's log lines](../images/run-detail.png)
 
 The header band shows the run's name, state, flow, tags, and a line with its start, elapsed or total time, attempt, what created it, and its parameters. **Run again** and **Cancel** sit on the right; **Delete** is in the overflow menu. A paused run shows its question and the **Resume** form in the band.
 
@@ -34,15 +36,17 @@ The **tasks rail** on the left lists every task run with its state, duration, an
 
 ![The run page in the dark theme](../images/run-detail-dark.png)
 
-![The Timeline tab: task runs as bars on a time axis with lines for the dependencies between them](../images/run-timeline.png)
+![The Timeline tab: the run's task runs as bars on a time axis, with the switch to the dependency view](../images/run-timeline.png)
 
 ## Flows
 
-![Flows in collapsible groups under a Dependencies panel, a scheduled flow's row menu open on Skip next run with the time it skips, Skip runs, and Reschedule; rows show the schedule in words with the next fire and a skipped count, a run-history sparkline, the last run's state, tags, and a Run button](../images/flows.png)
+![Flows page beside the scope sidebar, titled All flows, with the Last run, Schedule, and Tags filters, rows banded by project and group, and a scheduled flow's row menu open on Skip next run, Skip runs, and Reschedule; rows show the schedule in words with the next fire, a run-history sparkline, the last run's state, the flows each starts after, and tags](../images/flows.png)
 
-Every flow the server has registered, in collapsible sections nested project then group. A flow's group is the one it declared with `group=`, else its project, so a flow that declared none is listed directly under its project rather than in a section repeating that name; a project header shows its source directory. A **Group** filter sits beside **Project**. Each row shows the schedule in words with the next fire time, the last ten runs as bars coloured by state and sized by duration, the last run's state, and tags. **Run** opens a form built from the flow's parameter schema. For a scheduled flow the row menu adds **Skip next run** (with the time it skips), **Skip runs…**, and **Reschedule…**, and the schedule cell counts skipped fires beside the next one. The **Dependencies** panel above the table draws each `after=` chain as nodes joined by arrows and each fan-in as its upstreams joined into the downstream flow with its key. A flow the running server did not register stays listed, dimmed, with its last-seen time and a **Delete** action.
+The flows in the sidebar's scope. The title names the scope (**All flows**, a project, or a group) over a line with its flow and group counts and the source directory. Above the table, a search and three filters narrow within the scope: **Last run** state, **Schedule** (scheduled or unscheduled), and **Tags**. Each option's count is taken over the whole scope, and the filters reset when the scope changes. **Clear** removes them, and the count on the right reads `n of m flows` while they apply.
 
-A header at either level is the same columns rolled up, so collapsing hides the detail without hiding what it says: the soonest next fire, the recent runs, the last-run states as a bar with counts, the union of the tags, and how many flows it holds. A project's header covers every flow in it, across its groups, so a fold never hides what a group beneath it would have shown. Flows the running server no longer has registered are counted separately as **stale**, so an all-green bar cannot hide them. A section of more than five rows starts collapsed and everything else starts open; a lone section is always open, and a search opens every section it matches.
+While the scope spans more than one group, a band heads each project and group with its flow count, how many are scheduled, whether its flows have dependencies, and how many are **stale**, meaning not registered by this server. Click a band's name to scope to that group. Scope to a single group and a summary strip replaces the bands: its flow count, the soonest next fire, its last-run states with the stale count, and each dependency as `upstream → flow`.
+
+Each row shows the flow's name and description, the schedule in words with the next fire time, the last ten runs as bars coloured by state and sized by duration, the last run's state, **Starts after** with the flows it follows, and tags. **Run** opens a form built from the flow's parameter schema. For a scheduled flow the row menu adds **Skip next run** (with the time it skips), **Skip runs…**, and **Reschedule…**, and the schedule cell counts skipped fires beside the next one. A flow the running server did not register stays listed, dimmed, with its last-seen time and a **Delete** action.
 
 ## Flow detail
 

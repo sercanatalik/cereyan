@@ -155,9 +155,10 @@ class Flow:
     def group(self) -> str:
         """The group this flow belongs to: the one it declared, else its `project`.
 
-        Groups are a flat axis, so flows in different projects that declare the same
-        group form one group, and a declared group equal to a project name merges with
-        the flows defaulting to that project.
+        A group is a level inside the project: the same name declared in two projects
+        is two groups, one under each. A flow whose group is its project, because it
+        declared none or declared the project's own name, is one of the project's own
+        flows rather than a member of a group.
         """
         return self.declared_group if self.declared_group is not None else self.project
 
@@ -248,11 +249,10 @@ def flow(
             ``(project, name)``.
         description (str | None): Shown in the UI; defaults to the function's docstring.
         tags (Iterable[str]): Tags copied onto every run.
-        group (str | None): The group this flow is listed under in the UI; defaults to the
-            flow's project. Groups are a flat axis, not a level inside the
-            project: flows in different projects declaring the same group form
-            one group, and a group named after a project merges with the flows
-            that default to it.
+        group (str | None): The group this flow is listed under, inside its project, in
+            the UI and in the ``group`` filter of the API, the CLI, and MCP. The
+            same name declared in two projects is two groups. Defaults to the
+            project, which lists the flow as one of the project's own flows.
         run_name (str | Callable[..., str] | None): A ``str.format`` template over the parameters, such as
             ``"etl-{day}"``, or a callable taking the parameters as keyword
             arguments and returning the name.

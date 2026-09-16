@@ -1,7 +1,7 @@
 # ---
 # title: Alerting
 # description: A custom event, a code rule that reacts to it, and a proactive rule for a run that overruns.
-# order: 5
+# order: 6
 # fixture: served
 # ---
 #

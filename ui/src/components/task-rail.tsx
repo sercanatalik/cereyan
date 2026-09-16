@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { TaskRun } from "@/api/client";
-import { StateDot } from "@/components/ported/state-badge";
+import { StateDot } from "@/components/state-badge";
 import { StateBar, type StateCounts } from "@/components/state-bar";
 import { cn, formatDuration } from "@/lib/utils";
 

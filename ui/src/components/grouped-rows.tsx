@@ -7,7 +7,7 @@
 import { ChevronRight, TriangleAlert } from "lucide-react";
 import { type ReactNode, useId, useRef, useState } from "react";
 import type { StateType } from "@/api/client";
-import { DOT_COLORS } from "@/components/ported/state-badge";
+import { DOT_COLORS } from "@/components/state-badge";
 import { StateBar, type StateCounts } from "@/components/state-bar";
 import { Td, Tr } from "@/components/ui/table";
 import type { ProjectGroup } from "@/lib/groups";

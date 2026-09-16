@@ -67,7 +67,7 @@ def report(day: date) -> str:
 assert report.after["flows"] == ["sales", "inventory"] and report.after["key"] == "day"
 ```
 
-`report` runs once per `day`, after both `sales` and `inventory` have a Completed or Skipped run for that day. A day that already has a report never gets a second one, however the first was created, and a failed upstream blocks the batch until it is rerun. Each creation records a `flow.fan_in` event with the key value and the upstream run ids, and the flow page's dependency graph draws one edge per upstream.
+`report` runs once per `day`, after both `sales` and `inventory` have a Completed or Skipped run for that day. A day that already has a report never gets a second one, however the first was created, and a failed upstream blocks the batch until it is rerun. Each creation records a `flow.fan_in` event with the key value and the upstream run ids, and the flow page lists every upstream under *Triggered by*.
 
 ## When to use a rule instead
 

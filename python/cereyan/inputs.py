@@ -45,12 +45,8 @@ def wait_for_input(prompt: str, schema: dict | None = None) -> Any:
         )
     index = run.next_input_index()
     stored = run.backend.get_input(index)
-    if stored is not None:
-        answered = stored.get("prompt")
-        # An answer stored before questions were numbered has no prompt to
-        # match, and answers the first question.
-        if answered is None or answered == prompt:
-            return stored.get("input")
+    if stored is not None and stored.get("prompt") == prompt:
+        return stored.get("input")
     task = context.current_task_run()
     raise RunPaused(prompt, schema, task.id if task else None, index)
 

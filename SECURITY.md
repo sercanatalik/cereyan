@@ -6,8 +6,9 @@ Fixes go into the latest released version on PyPI. There are no long-term suppor
 
 | Version | Supported |
 |---|---|
-| Latest release | Yes |
-| Anything older | No — upgrade first |
+| 2.x, latest release | Yes |
+| Older 2.x releases | No — upgrade to the latest |
+| 1.x | No — upgrade to 2.x; the changelog's *Upgrading from 1.x* lists what changes |
 
 ## Reporting a vulnerability
 

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import io
-import json
 import os
-import sqlite3
 
 import pytest
 
@@ -238,22 +236,6 @@ def test_answers_are_dropped_when_the_run_ends(hitl):
     stored = hitl.client._request("GET", f"/api/runs/{run['id']}/input")
     assert stored["answers"] == {}
     assert stored["input"] is None and stored["pending"] is None
-
-
-def test_an_answer_stored_before_questions_were_numbered(hitl):
-    run = start(hitl, "approve", n=2)
-    paused(hitl, run["id"])
-    con = sqlite3.connect(os.path.join(str(hitl.home), "db.sqlite"), timeout=10)
-    con.execute(
-        "INSERT OR REPLACE INTO kv (key, value, updated_at) VALUES (?, ?, 0)",
-        (f"run.input:{run['id']}", json.dumps({"approve": True})),
-    )
-    con.commit()
-    con.close()
-    # A bare answer written by an earlier release answers the first question.
-    answer = hitl.client._request("GET", f"/api/runs/{run['id']}/input?index=0")
-    assert answer["answer"]["input"] == {"approve": True}
-    assert "prompt" not in answer["answer"]
 
 
 def test_a_changed_prompt_at_the_same_position_asks_again():

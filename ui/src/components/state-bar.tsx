@@ -1,5 +1,5 @@
 import type { StateType } from "@/api/client";
-import { DOT_COLORS } from "@/components/ported/state-badge";
+import { DOT_COLORS } from "@/components/state-badge";
 import { cn } from "@/lib/utils";
 
 /** Draw order: terminal states first, then what is still moving. */

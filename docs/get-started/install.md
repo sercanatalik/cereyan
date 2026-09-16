@@ -29,6 +29,14 @@ python -c "import cereyan; print(cereyan.__version__)"
 
 The first run creates the runtime home, `~/.cereyan` by default, holding the SQLite database and, later, `server.json` while a server runs, `secret.key` once a secret variable exists, and `storage/` for persisted results. Set `CEREYAN_HOME` or pass `--home` to put it elsewhere; see [Engines and the home directory](../concepts/engines-and-home.md).
 
+## Upgrade
+
+```bash
+pip install --upgrade cereyan
+```
+
+The first start of a newer version migrates the database in place. A migration that rebuilds a table, such as the `task_run` rebuild in 2.0.0, makes that start take longer on a large store. A migrated database cannot be opened by an older version, which refuses to start and asks you to upgrade, so to keep a way back, stop the server and copy `db.sqlite` from the home before upgrading. Read the changelog's *Upgrading from* list when the major version changes.
+
 ## Windows
 
 The Unix socket listener and engine niceness are Unix-only options, rejected or ignored with a message. Windows cannot interrupt a flow blocked in most I/O calls; a flow running Python code or sleeping in `time.sleep` is interrupted as on Linux and macOS. Two behaviours are weaker there as a result:

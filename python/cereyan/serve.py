@@ -471,16 +471,14 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         (crash_retries, "flag", "--crash-retries"),
     ), 5)
     crash_default = int(crash_default)
-    # max_engines and engine_max_runs: the argument, [server], then [defaults].
+    # max_engines and engine_max_runs: the argument, then [server].
     engines, sources["server.max_engines"] = _first((
         (max_engines or None, "flag", "--max-engines or app.serve(max_engines=)"),
         (settings.get("max_engines") or None, "toml", "[server] max_engines"),
-        (toml_defaults.get("max_engines"), "toml", "[defaults] max_engines"),
     ), os.cpu_count() or 4)
     engine_runs, sources["server.engine_max_runs"] = _first((
         (engine_max_runs or None, "flag", "--engine-max-runs or app.serve(engine_max_runs=)"),
         (settings.get("engine_max_runs") or None, "toml", "[server] engine_max_runs"),
-        (toml_defaults.get("engine_max_runs"), "toml", "[defaults] engine_max_runs"),
     ), 100)
     should_open, sources["server.open_browser"] = _first((
         (False if os.environ.get("CEREYAN_NO_BROWSER") else None, "env", "CEREYAN_NO_BROWSER"),
