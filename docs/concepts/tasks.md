@@ -24,6 +24,8 @@ A **task** is a decorated function called inside a flow. Each call becomes a **t
 
 Every call gets a dynamic key made of the task name and a counter, such as `fetch-0` and `fetch-1`, so the same task called twice in one run is two task runs. Task runs record which earlier task runs produced their arguments, which is what the run page's timeline and dependency views draw.
 
+The counter restarts with each [pass](runs-and-states.md#attempts), so a call keeps its key when the body executes again: a flow that calls `fetch()` once and then retries records `fetch-0` in pass 0 and `fetch-0` in pass 1, not `fetch-0` and `fetch-1`. A task run is therefore identified by its run, its pass and its key.
+
 ## What a task can do
 
 | Option | Effect | Guide |

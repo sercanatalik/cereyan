@@ -26,7 +26,8 @@ class Backend:
                        details: dict | None = None) -> dict:
         raise NotImplementedError
 
-    def create_task_run(self, name: str, task_key: str, dynamic_key: str, parents: list[str] | None = None) -> tuple[str, int | None]:
+    def create_task_run(self, name: str, task_key: str, dynamic_key: str, parents: list[str] | None = None,
+                        pass_: int = 0) -> tuple[str, int | None]:
         raise NotImplementedError
 
     def acquire_resources(self, resources: dict, logger):
@@ -60,8 +61,12 @@ class Backend:
     def cancel_requested(self) -> bool:
         return False
 
-    def get_input(self):
-        """The answer a resumed run was given, or None."""
+    def get_input(self, index: int = 0):
+        """The answer given to question `index` of this run, or None.
+
+        The answer comes back as ``{"prompt": ..., "input": ...}``; the prompt
+        is absent for an answer stored before questions were numbered.
+        """
         return None
 
 
@@ -127,8 +132,8 @@ class StoreBackend(Backend):
                 settle_expectations_offline(self.store, self.run_id)
         return state
 
-    def create_task_run(self, name, task_key, dynamic_key, parents=None):
-        row_id, external_id = self.store.create_task_run(self.run_id, name, task_key, dynamic_key, list(parents or []))
+    def create_task_run(self, name, task_key, dynamic_key, parents=None, pass_=0):
+        row_id, external_id = self.store.create_task_run(self.run_id, name, task_key, dynamic_key, list(parents or []), pass_)
         self._rows[external_id] = row_id
         return external_id, row_id
 
@@ -179,11 +184,11 @@ class StoreBackend(Backend):
 class ReporterBackend(Backend):
     """Batched reporting to a server through the Rust client."""
 
-    def __init__(self, client: _core.Client, run_id: int) -> None:
+    def __init__(self, client: _core.Client, run_id: int, report_seq: int = 0) -> None:
         self.client = client
         self.run_id = run_id
         self._artifact_ids: dict = {}
-        client.begin_run(run_id)
+        client.begin_run(run_id, report_seq)
 
     def transition_run(self, state_type, name=None, message=None, details=None) -> dict:
         accepted, body = self.client.transition_run(self.run_id, state_type, name, message, _details(details))
@@ -192,9 +197,9 @@ class ReporterBackend(Backend):
             raise RunRejected(data.get("reason", "rejected"), data.get("current"))
         return data.get("state", data)
 
-    def create_task_run(self, name, task_key, dynamic_key, parents=None):
+    def create_task_run(self, name, task_key, dynamic_key, parents=None, pass_=0):
         external_id = _core.new_id()
-        self.client.task_run_created(self.run_id, external_id, name, task_key, dynamic_key, list(parents or []))
+        self.client.task_run_created(self.run_id, external_id, name, task_key, dynamic_key, list(parents or []), pass_)
         return external_id, None
 
     def acquire_resources(self, resources: dict, logger):
@@ -241,8 +246,9 @@ class ReporterBackend(Backend):
     def cancel_requested(self) -> bool:
         return self.client.cancel_requested(self.run_id)
 
-    def get_input(self):
-        status, text = self.client.get(f"/api/runs/{self.run_id}/input")
+    def get_input(self, index: int = 0):
+        status, text = self.client.get(f"/api/runs/{self.run_id}/input?index={index}")
         if status >= 300 or not text:
             return None
-        return json.loads(text).get("input")
+        answer = json.loads(text).get("answer")
+        return answer if isinstance(answer, dict) else None

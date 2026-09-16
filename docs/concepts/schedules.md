@@ -41,6 +41,19 @@ Timezones are IANA names and default to the machine's local zone. Each schedule 
 
 Skip a fire when one run should not happen but the schedule should stay on: from the Flows page menu (**Skip next run**, **Skip runs…**), the flow page's **Upcoming** tab, or `POST /api/schedules/{id}/skips` with a list of `fires` or `{"next": N}`. A skip names one fire time of one schedule, at most 100 fires ahead, and lasts until that time passes: it survives a restart, a pause and resume, and an edit that still produces the time. At its time the fire's run ends `Skipped` with `details.reason = "user"` without starting, shows in Runs, and records `run.skipped`; until then **Undo** or `DELETE /api/schedules/{id}/skips/{fire}` takes it back. The look-ahead keeps three runs that will start, so it reaches past skipped fires, and the flows that run after this one are skipped for that fire too (see [Dependencies](dependencies.md)).
 
+## Daylight saving time
+
+Twice a year a timezone loses an hour and gains one back, so a wall-clock time can be missing or can happen twice. A schedule that fires by wall clock resolves both the same way.
+
+| Schedule | A time the clocks skipped | A time that happens twice |
+|---|---|---|
+| Cron | Fires at the first instant after the gap, on the same day | Fires once, at the earlier instant |
+| Interval of a day or more | Fires at the first instant after the gap, on the same day | Fires once, at the earlier instant |
+| Interval under a day | Not affected: elapsed time, not wall clock | Not affected |
+| RRule | Follows the recurrence rule's own instants | Follows the recurrence rule's own instants |
+
+A daily schedule at 02:30 `America/New_York` on the day the clocks jump from 02:00 to 03:00 therefore fires at 03:00, and the day is never missing from its history. The gap is resolved by the zone's own shift, which is not always an hour: `Australia/Lord_Howe` moves thirty minutes, and a 02:15 schedule there fires at 02:30.
+
 ## Catch-up
 
 When the server starts after downtime, each schedule's `catchup` policy decides what happens to the fires it missed: `skip` (default) drops them, `latest` creates the most recent one, and `all` creates every one up to `catchup_max` (default 100). A skipped fire is never caught up. Catch-up runs carry `created_by = catchup` and the decision is recorded as a `schedule.catchup` event.

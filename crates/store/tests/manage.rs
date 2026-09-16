@@ -24,7 +24,7 @@ fn count(store: &Store, sql: &str) -> i64 {
 /// stored answer.
 fn busy_run(store: &Store, flow_id: i64, rule_id: i64, logs: usize) -> i64 {
     let (run, _) = store.create_run(flow_id, "r", "{}", "[]").unwrap();
-    store.create_task_run(run, "t", "t", "t-0").unwrap();
+    store.create_task_run(run, "t", "t", "t-0", 0).unwrap();
     let lines = (0..logs)
         .map(|i| NewLog {
             run_id: run,

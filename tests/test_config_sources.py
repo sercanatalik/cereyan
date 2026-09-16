@@ -9,6 +9,7 @@ from cereyan import serve as serve_mod
 ENV = (
     "CEREYAN_HOST", "CEREYAN_PORT", "CEREYAN_TOKEN", "CEREYAN_SOCKET", "CEREYAN_BASE_PATH",
     "CEREYAN_ENABLE_AUTH", "CEREYAN_AUTH_COOKIE", "CEREYAN_AUTH_SCOPE", "CEREYAN_LOGIN_URL",
+    "CEREYAN_ALLOWED_HOSTS",
 )
 
 
@@ -86,3 +87,45 @@ def test_file_only_settings(tmp_path):
     assert sources["ui.title"] == src("toml", "[ui] title")
     assert sources["resources.gpu"] == src("toml", "[resources] gpu")
     assert sources["email.host"] == src("toml", "[email] host")
+
+
+def test_allowed_hosts_sources(tmp_path, monkeypatch):
+    bare = project(tmp_path, "bare")
+    assert serve_mod._allowed_hosts(bare) == ([], src("default"))
+
+    filed = project(tmp_path, "filed", '[server]\nallowed_hosts = ["A.example"]\n')
+    assert serve_mod._allowed_hosts(filed) == (["a.example"], src("toml", "[server] allowed_hosts"))
+    assert serve_mod._allowed_hosts(filed, app_allowed_hosts=("b.example",)) == (
+        ["b.example"], src("app", "app.serve(allowed_hosts=)"))
+    # The first source wins whole: lists are never merged.
+    monkeypatch.setenv("CEREYAN_ALLOWED_HOSTS", " b.example, ,C.example ")
+    assert serve_mod._allowed_hosts(filed, app_allowed_hosts=["d.example"]) == (
+        ["b.example", "c.example"], src("env", "CEREYAN_ALLOWED_HOSTS"))
+    assert serve_mod._allowed_hosts(filed, ["e.example", "10.0.0.1", "[fd00::1]"]) == (
+        ["e.example", "10.0.0.1", "[fd00::1]"], src("flag", "--allowed-host"))
+    # Only commas: nothing set there, so the next source applies.
+    monkeypatch.setenv("CEREYAN_ALLOWED_HOSTS", " , ")
+    assert serve_mod._allowed_hosts(filed)[1] == src("toml", "[server] allowed_hosts")
+
+
+@pytest.mark.parametrize("toml", [
+    '["cereyan.example.com:443"]',
+    '["https://cereyan.example.com"]',
+    '["*"]',
+    '[".example.com"]',
+    '["a b"]',
+    '"cereyan.example.com"',
+    "[5]",
+])
+def test_allowed_hosts_entries_are_checked(tmp_path, toml):
+    directory = project(tmp_path, "p", f"[server]\nallowed_hosts = {toml}\n")
+    with pytest.raises(serve_mod.CereyanError, match=r"allowed_hosts.*from \[server\] allowed_hosts in cereyan.toml"):
+        serve_mod.resolve_allowed_hosts(directory)
+
+
+def test_allowed_hosts_flag_repeats():
+    from cereyan.cli import build_parser
+
+    args = build_parser().parse_args(["serve", "--allowed-host", "a.example", "--allowed-host", "b.example"])
+    assert args.allowed_hosts == ["a.example", "b.example"]
+    assert build_parser().parse_args(["serve"]).allowed_hosts is None

@@ -24,6 +24,7 @@ Resource `run`; related `flow` and the run's tags. Offline the payload is `state
 | `run.skipped` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by`, `reason` | The run ended Skipped: `on_overlap="skip"`, a backfill value already done, a catch-up drop, a fire a person skipped (`reason` `user`), or an upstream run skipped that way (`reason` `upstream`) |
 | `run.paused` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run is waiting on `wait_for_input` |
 | `run.resumed` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run was answered and its next attempt scheduled |
+| `run.report_rejected` | `seq`, `kind`, `reason` | The store refused one event of an engine's report; the rest of that report still applied |
 
 `AwaitingRetry`, `AwaitingResource`, and `Cancelling` record no event.
 

@@ -113,7 +113,7 @@ def execute_work(client: _core.Client, work: dict, module) -> None:
         execute_job(client, work, module)
         return
     run_id = int(work["run_id"])
-    backend = ReporterBackend(client, run_id)
+    backend = ReporterBackend(client, run_id, int(work.get("report_seq") or 0))
     flow = _find_flow(work["project"], work["flow"])
     try:
         if flow is None:
@@ -133,7 +133,7 @@ def execute_work(client: _core.Client, work: dict, module) -> None:
         watcher = _CancelWatcher(client, run_id)
         watcher.start()
         try:
-            execute_run(flow, values, backend, RunInfo(run_id, work["external_id"], work["run_name"]))
+            execute_run(flow, values, backend, RunInfo(run_id, work["external_id"], work["run_name"], int(work.get("pass") or 0)))
         except KeyboardInterrupt:
             if not watcher.fired:
                 raise

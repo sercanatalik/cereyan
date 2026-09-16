@@ -7,7 +7,7 @@ The server implements the [Model Context Protocol](https://modelcontextprotocol.
 | Transport | How | Authentication |
 |---|---|---|
 | stdio | `cereyan mcp`, started by the host; proxies every message to the running server found through `server.json` (`--url` and `--socket` override) | `CEREYAN_TOKEN`, or `--token` before the subcommand (`cereyan --token <token> mcp`); with a Unix socket and no token it connects over the socket |
-| Streamable HTTP | `POST /mcp` with one JSON-RPC message per request; requests get a JSON reply, notifications get 202; `initialize` returns `Mcp-Session-Id` to send on later requests; `DELETE /mcp` ends the session; `GET /mcp` answers 405 | `Authorization: Bearer <token>` when the server has a token |
+| Streamable HTTP | `POST /mcp` with one JSON-RPC message per request and `Content-Type: application/json` (any other type answers 415); requests get a JSON reply, notifications get 202; `initialize` returns `Mcp-Session-Id` to send on later requests; `DELETE /mcp` ends the session; `GET /mcp` answers 405 | `Authorization: Bearer <token>` when the server has a token |
 
 Runs created through MCP record `created_by = mcp:<client name>` from the `initialize` handshake.
 

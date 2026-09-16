@@ -1,6 +1,6 @@
 # How to secure the server
 
-By default the server listens on loopback with no authentication: anyone on the machine can use it, and nobody off the machine can reach it. Add a token before binding to another address or exposing MCP, and use the Unix socket to let trusted local processes in without the token.
+By default the server listens on loopback with no authentication: any process on the machine can use it. Web pages open in your browser cannot, because the server answers only to its own addresses and refuses requests from other sites' pages; see [Reach the server under another name](#reach-the-server-under-another-name). Add a token before binding to another address or exposing MCP, and use the Unix socket to let trusted local processes in without the token.
 
 ## Require a token
 
@@ -38,9 +38,10 @@ The server warns at start when bound to a non-loopback address without a token. 
 ```toml
 [server]
 base_path = "/cereyan"
+allowed_hosts = ["cereyan.example.com"]
 ```
 
-Or `--base-path /cereyan`, `CEREYAN_BASE_PATH`, or `app.serve(base_path=...)`. The server then answers everything under that path, custom routes included, and the proxy forwards the path unchanged:
+Or `--base-path /cereyan`, `CEREYAN_BASE_PATH`, or `app.serve(base_path=...)`. The server then answers everything under that path, custom routes included, and the proxy forwards the path unchanged. `allowed_hosts` names the public host, because the UI's requests carry that origin; nginx sends `Host: 127.0.0.1:4200` upstream, which the server accepts:
 
 ```nginx
 location /cereyan/ {
@@ -52,6 +53,22 @@ location /cereyan/ {
 ```
 
 A `proxy_pass` ending in `/` strips `/cereyan`, and every request then answers 404. The same URLs work without the proxy, at `http://127.0.0.1:4200/cereyan/`, and `/` redirects there. The CLI, the Python client, engines, and `cereyan mcp` read the base path from `server.json`; the Unix socket stays at the root. Keep the server on loopback so the proxy, which terminates TLS, is the only way in.
+
+## Reach the server under another name
+
+```toml
+[server]
+allowed_hosts = ["cereyan.example.com", "build-box.lan"]
+```
+
+Or `--allowed-host` (repeat it for more), `CEREYAN_ALLOWED_HOSTS` as a comma-separated list, or `app.serve(allowed_hosts=[...])`; the first that sets it wins whole. Before the token is checked, the server answers two kinds of request with 403, on every path, the UI and custom routes included:
+
+| Refused | Why | Accepted without configuration |
+|---|---|---|
+| A `Host` naming another host | A site whose name is re-pointed at 127.0.0.1 (DNS rebinding) could read and change everything | IP addresses, `localhost`, the configured `host` |
+| An `Origin` from another page | A page on any site could post to the API and `/mcp` from your browser without seeing a reply | The server's own origin |
+
+Names in `allowed_hosts` are accepted in both. Add one when you open the server through it: a LAN name, a tunnel, or a reverse proxy. Entries are host names or IP addresses without a scheme or port; the 403 names the host or origin it refused. The CLI, the Python client, engines, and `cereyan mcp` dial an address and send no `Origin`, so they need nothing, and the Unix socket skips both checks.
 
 ## Trust local processes through the socket
 

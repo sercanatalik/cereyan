@@ -96,6 +96,8 @@ async fn build_work_item(state: &Arc<AppState>, run_id: i64) -> ApiResult<Option
             .get(run.id)
             .map(|r| r.cancel_requested)
             .unwrap_or(false),
+        pass: state.store.next_pass(run.id)?,
+        report_seq: run.report_seq,
         payload: serde_json::Value::Null,
     }))
 }
@@ -139,6 +141,9 @@ async fn build_job_item(
             .unwrap_or(serde_json::Value::Object(Default::default())),
         options: serde_json::Value::Object(flow.options.clone()),
         cancel_requested: false,
+        // A job is not an execution of a run's body, so it records no task runs.
+        pass: 0,
+        report_seq: run.as_ref().map(|r| r.report_seq).unwrap_or(0),
         payload,
     }))
 }
@@ -249,6 +254,25 @@ pub async fn report(
     let outcome = tokio::task::spawn_blocking(move || st.store.apply_report(run_id, req.events))
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))??;
+    // An event the store would not take is recorded rather than swallowed: a
+    // report that disappeared quietly is how a whole execution of a run once
+    // went missing from its history.
+    if !outcome.rejected.is_empty() {
+        let flow_id = state
+            .store
+            .get_run(run_id)
+            .ok()
+            .flatten()
+            .map(|r| r.flow_id);
+        for r in &outcome.rejected {
+            let _ = state.record_engine_event(
+                cereyan_core::EventName::RunReportRejected,
+                Some(run_id),
+                flow_id,
+                json!({"seq": r.seq, "kind": r.kind, "reason": r.reason}),
+            );
+        }
+    }
     for t in &outcome.task_runs {
         state.publish_task_run(t);
     }

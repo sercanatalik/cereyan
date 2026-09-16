@@ -23,7 +23,10 @@ import {
 import { UnderlineTabs } from "@/components/ui/underline-tabs";
 import { formatDuration, formatTime } from "@/lib/utils";
 
-type Search = { tab?: string; task?: number };
+type Search = { tab?: string; task?: number; pass?: number };
+
+const asNumber = (v: unknown): number | undefined =>
+  typeof v === "number" ? v : typeof v === "string" && v !== "" ? Number(v) : undefined;
 
 export const Route = createFileRoute("/runs/$runId")({
   validateSearch: (s: Record<string, unknown>): Search => ({
@@ -34,6 +37,7 @@ export const Route = createFileRoute("/runs/$runId")({
         : typeof s.task === "string"
           ? Number(s.task) || undefined
           : undefined,
+    pass: Number.isFinite(asNumber(s.pass)) ? asNumber(s.pass) : undefined,
   }),
   component: RunDetail,
 });
@@ -73,9 +77,28 @@ function RunDetail() {
     queryKey: ["run-tasks", id],
     queryFn: async () => unwrap(await api.GET("/api/runs/{id}/tasks", { params: { path: { id } } })),
   });
+  // A run's body can execute more than once; each execution is a pass. The
+  // tasks request carries every pass, so the switcher knows what exists
+  // without a second round trip.
+  const passes = [...new Set((tasks.data ?? []).map((t) => t.pass ?? 0))].sort((a, b) => a - b);
+  const latestPass = passes.length ? passes[passes.length - 1] : 0;
+  const activePass = search.pass != null && passes.includes(search.pass) ? search.pass : latestPass;
+  const visibleTasks = (tasks.data ?? []).filter((t) => (t.pass ?? 0) === activePass);
+  const setPass = (pass: number | undefined) =>
+    navigate({
+      to: "/runs/$runId",
+      params: { runId },
+      search: (old: Search) => ({ ...old, pass, task: undefined }),
+      replace: true,
+    });
   const graph = useQuery({
-    queryKey: ["run-graph", id, tasks.data?.map((t) => `${t.id}:${t.state.name}`).join(",")],
-    queryFn: async () => unwrap(await api.GET("/api/runs/{id}/graph", { params: { path: { id } } })),
+    queryKey: ["run-graph", id, activePass, visibleTasks.map((t) => `${t.id}:${t.state.name}`).join(",")],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/runs/{id}/graph", {
+          params: { path: { id }, query: { pass: activePass } },
+        }),
+      ),
     enabled: tab === "timeline",
   });
   const again = useMutation({
@@ -197,7 +220,34 @@ function RunDetail() {
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)]">
-        <TaskRail tasks={tasks.data ?? []} selectedId={selectedTask} onSelect={setSelectedTask} />
+        <div className="flex min-h-0 flex-col">
+          {passes.length > 1 ? (
+            <div
+              className="flex items-center gap-1.5 border-r border-b px-4 py-2"
+              data-testid="pass-switcher"
+            >
+              <span className="text-xs text-muted-foreground">Pass</span>
+              {passes.map((p) => (
+                <Button
+                  key={p}
+                  type="button"
+                  size="sm"
+                  variant={p === activePass ? "secondary" : "ghost"}
+                  className="h-6 px-2 text-xs tabular-nums"
+                  onClick={() => setPass(p === latestPass ? undefined : p)}
+                >
+                  {p}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          <TaskRail
+            tasks={visibleTasks}
+            selectedId={selectedTask}
+            onSelect={setSelectedTask}
+            className="min-h-0 flex-1"
+          />
+        </div>
         <div className="flex min-w-0 flex-col">
           <UnderlineTabs
             className="px-6"

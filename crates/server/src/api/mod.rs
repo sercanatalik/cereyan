@@ -386,11 +386,17 @@ pub fn router(state: Arc<AppState>) -> Router {
     let api = api.layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024));
     let api = custom::attach(api, &state.config.custom_routes);
     // The check wraps the UI fallback too and decides by path and `auth_scope`,
-    // so scope `api` leaves the UI open and scope `all` covers it.
+    // so scope `api` leaves the UI open and scope `all` covers it. The guard
+    // wraps everything, so a refused Host or Origin never reaches the token.
+    let guard = Arc::new(crate::guard::Guard::new(&state.config));
     api.fallback(ui::serve)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::auth::require_token,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            guard,
+            crate::guard::check,
         ))
         .with_state(state)
 }

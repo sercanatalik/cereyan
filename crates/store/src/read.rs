@@ -132,6 +132,9 @@ pub struct RunsPage {
 pub struct ListTaskRunsFilter {
     #[serde(default)]
     pub run_id: Option<i64>,
+    /// Only task runs of this execution of the run's body.
+    #[serde(default)]
+    pub pass: Option<i64>,
     #[serde(default)]
     pub project: Option<String>,
     #[serde(default)]
@@ -397,16 +400,42 @@ impl Store {
         })
     }
 
-    pub fn task_runs_by_run(&self, run_id: i64) -> Result<Vec<TaskRun>> {
+    /// Task runs of one run, oldest first: every pass, or only the one given.
+    pub fn task_runs_by_run(&self, run_id: i64, pass: Option<i64>) -> Result<Vec<TaskRun>> {
+        let clause = if pass.is_some() {
+            " AND t.pass = ?2"
+        } else {
+            ""
+        };
         let sql = format!(
-            "SELECT {TASK_RUN_COLUMNS} FROM {TASK_RUN_FROM} WHERE t.run_id = ?1 ORDER BY t.id"
+            "SELECT {TASK_RUN_COLUMNS} FROM {TASK_RUN_FROM} WHERE t.run_id = ?1{clause} ORDER BY t.id"
         );
         self.with_reader(|conn| {
             let mut stmt = conn.prepare_cached(&sql)?;
-            let rows = stmt
-                .query_map([run_id], task_run_from_row)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let rows = match pass {
+                Some(p) => stmt
+                    .query_map(rusqlite::params![run_id, p], task_run_from_row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+                None => stmt
+                    .query_map([run_id], task_run_from_row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+            };
             Ok(rows)
+        })
+    }
+
+    /// The pass the next execution of this run's body belongs to: one more than
+    /// the highest recorded, or 0 when the run has no task runs. A pass that
+    /// recorded nothing leaves no trace and its number is used again, which is
+    /// harmless because it has no rows to collide with.
+    pub fn next_pass(&self, run_id: i64) -> Result<i64> {
+        self.with_reader(|conn| {
+            let next = conn.query_row(
+                "SELECT COALESCE(MAX(pass), -1) + 1 FROM task_run WHERE run_id = ?1",
+                [run_id],
+                |r| r.get(0),
+            )?;
+            Ok(next)
         })
     }
 
@@ -415,6 +444,9 @@ impl Store {
         let mut q = Query::new();
         if let Some(id) = filter.run_id {
             q.push("t.run_id = ?", SqlValue::Integer(id));
+        }
+        if let Some(p) = filter.pass {
+            q.push("t.pass = ?", SqlValue::Integer(p));
         }
         if let Some(p) = &filter.project {
             q.push("f.project = ?", SqlValue::Text(p.clone()));

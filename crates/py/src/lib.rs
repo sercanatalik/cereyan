@@ -174,7 +174,7 @@ impl Store {
     }
 
     /// Returns (task_run_id, external_id).
-    #[pyo3(signature = (run_id, name, task_key, dynamic_key, parents=None))]
+    #[pyo3(signature = (run_id, name, task_key, dynamic_key, parents=None, pass_=0))]
     fn create_task_run(
         &self,
         py: Python<'_>,
@@ -183,6 +183,7 @@ impl Store {
         task_key: String,
         dynamic_key: String,
         parents: Option<Vec<String>>,
+        pass_: i64,
     ) -> PyResult<(i64, String)> {
         let store = self.inner.clone();
         let parents: Vec<cereyan_core::Id> = parents
@@ -199,6 +200,7 @@ impl Store {
                     dynamic_key,
                     external_id: None,
                     parents,
+                    pass: pass_,
                 })
             })
             .map_err(to_py)?;
@@ -269,7 +271,7 @@ impl Store {
     fn task_runs(&self, py: Python<'_>, run_id: i64) -> PyResult<String> {
         let store = self.inner.clone();
         let rows = py
-            .detach(move || store.task_runs_by_run(run_id))
+            .detach(move || store.task_runs_by_run(run_id, None))
             .map_err(to_py)?;
         json(&rows)
     }

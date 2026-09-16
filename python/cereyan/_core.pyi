@@ -51,6 +51,7 @@ class Store:
         task_key: str,
         dynamic_key: str,
         parents: list[str] | None = None,
+        pass_: int = 0,
     ) -> tuple[int, str]: ...
     def transition_task_run(
         self,
@@ -160,7 +161,7 @@ class Client:
         wait_ms: int = 30000,
         nice: int = 0,
     ) -> str: ...
-    def begin_run(self, run_id: int) -> None: ...
+    def begin_run(self, run_id: int, start_seq: int = 0) -> None: ...
     def end_run(self, run_id: int) -> None: ...
     def transition_run(
         self,
@@ -179,6 +180,7 @@ class Client:
         task_key: str,
         dynamic_key: str,
         parents: list[str] | None = None,
+        pass_: int = 0,
     ) -> None: ...
     def emit_event(
         self,

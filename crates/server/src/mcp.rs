@@ -82,6 +82,15 @@ fn rpc_result(id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
 }
 
+/// Whether the request declares a JSON body, ignoring parameters and case.
+fn is_json(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/json"))
+}
+
 fn api_error_message(e: ApiError) -> String {
     match e {
         ApiError::NotFound(m)
@@ -122,6 +131,18 @@ pub async fn handle_post(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    // A page can post text/plain across sites without a preflight; JSON cannot.
+    if !is_json(&headers) {
+        return (
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Json(rpc_error(
+                Value::Null,
+                -32600,
+                "send the message with Content-Type: application/json",
+            )),
+        )
+            .into_response();
+    }
     let message: Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -450,7 +471,7 @@ async fn call_tool(
                 .store
                 .get_run(id)?
                 .ok_or_else(|| ToolError::Failed(format!("run {id} not found")))?;
-            let tasks = state.store.task_runs_by_run(id)?;
+            let tasks = state.store.task_runs_by_run(id, None)?;
             Ok(json!({"run": run, "task_runs": tasks}))
         }
         "run_logs" => {
@@ -498,7 +519,7 @@ async fn call_tool(
                 .ok_or_else(|| ToolError::Failed(format!("run {id} not found")))?;
             let failed: Vec<_> = state
                 .store
-                .task_runs_by_run(id)?
+                .task_runs_by_run(id, None)?
                 .into_iter()
                 .filter(|t| matches!(t.state.state_type, StateType::Failed | StateType::Crashed))
                 .collect();
@@ -777,5 +798,25 @@ fn read_resource(state: &AppState, uri: &str) -> Result<String, String> {
             Ok(pretty(&json!({"run_id": id, "artifacts": items})))
         }
         _ => Err(format!("unknown resource {uri:?}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_json_bodies_are_read() {
+        let with = |value: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CONTENT_TYPE, value.parse().unwrap());
+            is_json(&headers)
+        };
+        assert!(with("application/json"));
+        assert!(with("Application/JSON; charset=utf-8"));
+        assert!(!with("text/plain"));
+        assert!(!with("text/plain; charset=application/json"));
+        assert!(!with("application/json-patch+json"));
+        assert!(!is_json(&HeaderMap::new()));
     }
 }

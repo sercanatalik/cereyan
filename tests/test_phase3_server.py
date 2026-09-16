@@ -45,6 +45,21 @@ def fail():
 def flaky():
     raise ValueError("again")
 
+_passes = []
+
+@task
+def counted(n: int):
+    return n
+
+@app.flow(retries=1, retry_delay=0)
+def retried_with_tasks():
+    counted(1)
+    _passes.append(1)
+    if len(_passes) == 1:
+        raise ValueError("first pass fails")
+    counted(2)
+    return "ok"
+
 @app.flow
 def loop_a():
     return "a"
@@ -131,6 +146,21 @@ def wait_until(fn, timeout=20, interval=0.05):
             return v
         time.sleep(interval)
     raise AssertionError("condition not met in time")
+
+
+def test_retry_restarts_task_keys_in_a_new_pass(obs):
+    run = start(obs, "retried_with_tasks")
+    done = obs.wait_run(run["id"], timeout=30)
+    assert done["state"]["type"] == "Completed"
+    tasks = obs.client._request("GET", f"/api/runs/{run['id']}/tasks")
+    by_pass: dict[int, list[str]] = {}
+    for t in tasks:
+        by_pass.setdefault(t["pass"], []).append(t["dynamic_key"])
+    # The execution that failed recorded `counted-0`. The retry is a new pass
+    # and numbers its calls from zero again, so the same call keeps its key
+    # instead of continuing at `counted-1`.
+    assert by_pass[0] == ["counted-0"]
+    assert by_pass[1] == ["counted-0", "counted-1"]
 
 
 def test_engine_events_and_filters(obs):

@@ -350,3 +350,27 @@ def test_schedule_tools_reach_and_guard(agent):
     gone = call(agent, "delete_schedule", schedule_id=made_id)
     assert not gone["isError"] and gone["data"]["deleted"]
     assert made_id not in [s["id"] for s in call(agent, "list_schedules")["data"]["schedules"]]
+
+
+def test_messages_must_be_json(agent):
+    run_id = agent.client.submit("agent", "ask")["id"]
+    agent.wait_run(run_id, until=lambda r: r["state"]["type"] == "Paused")
+
+    def post(content_type, msg):
+        headers = {"content-type": content_type, "authorization": f"Bearer {TOKEN}"}
+        req = urllib.request.Request(agent.info["url"] + "/mcp", data=json.dumps(msg).encode(), headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    # text/plain is what a page on another site can send without a preflight.
+    cancel = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+              "params": {"name": "cancel_run", "arguments": {"run_id": run_id}}}
+    status, body = post("text/plain", cancel)
+    assert status == 415 and body["id"] is None and "application/json" in body["error"]["message"]
+    assert agent.client.get_run(run_id)["state"]["type"] == "Paused"
+    # Case and parameters in the media type do not matter.
+    status, body = post("Application/JSON; charset=utf-8", {"jsonrpc": "2.0", "id": 2, "method": "ping"})
+    assert (status, body["result"]) == (200, {})

@@ -97,7 +97,7 @@ pub const TASK_RUN_COLUMNS: &str =
     "t.id, t.external_id, t.run_id, t.name, t.task_key, t.dynamic_key, \
     t.state_type, t.state_name, t.state_message, t.state_details, t.state_timestamp, \
     t.failure_count, t.crash_count, t.created_at, t.start_time, t.end_time, t.total_run_time, \
-    r.name, r.flow_id, f.name, f.project, t.parents";
+    r.name, r.flow_id, f.name, f.project, t.parents, t.pass";
 
 pub const TASK_RUN_FROM: &str =
     "task_run t JOIN run r ON r.id = t.run_id JOIN flow f ON f.id = r.flow_id";
@@ -134,6 +134,7 @@ pub fn task_run_from_row(row: &Row<'_>) -> rusqlite::Result<TaskRun> {
             .get::<_, Option<String>>(21)?
             .and_then(|t| serde_json::from_str::<Vec<Id>>(&t).ok())
             .unwrap_or_default(),
+        pass: row.get(22)?,
     })
 }
 

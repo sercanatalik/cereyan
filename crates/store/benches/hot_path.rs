@@ -39,6 +39,7 @@ fn short_task_events(run_id: i64, index: usize, seq: &mut i64) -> Vec<ReportEven
             task_key: "noop".into(),
             dynamic_key: format!("noop-{index}"),
             parents: Vec::new(),
+            pass: 0,
         },
         ReportEvent::TaskRunTransition {
             seq: next(),
@@ -131,7 +132,7 @@ fn bench_transition(c: &mut Criterion) {
                 let ids: Vec<i64> = (0..N)
                     .map(|i| {
                         store
-                            .create_task_run(run, "noop", "noop", &format!("noop-{i}"))
+                            .create_task_run(run, "noop", "noop", &format!("noop-{i}"), 0)
                             .unwrap()
                             .0
                     })

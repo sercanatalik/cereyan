@@ -9,7 +9,7 @@ The server implements the [Model Context Protocol](https://modelcontextprotocol.
 | Transport | How | Authentication |
 |---|---|---|
 | stdio | `cereyan mcp`, started by the host; proxies every message to the running server found through `server.json` (`--url` and `--socket` override) | `CEREYAN_TOKEN`, or `--token` before the subcommand (`cereyan --token <token> mcp`); with a Unix socket and no token it connects over the socket |
-| Streamable HTTP | `POST /mcp` with one JSON-RPC message per request; requests get a JSON reply, notifications get 202; `initialize` returns `Mcp-Session-Id` to send on later requests; `DELETE /mcp` ends the session; `GET /mcp` answers 405 | `Authorization: Bearer <token>` when the server has a token |
+| Streamable HTTP | `POST /mcp` with one JSON-RPC message per request and `Content-Type: application/json` (any other type answers 415); requests get a JSON reply, notifications get 202; `initialize` returns `Mcp-Session-Id` to send on later requests; `DELETE /mcp` ends the session; `GET /mcp` answers 405 | `Authorization: Bearer <token>` when the server has a token |
 
 Runs created through MCP record `created_by = mcp:<client name>` from the `initialize` handshake.
 
@@ -60,7 +60,7 @@ Recorded from real responses, so a model knows what it gets without a second cal
 |---|---|---|
 | `explain_failure` | `error_logs` | `id`, `level`, `logger`, `message`, `run_id`, `task_run_id`, `timestamp` |
 | `explain_failure` | `events` | `external_id`, `flow_id`, `id`, `name`, `occurred`, `payload`, `related`, `resource`, `run_id`, `seq` |
-| `get_run` | `task_runs` | `crash_count`, `created_at`, `dynamic_key`, `end_time`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `id`, `name`, `parents`, `project`, `run_id`, `run_name`, `start_time`, `state`, `task_key`, `total_run_time` |
+| `get_run` | `task_runs` | `crash_count`, `created_at`, `dynamic_key`, `end_time`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `id`, `name`, `parents`, `pass`, `project`, `run_id`, `run_name`, `start_time`, `state`, `task_key`, `total_run_time` |
 | `list_artifacts` | `artifacts` | `created_at`, `data`, `external_id`, `flow_name`, `id`, `key`, `kind`, `project`, `run_id`, `run_name`, `task_run_id`, `updated_at` |
 | `list_events` | `events` | `external_id`, `flow_id`, `id`, `name`, `occurred`, `payload`, `related`, `resource`, `run_id`, `seq` |
 | `list_flows` | `flows` | `description`, `error`, `id`, `live`, `name`, `options`, `parameter_schema`, `project`, `tags` |

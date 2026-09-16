@@ -40,6 +40,7 @@ pub enum EventName {
     RunSkipped,
     RunPaused,
     RunResumed,
+    RunReportRejected,
     TaskRunRunning,
     TaskRunCompleted,
     TaskRunFailed,
@@ -64,7 +65,7 @@ pub enum EventName {
 }
 
 impl EventName {
-    pub const ALL: [EventName; 33] = [
+    pub const ALL: [EventName; 34] = [
         EventName::RunScheduled,
         EventName::RunPending,
         EventName::RunRunning,
@@ -77,6 +78,7 @@ impl EventName {
         EventName::RunSkipped,
         EventName::RunPaused,
         EventName::RunResumed,
+        EventName::RunReportRejected,
         EventName::TaskRunRunning,
         EventName::TaskRunCompleted,
         EventName::TaskRunFailed,
@@ -114,6 +116,7 @@ impl EventName {
             EventName::RunSkipped => "run.skipped",
             EventName::RunPaused => "run.paused",
             EventName::RunResumed => "run.resumed",
+            EventName::RunReportRejected => "run.report_rejected",
             EventName::TaskRunRunning => "task_run.running",
             EventName::TaskRunCompleted => "task_run.completed",
             EventName::TaskRunFailed => "task_run.failed",
@@ -153,7 +156,8 @@ impl EventName {
             | EventName::RunRetrying
             | EventName::RunSkipped
             | EventName::RunPaused
-            | EventName::RunResumed => "run",
+            | EventName::RunResumed
+            | EventName::RunReportRejected => "run",
             EventName::TaskRunRunning
             | EventName::TaskRunCompleted
             | EventName::TaskRunFailed
@@ -194,6 +198,7 @@ impl EventName {
             EventName::RunSkipped => "The run ended Skipped: `on_overlap=\"skip\"`, a backfill value already done, a catch-up drop, a fire a person skipped (`reason` `user`), or an upstream run skipped that way (`reason` `upstream`)",
             EventName::RunPaused => "The run is waiting on `wait_for_input`",
             EventName::RunResumed => "The run was answered and its next attempt scheduled",
+            EventName::RunReportRejected => "The store refused one event of an engine's report; the rest of that report still applied",
             EventName::TaskRunRunning => "The task started",
             EventName::TaskRunCompleted => "The task returned",
             EventName::TaskRunFailed => "The task raised or timed out (after its retries)",
@@ -221,6 +226,7 @@ impl EventName {
     /// The payload keys the emit site sets, in the order the reference lists them.
     pub fn payload_fields(self) -> &'static [&'static str] {
         match self {
+            EventName::RunReportRejected => &["seq", "kind", "reason"],
             EventName::RunLate => &[
                 "state",
                 "state_type",
@@ -477,6 +483,7 @@ mod tests {
             "run.skipped",
             "run.paused",
             "run.resumed",
+            "run.report_rejected",
             "task_run.running",
             "task_run.completed",
             "task_run.failed",

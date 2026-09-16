@@ -429,9 +429,15 @@ impl Client {
         })
     }
 
-    fn begin_run(&self, run_id: i64) {
+    /// Start buffering for a run, continuing from the sequence the store has
+    /// already recorded. A report at or below that number is treated as a
+    /// redelivery and skipped, so an engine that began at zero for a run
+    /// someone else reported on would have its whole report discarded.
+    #[pyo3(signature = (run_id, start_seq=0))]
+    fn begin_run(&self, run_id: i64, start_seq: i64) {
         let mut runs = self.inner.runs.lock().unwrap_or_else(|p| p.into_inner());
-        runs.entry(run_id).or_default();
+        let buf = runs.entry(run_id).or_default();
+        buf.next_seq = buf.next_seq.max(start_seq);
     }
 
     /// Flush and forget a run's buffer.
@@ -481,7 +487,7 @@ impl Client {
         })
     }
 
-    #[pyo3(signature = (run_id, external_id, name, task_key, dynamic_key, parents=None))]
+    #[pyo3(signature = (run_id, external_id, name, task_key, dynamic_key, parents=None, pass_=0))]
     fn task_run_created(
         &self,
         run_id: i64,
@@ -490,6 +496,7 @@ impl Client {
         task_key: String,
         dynamic_key: String,
         parents: Option<Vec<String>>,
+        pass_: i64,
     ) -> PyResult<()> {
         let ext = Id::parse(external_id).ok_or_else(|| PyValueError::new_err("bad external id"))?;
         let parents: Vec<Id> = parents
@@ -508,6 +515,7 @@ impl Client {
             task_key,
             dynamic_key,
             parents,
+            pass: pass_,
         });
         Ok(())
     }

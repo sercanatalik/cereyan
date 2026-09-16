@@ -279,7 +279,9 @@ impl AppState {
             self.timer.remove_run_events(run_id);
             self.supervisor.ensure_capacity(self);
         }
-        if run.state.state_type == StateType::Cancelled {
+        if run.state.is_terminal() {
+            // The answers belong to this run's questions and nothing asks them
+            // again once it has ended.
             let _ = self.store.kv_delete(&run_input_key(run_id));
         }
         self.publish_run(&run);

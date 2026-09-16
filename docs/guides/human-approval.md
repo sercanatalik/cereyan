@@ -42,7 +42,7 @@ done = served.wait_run(run["id"])
 assert done["state"]["type"] == "Completed"
 ```
 
-`POST /api/runs/{id}/resume` with `{"input": ...}`, `Client.resume`, and the MCP `resume_run` tool do the same. `GET /api/runs/{id}/input` returns the stored answer. Resuming a run that is not paused answers 409.
+`POST /api/runs/{id}/resume` with `{"input": ...}`, `Client.resume`, and the MCP `resume_run` tool do the same: each sends only the answer, and the server stores it against the question the run is waiting on. `GET /api/runs/{id}/input` returns that pending question and the answers given so far, and `?index=` returns one answer. Resuming a run that is not paused answers 409.
 
 ## What happens on resume
 
@@ -64,7 +64,11 @@ def nobody_answered(event, run):
 
 ## Several questions
 
-Each `wait_for_input` call in a flow pauses in turn; the stored answer belongs to the attempt that asked, so a flow can ask, resume, and ask again.
+Each `wait_for_input` call in a flow pauses in turn, and a flow can ask, resume, and ask again. Questions are numbered in the order the body reaches them, and an answer is stored against the question it answered, so the second question waits for its own answer instead of receiving the first one. Two questions that use the same words are still two questions.
+
+An answer is used only while the prompt at that position still matches the one it was given for. Edit the flow between a pause and a resume so that a different question now sits at that position, and the run asks it rather than handing over an answer meant for something else. A prompt built from a value that changes between executions — a timestamp, say — will therefore ask again, so keep prompts stable for the same question.
+
+`wait_for_input` belongs in the flow body. Pausing works by raising out of the body, so a call from a task submitted with `submit` or `map` raises `CereyanError` instead of pausing the run.
 
 ## Offline
 

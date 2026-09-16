@@ -278,6 +278,7 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
 | `id` | path | integer (int64) | yes |  |
+| `pass` | query | integer or null (int64) | no | One execution of the run's body: 0 the first time, the next after a resume or an in-process flow retry. |
 
 | Status | Body |
 |---|---|
@@ -288,10 +289,11 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
 | `id` | path | integer (int64) | yes |  |
+| `index` | query | integer or null (int64) | no | Which question: 0 is the first `wait_for_input` call of the body. |
 
 | Status | Body |
 |---|---|
-| 200 | {input: <json>} or {input: null} when nothing was stored |
+| 200 | With index: {answer: {prompt, input}} or {answer: null}. Without: the pending question, every answer given, and {input} for the first |
 | 404 | no body |
 
 ### `GET /api/runs/{id}/logs`
@@ -327,6 +329,7 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
 | `id` | path | integer (int64) | yes |  |
+| `pass` | query | integer or null (int64) | no | One execution of the run's body: 0 the first time, the next after a resume or an in-process flow retry. |
 
 | Status | Body |
 |---|---|
@@ -353,6 +356,7 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
 | `run_id` | query | integer or null (int64) | no |  |
+| `pass` | query | integer or null (int64) | no | Only task runs of this execution of the run's body. |
 | `project` | query | string or null | no |  |
 | `flow` | query | string or null | no |  |
 | `state_type` | query | string or null | no |  |
@@ -1647,6 +1651,7 @@ Row counts for the Data tab and the reset dialog.
 | `id` | integer (int64) | yes |  |
 | `name` | string | yes |  |
 | `parents` | [`Id`](#id)[] | no | External ids of task runs this one waited on (futures and wait_for). |
+| `pass` | integer (int64) | no | Which execution of the run's body created this task run: 0 for the first, the next for a resume or an in-process flow retry. Dynamic keys restart with each pass, so the pass tells repeated calls apart. |
 | `project` | string | no |  |
 | `run_id` | integer (int64) | yes |  |
 | `run_name` | string | no |  |
@@ -1745,8 +1750,10 @@ Work handed to an engine.
 | `kind` | string | no | `run`, `hooks`, or `bulk_complete`. |
 | `options` | object | yes |  |
 | `parameters` | object | yes |  |
+| `pass` | integer (int64) | no | Which execution of the run's body this is: 0 the first time, the next after a resume. The engine counts its own retries up from here and reports it with every task run it creates. |
 | `payload` | object | no |  |
 | `project` | string | yes |  |
+| `report_seq` | integer (int64) | no | The last report sequence the store recorded for this run. A fresh engine process buffers from zero, and the store skips any event at or below the run's sequence as a redelivery, so an engine picking up a run someone else already reported on has to continue that count rather than restart it. Without this a resumed run's whole report was silently dropped. |
 | `run_id` | integer (int64) | yes |  |
 | `run_name` | string | yes |  |
 

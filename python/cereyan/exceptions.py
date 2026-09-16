@@ -4,11 +4,14 @@ from __future__ import annotations
 class RunPaused(BaseException):
     """Raised by ``wait_for_input`` to end the attempt while the run waits."""
 
-    def __init__(self, prompt: str, schema: dict | None, task_run: str | None) -> None:
+    def __init__(self, prompt: str, schema: dict | None, task_run: str | None, index: int = 0) -> None:
         super().__init__(prompt)
         self.prompt = prompt
         self.schema = schema
         self.task_run = task_run
+        #: Which question of this execution of the body is waiting: 0 is the
+        #: first. The answer is stored against it, so asking twice works.
+        self.index = index
 
 
 class CereyanError(Exception):

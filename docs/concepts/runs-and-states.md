@@ -56,7 +56,11 @@ Inside the run, `cereyan.runtime.run`, `cereyan.runtime.task_run`, and `cereyan.
 
 ## Attempts
 
-Retries, crash reruns, and resumes after a pause are new attempts of the same run: the run keeps its id and history, `failure_count` or `crash_count` grows, and the task runs of the new attempt are recorded alongside the old ones. Tasks marked `cache=INPUTS` return their stored result on a replay instead of executing again.
+A run's body can execute more than once, and each execution is a **pass**. The first is pass 0; a retry and a resume after a pause are the next. Every pass numbers its task runs from zero, so the same call keeps its dynamic key in each one — `fetch-0` in pass 0 is the same call as `fetch-0` in pass 1 — and the task runs of a later pass are recorded alongside the earlier ones rather than replacing them. `failure_count` grows with retries. Tasks marked `cache=INPUTS` return their stored result on a replay instead of executing again.
+
+A **crash rerun** is not a pass: the supervisor creates a new run linked to the crashed one through `parent_run_id`, with `created_by` of `crash:<id>` and `attempt` one higher, so a crash chain is a chain of runs rather than one run executed twice.
+
+`GET /api/runs/{id}/tasks` returns every pass, and `?pass=` narrows it to one. The run page shows the latest pass and offers a switcher when there is more than one.
 
 ## Finding runs
 

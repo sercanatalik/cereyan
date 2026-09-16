@@ -432,6 +432,7 @@ impl Store {
         name: &str,
         task_key: &str,
         dynamic_key: &str,
+        pass: i64,
     ) -> Result<(i64, Id)> {
         self.create_task_run_full(writer::CreateTaskRun {
             run_id,
@@ -440,6 +441,7 @@ impl Store {
             dynamic_key: dynamic_key.into(),
             external_id: None,
             parents: Vec::new(),
+            pass,
         })
     }
 

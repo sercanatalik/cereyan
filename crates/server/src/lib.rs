@@ -8,6 +8,7 @@ mod base_path;
 mod custom;
 mod dispatch;
 mod events;
+mod guard;
 mod index;
 pub mod mcp;
 mod process;
@@ -119,6 +120,10 @@ pub struct ServeConfig {
     /// Where a user who is not signed in goes to sign in; reported on 401s.
     #[serde(default)]
     pub login_url: Option<String>,
+    /// Host names the TCP listener answers to and accepts browser pages from,
+    /// beside IP addresses, `localhost`, and `host`.
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
 }
 
 fn default_auth_scope() -> String {
@@ -237,6 +242,7 @@ impl Server {
         custom::check_conflicts(&config.custom_routes)?;
         base_path::check(&config.base_path)?;
         auth::check(&config, authenticator.is_some())?;
+        guard::check_config(&config)?;
         if authenticator.is_some() && config.token.is_none() {
             config.token = Some(auth::generate_token());
         }

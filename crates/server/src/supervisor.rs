@@ -209,6 +209,18 @@ pub struct WorkItem {
     #[schema(value_type = Object)]
     pub options: serde_json::Value,
     pub cancel_requested: bool,
+    /// Which execution of the run's body this is: 0 the first time, the next
+    /// after a resume. The engine counts its own retries up from here and
+    /// reports it with every task run it creates.
+    #[serde(default)]
+    pub pass: i64,
+    /// The last report sequence the store recorded for this run. A fresh engine
+    /// process buffers from zero, and the store skips any event at or below the
+    /// run's sequence as a redelivery, so an engine picking up a run someone
+    /// else already reported on has to continue that count rather than restart
+    /// it. Without this a resumed run's whole report was silently dropped.
+    #[serde(default)]
+    pub report_seq: i64,
     #[serde(default)]
     #[schema(value_type = Object)]
     pub payload: serde_json::Value,

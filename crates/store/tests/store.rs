@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
-use cereyan_core::{State, StateType};
-use cereyan_store::{ListRunsFilter, NewLog, Store, StoreError};
+use cereyan_core::{new_id, State, StateType};
+use cereyan_store::{ListRunsFilter, NewLog, ReportEvent, Store, StoreError};
 use tempfile::TempDir;
 
 fn open(dir: &TempDir) -> Store {
@@ -156,6 +156,116 @@ fn migration_upgrade_from_empty_db() {
 }
 
 #[test]
+fn one_rejected_event_does_not_discard_its_report() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+    let f = flow(&store, "etl", "daily");
+    let (run, _) = store.create_run(f, "one", "{}", "[]").unwrap();
+    let first = new_id();
+    let created = |seq: i64, external_id| ReportEvent::TaskRunCreated {
+        seq,
+        external_id,
+        name: "load".into(),
+        task_key: "pipeline.load".into(),
+        dynamic_key: "load-0".into(),
+        parents: Vec::new(),
+        pass: 0,
+    };
+    // Two creations claiming one (run, pass, dynamic key). The second is
+    // refused, and the event after it still applies: a whole report used to be
+    // discarded for one bad row, which is how an execution went missing.
+    let events = vec![
+        created(1, first),
+        created(2, new_id()),
+        ReportEvent::TaskRunTransition {
+            seq: 3,
+            external_id: first,
+            state: State::new(StateType::Pending),
+            force: false,
+        },
+    ];
+    let outcome = store.apply_report(run, events.clone()).unwrap();
+    assert_eq!(outcome.rejected.len(), 1);
+    assert_eq!(outcome.rejected[0].seq, 2);
+    assert_eq!(outcome.rejected[0].kind, "task_run_created");
+    let tasks = store.task_runs_by_run(run, None).unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].state.state_type, StateType::Pending);
+
+    // Redelivery of the same batch changes nothing.
+    let again = store.apply_report(run, events).unwrap();
+    assert_eq!(again.applied, 0);
+    assert_eq!(again.skipped, 3);
+    assert!(again.rejected.is_empty());
+    assert_eq!(store.task_runs_by_run(run, None).unwrap().len(), 1);
+}
+
+#[test]
+fn task_run_pass_migration_keeps_history() {
+    let dir = TempDir::new().unwrap();
+    {
+        // A store as an earlier release wrote it: schema 9, no `pass` column.
+        let conn = rusqlite::Connection::open(dir.path().join("db.sqlite")).unwrap();
+        for sql in [
+            include_str!("../migrations/0001_init.sql"),
+            include_str!("../migrations/0002_server.sql"),
+            include_str!("../migrations/0003_scheduling.sql"),
+            include_str!("../migrations/0004_observability.sql"),
+            include_str!("../migrations/0005_counts_index.sql"),
+            include_str!("../migrations/0006_expectations.sql"),
+            include_str!("../migrations/0007_flow_group.sql"),
+            include_str!("../migrations/0008_schedule_skips.sql"),
+            include_str!("../migrations/0009_event_flow_index.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO flow (id, external_id, project, name, module, source_dir, created_at, last_seen_at)
+                 VALUES (1, randomblob(16), 'etl', 'daily', 'pipeline', '.', 0, 0);
+             INSERT INTO run (id, external_id, flow_id, name, created_at)
+                 VALUES (1, randomblob(16), 1, 'one', 0);
+             INSERT INTO task_run (id, external_id, run_id, name, task_key, dynamic_key, created_at)
+                 VALUES (7, randomblob(16), 1, 'load', 'pipeline.load', 'load-0', 0);
+             INSERT INTO task_run_state (task_run_id, type, name, timestamp)
+                 VALUES (7, 'Completed', 'Completed', 0);
+             PRAGMA user_version = 9;",
+        )
+        .unwrap();
+    }
+
+    let store = open(&dir);
+    let tasks = store.task_runs_by_run(1, None).unwrap();
+    assert_eq!(tasks.len(), 1);
+    // Ids carry over: logs, artifacts and recorded states all point at them.
+    assert_eq!(tasks[0].id, 7);
+    assert_eq!(tasks[0].dynamic_key, "load-0");
+    assert_eq!(tasks[0].pass, 0);
+    // Dropping the old table with foreign keys enforced would have cascaded
+    // into task_run_state and taken every recorded state with it.
+    let states: i64 = store
+        .with_reader(|c| {
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM task_run_state WHERE task_run_id = 7",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(states, 1);
+
+    // The same call in a later pass is a second task run, not a conflict.
+    store
+        .create_task_run(1, "load", "pipeline.load", "load-0", 1)
+        .unwrap();
+    assert_eq!(store.task_runs_by_run(1, Some(1)).unwrap().len(), 1);
+    assert_eq!(store.task_runs_by_run(1, None).unwrap().len(), 2);
+    // Twice in one pass is still refused.
+    assert!(store
+        .create_task_run(1, "load", "pipeline.load", "load-0", 1)
+        .is_err());
+}
+
+#[test]
 fn transitions_apply_rules_and_counters() {
     let dir = TempDir::new().unwrap();
     let store = open(&dir);
@@ -241,10 +351,10 @@ fn task_runs_and_logs() {
     let f = flow(&store, "etl", "daily");
     let (run, _) = store.create_run(f, "one", "{}", "[]").unwrap();
     let (t0, _) = store
-        .create_task_run(run, "load", "pipeline.load", "load-0")
+        .create_task_run(run, "load", "pipeline.load", "load-0", 0)
         .unwrap();
     let (t1, _) = store
-        .create_task_run(run, "load", "pipeline.load", "load-1")
+        .create_task_run(run, "load", "pipeline.load", "load-1", 0)
         .unwrap();
     store
         .transition_task_run(t0, State::new(StateType::Pending), false)
@@ -255,7 +365,7 @@ fn task_runs_and_logs() {
     store
         .transition_task_run(t0, State::new(StateType::Completed), false)
         .unwrap();
-    let tasks = store.task_runs_by_run(run).unwrap();
+    let tasks = store.task_runs_by_run(run, None).unwrap();
     assert_eq!(tasks.len(), 2);
     assert_eq!(tasks[0].id, t0);
     assert_eq!(tasks[0].state.state_type, StateType::Completed);

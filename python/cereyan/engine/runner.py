@@ -59,6 +59,9 @@ class RunInfo:
     id: int
     external_id: str
     name: str
+    #: Which execution of the run's body this is; the server counts it from the
+    #: task runs already recorded, so a resumed run continues where it left off.
+    pass_: int = 0
 
 
 def configure(home: str | None) -> None:
@@ -247,6 +250,7 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
         parameters=values,
         backend=backend,
         runner=runner,
+        pass_=run.pass_,
     )
     token = context.set_run(ctx)
     handler = run_logging.install(backend, run.id)
@@ -294,6 +298,9 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
                 if attempt < flow.retries and not timed_out:
                     delay = retry_delay_for(flow.retry_delay, attempt)
                     attempt += 1
+                    # The body runs again in this process: a new pass, so its
+                    # task runs do not collide with the ones just recorded.
+                    ctx.start_pass()
                     try:
                         backend.transition_run("Scheduled", "AwaitingRetry", _error_message(exc), {"attempt": attempt, "delay": delay, "retries": flow.retries, **_failure_details(exc)})
                     except RunRejected:
@@ -553,7 +560,7 @@ def _run_task_attempts(run: context.RunContext, task, args: tuple, kwargs: dict,
 
 def _create_task_run(run: context.RunContext, task, parents: list[str]):
     dynamic_key = run.next_dynamic_key(task.name)
-    external_id, _row = run.backend.create_task_run(task.name, task.key, dynamic_key, parents)
+    external_id, _row = run.backend.create_task_run(task.name, task.key, dynamic_key, parents, run.pass_)
     run.backend.transition_task_run(external_id, "Pending")
     return external_id, dynamic_key
 

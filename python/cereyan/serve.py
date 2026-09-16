@@ -4,6 +4,7 @@ them, and run the server in this process."""
 from __future__ import annotations
 
 import importlib
+import ipaddress
 import json
 import os
 import platform
@@ -295,6 +296,45 @@ def resolve_login_url(directory: str, login_url: str | None = None, app_login_ur
     return _login_url(directory, login_url, app_login_url)[0]
 
 
+_HOST_LABEL = re.compile(r"[a-z0-9-]+")
+
+
+def _valid_allowed_host(host: str) -> bool:
+    bare = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    try:
+        ipaddress.ip_address(bare)
+        return True
+    except ValueError:
+        return all(_HOST_LABEL.fullmatch(label) for label in host.split("."))
+
+
+def _allowed_hosts(directory: str, allowed_hosts: list[str] | None = None,
+                   app_allowed_hosts: list[str] | tuple[str, ...] | None = None) -> tuple[list[str], dict]:
+    env = [item for item in os.environ.get("CEREYAN_ALLOWED_HOSTS", "").split(",") if item.strip()]
+    value, source = _first((
+        (list(allowed_hosts) if allowed_hosts else None, "flag", "--allowed-host"),
+        (env or None, "env", "CEREYAN_ALLOWED_HOSTS"),
+        (app_allowed_hosts, "app", "app.serve(allowed_hosts=)"),
+        (server_settings(directory).get("allowed_hosts"), "toml", "[server] allowed_hosts"),
+    ), [])
+    if not isinstance(value, (list, tuple)) or not all(isinstance(item, str) for item in value):
+        raise CereyanError(f"invalid allowed_hosts {value!r} from {_describe(source)}: expected a list of host names")
+    hosts = [item.strip().lower() for item in value]
+    for host in hosts:
+        if not _valid_allowed_host(host):
+            raise CereyanError(
+                f"invalid allowed_hosts entry {host!r} from {_describe(source)}: "
+                "expected a host name or an IP address, without a scheme, port, or path"
+            )
+    return hosts, source
+
+
+def resolve_allowed_hosts(directory: str, allowed_hosts: list[str] | None = None,
+                          app_allowed_hosts: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    """Flag, environment, app.serve(), cereyan.toml. Empty unless set; the first source wins whole."""
+    return _allowed_hosts(directory, allowed_hosts, app_allowed_hosts)[0]
+
+
 def _file_sources(directory: str, settings: dict, toml_defaults: dict) -> dict[str, dict]:
     """Sources of the settings only cereyan.toml can set."""
 
@@ -344,11 +384,13 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
           enable_auth: bool | None = None, app_enable_auth: bool | None = None,
           auth_cookie: str | None = None, app_auth_cookie: str | None = None,
           auth_scope: str | None = None, app_auth_scope: str | None = None,
-          login_url: str | None = None, app_login_url: str | None = None) -> int:
+          login_url: str | None = None, app_login_url: str | None = None,
+          allowed_hosts: list[str] | None = None,
+          app_allowed_hosts: list[str] | tuple[str, ...] | None = None) -> int:
     """Serve ``directory``. ``host``, ``port``, ``token``, ``socket``, ``base_path``,
-    ``enable_auth``, ``auth_cookie``, ``auth_scope``, and ``login_url`` are the CLI
-    flags; the ``app_*`` values come from ``app.serve()`` and rank below the
-    environment."""
+    ``enable_auth``, ``auth_cookie``, ``auth_scope``, ``login_url``, and
+    ``allowed_hosts`` are the CLI flags; the ``app_*`` values come from
+    ``app.serve()`` and rank below the environment."""
     directory = os.path.abspath(directory or os.getcwd())
     if not os.path.isdir(directory):
         raise CereyanError(f"{directory} is not a directory")
@@ -362,6 +404,9 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     resolved_auth_cookie, sources["server.auth_cookie"] = _auth_cookie(directory, auth_cookie, app_auth_cookie)
     resolved_auth_scope, sources["server.auth_scope"] = _auth_scope(directory, auth_scope, app_auth_scope)
     resolved_login_url, sources["server.login_url"] = _login_url(directory, login_url, app_login_url)
+    resolved_allowed_hosts, sources["server.allowed_hosts"] = _allowed_hosts(
+        directory, allowed_hosts, app_allowed_hosts
+    )
     if resolved_auth_scope == "all" and not resolved_enable_auth:
         raise CereyanError(
             "auth_scope 'all' requires enable_auth: without an authenticator the UI could not load its token prompt"
@@ -472,6 +517,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "auth_cookie": resolved_auth_cookie,
         "auth_scope": resolved_auth_scope,
         "login_url": resolved_login_url,
+        "allowed_hosts": resolved_allowed_hosts,
         "open_browser": bool(should_open),
         "sources": sources,
         "python_version": platform.python_version(),

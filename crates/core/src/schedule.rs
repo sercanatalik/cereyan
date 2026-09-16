@@ -227,10 +227,7 @@ impl Schedule {
                     for steps in (first..).take(4) {
                         let date = local_anchor.date_naive() + Duration::days(steps * days);
                         let naive = date.and_time(local_anchor.time());
-                        candidate = tz
-                            .from_local_datetime(&naive)
-                            .earliest()
-                            .unwrap_or(candidate);
+                        candidate = local_to_instant(tz, naive).unwrap_or(candidate);
                         if candidate > after_local {
                             return Ok(Some(candidate.with_timezone(&Utc)));
                         }
@@ -272,6 +269,29 @@ impl Schedule {
         }
         Ok(out)
     }
+}
+
+/// The instant a local time names in `tz`.
+///
+/// Daylight saving removes some local times, and one that does not exist has
+/// no instant: the fire belongs at the first instant after the gap, which is
+/// what cron already does. The shift is not always an hour — Lord Howe moves
+/// thirty minutes — so the boundary is found by stepping rather than assumed.
+/// The search is bounded, so an unexpected zone cannot spin; a local time that
+/// happens twice resolves to the earlier instant, so a run happens once.
+fn local_to_instant(tz: Tz, naive: chrono::NaiveDateTime) -> Option<DateTime<Tz>> {
+    if let Some(dt) = tz.from_local_datetime(&naive).earliest() {
+        return Some(dt);
+    }
+    for minutes in 1..=180 {
+        if let Some(dt) = tz
+            .from_local_datetime(&(naive + Duration::minutes(minutes)))
+            .earliest()
+        {
+            return Some(dt);
+        }
+    }
+    None
 }
 
 fn parse_cron(expr: &str, day_or: bool) -> Result<croner::Cron, ScheduleError> {
@@ -371,6 +391,106 @@ mod tests {
         };
         let next = s.next_after(anchor).unwrap().unwrap();
         assert_eq!(next, utc("2026-03-08T13:00:00Z"));
+    }
+
+    #[test]
+    fn daily_interval_across_the_spring_forward_gap() {
+        // 02:30 New York on 2026-03-07 (EST, UTC-5) is 07:30Z. On 2026-03-08
+        // the clocks jump 02:00 -> 03:00, so 02:30 does not exist that day and
+        // the fire belongs at the first instant after the gap: 03:00 EDT, 07:00Z.
+        let anchor = utc("2026-03-07T07:30:00Z");
+        let s = Schedule::Interval {
+            interval: 86_400.0,
+            anchor: Some(to_micros(anchor)),
+            timezone: Some("America/New_York".into()),
+        };
+        let next = s.next_after(anchor).unwrap().unwrap();
+        assert_eq!(next, utc("2026-03-08T07:00:00Z"));
+        // The day after the gap is back to the anchor's wall-clock time.
+        let after = s.next_after(next).unwrap().unwrap();
+        assert_eq!(after, utc("2026-03-09T06:30:00Z"));
+    }
+
+    #[test]
+    fn daily_interval_across_a_half_hour_gap() {
+        // Lord Howe moves thirty minutes: 2026-10-04 goes 02:00 -> 02:30, so a
+        // 02:15 schedule has no time that day. A fix that assumed an hour
+        // would land at 03:15 instead of at the end of the gap.
+        let anchor = utc("2026-10-02T15:45:00Z"); // 2026-10-03 02:15 local
+        let tz: Tz = "Australia/Lord_Howe".parse().unwrap();
+        let s = Schedule::Interval {
+            interval: 86_400.0,
+            anchor: Some(to_micros(anchor)),
+            timezone: Some("Australia/Lord_Howe".into()),
+        };
+        let local = s.next_after(anchor).unwrap().unwrap().with_timezone(&tz);
+        assert_eq!(local.date_naive().to_string(), "2026-10-04");
+        assert_eq!(local.time().to_string(), "02:30:00");
+    }
+
+    #[test]
+    fn daily_interval_fires_once_when_the_clocks_go_back() {
+        // 2026-11-01 New York goes 02:00 -> 01:00, so 01:30 happens twice; the
+        // run belongs at the earlier one, and once.
+        let anchor = utc("2026-10-31T05:30:00Z"); // 01:30 EDT
+        let tz: Tz = "America/New_York".parse().unwrap();
+        let s = Schedule::Interval {
+            interval: 86_400.0,
+            anchor: Some(to_micros(anchor)),
+            timezone: Some("America/New_York".into()),
+        };
+        let first = s.next_after(anchor).unwrap().unwrap();
+        assert_eq!(first, utc("2026-11-01T05:30:00Z"));
+        let second = s.next_after(first).unwrap().unwrap();
+        assert_eq!(
+            second.with_timezone(&tz).date_naive().to_string(),
+            "2026-11-02",
+            "the next fire is the following day, not the second 01:30"
+        );
+    }
+
+    #[test]
+    fn cron_and_interval_agree_across_the_gap() {
+        // The interval rule exists because cron already had one; if they ever
+        // disagree about the same wall-clock time, one of them is wrong.
+        let after = utc("2026-03-07T07:30:00Z");
+        let cron = Schedule::Cron {
+            cron: "30 2 * * *".into(),
+            timezone: Some("America/New_York".into()),
+            day_or: true,
+        };
+        let interval = Schedule::Interval {
+            interval: 86_400.0,
+            anchor: Some(to_micros(after)),
+            timezone: Some("America/New_York".into()),
+        };
+        assert_eq!(
+            cron.next_after(after).unwrap().unwrap(),
+            interval.next_after(after).unwrap().unwrap()
+        );
+    }
+
+    #[test]
+    fn fires_between_does_not_skip_the_gap_day() {
+        // The look-ahead, the upcoming list and the projected fires all go
+        // through fires_between, which is why the missing day was invisible.
+        let anchor = utc("2026-03-06T07:30:00Z"); // 02:30 EST on the 6th
+        let tz: Tz = "America/New_York".parse().unwrap();
+        let s = Schedule::Interval {
+            interval: 86_400.0,
+            anchor: Some(to_micros(anchor)),
+            timezone: Some("America/New_York".into()),
+        };
+        let days: Vec<String> = s
+            .fires_between(anchor, utc("2026-03-10T12:00:00Z"), 10)
+            .unwrap()
+            .iter()
+            .map(|f| f.with_timezone(&tz).date_naive().to_string())
+            .collect();
+        assert_eq!(
+            days,
+            ["2026-03-07", "2026-03-08", "2026-03-09", "2026-03-10"]
+        );
     }
 
     #[test]

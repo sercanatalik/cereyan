@@ -27,7 +27,7 @@ fn fixtures() -> (tempfile::TempDir, cereyan_core::Run, cereyan_core::TaskRun) {
         )
         .unwrap();
     let (task_id, _) = store
-        .create_task_run(run_id, "noop", "noop", "noop-0")
+        .create_task_run(run_id, "noop", "noop", "noop-0", 0)
         .unwrap();
     for t in [StateType::Pending, StateType::Running, StateType::Completed] {
         store.transition_run(run_id, State::new(t), false).unwrap();

@@ -15,7 +15,14 @@ export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   server: {
     port: 5173,
-    proxy: { "/api": { target: process.env.CEREYAN_URL ?? "http://127.0.0.1:4200", changeOrigin: true } },
+    proxy: {
+      "/api": {
+        target: process.env.CEREYAN_URL ?? "http://127.0.0.1:4200",
+        changeOrigin: true,
+        // The server refuses requests from other origins, and this page's origin is the dev server's.
+        configure: (proxy) => proxy.on("proxyReq", (req) => req.removeHeader("origin")),
+      },
+    },
   },
   build: { outDir: "dist", emptyOutDir: true, sourcemap: false },
   test: {

@@ -1910,6 +1910,13 @@ export interface components {
             name: string;
             /** @description External ids of task runs this one waited on (futures and wait_for). */
             parents?: components["schemas"]["Id"][];
+            /**
+             * Format: int64
+             * @description Which execution of the run's body created this task run: 0 for the
+             *     first, the next for a resume or an in-process flow retry. Dynamic keys
+             *     restart with each pass, so the pass tells repeated calls apart.
+             */
+            pass?: number;
             project?: string;
             /** Format: int64 */
             run_id: number;
@@ -2000,8 +2007,24 @@ export interface components {
             kind?: string;
             options: Record<string, never>;
             parameters: Record<string, never>;
+            /**
+             * Format: int64
+             * @description Which execution of the run's body this is: 0 the first time, the next
+             *     after a resume. The engine counts its own retries up from here and
+             *     reports it with every task run it creates.
+             */
+            pass?: number;
             payload?: Record<string, never>;
             project: string;
+            /**
+             * Format: int64
+             * @description The last report sequence the store recorded for this run. A fresh engine
+             *     process buffers from zero, and the store skips any event at or below the
+             *     run's sequence as a redelivery, so an engine picking up a run someone
+             *     else already reported on has to continue that count rather than restart
+             *     it. Without this a resumed run's whole report was silently dropped.
+             */
+            report_seq?: number;
             /** Format: int64 */
             run_id: number;
             run_name: string;
@@ -3249,7 +3272,13 @@ export interface operations {
     };
     run_graph: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description One execution of the run's body: 0 the first time, the next after a
+                 *     resume or an in-process flow retry.
+                 */
+                pass?: number | null;
+            };
             header?: never;
             path: {
                 id: number;
@@ -3270,7 +3299,10 @@ export interface operations {
     };
     run_input: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Which question: 0 is the first `wait_for_input` call of the body. */
+                index?: number | null;
+            };
             header?: never;
             path: {
                 id: number;
@@ -3279,7 +3311,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description {input: <json>} or {input: null} when nothing was stored */
+            /** @description With index: {answer: {prompt, input}} or {answer: null}. Without: the pending question, every answer given, and {input} for the first */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -3361,7 +3393,13 @@ export interface operations {
     };
     run_tasks: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description One execution of the run's body: 0 the first time, the next after a
+                 *     resume or an in-process flow retry.
+                 */
+                pass?: number | null;
+            };
             header?: never;
             path: {
                 id: number;
@@ -3726,6 +3764,8 @@ export interface operations {
                 flow?: string | null;
                 limit?: number | null;
                 name?: string | null;
+                /** @description Only task runs of this execution of the run's body. */
+                pass?: number | null;
                 project?: string | null;
                 run_id?: number | null;
                 start_after?: number | null;

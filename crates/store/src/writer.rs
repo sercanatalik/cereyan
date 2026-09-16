@@ -169,6 +169,8 @@ pub struct CreateTaskRun {
     pub dynamic_key: String,
     pub external_id: Option<Id>,
     pub parents: Vec<Id>,
+    /// Which execution of the run's body this task run belongs to.
+    pub pass: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +199,10 @@ pub enum ReportEvent {
         dynamic_key: String,
         #[serde(default)]
         parents: Vec<Id>,
+        /// Absent in reports written before passes existed, which behaved as
+        /// though every task run belonged to the first execution.
+        #[serde(default)]
+        pass: i64,
     },
     TaskRunTransition {
         seq: i64,
@@ -258,6 +264,19 @@ pub struct ReportOutcome {
     pub event_ids: Vec<i64>,
     /// Artifacts inserted or updated by this batch.
     pub artifact_ids: Vec<i64>,
+    /// Events the store refused while the rest of the batch applied. The server
+    /// records one `run.report_rejected` event for each, because a report that
+    /// vanished silently is how a whole execution of a run once went missing
+    /// from its history.
+    pub rejected: Vec<RejectedEvent>,
+}
+
+/// One event of a report the store would not apply.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RejectedEvent {
+    pub seq: i64,
+    pub kind: String,
+    pub reason: String,
 }
 
 pub enum WriteCommand {
@@ -994,8 +1013,8 @@ fn create_run(conn: &Connection, r: &CreateRun) -> Result<(i64, Id)> {
 fn create_task_run(conn: &Connection, t: &CreateTaskRun) -> Result<(i64, Id)> {
     let id = t.external_id.unwrap_or_else(new_id);
     conn.execute(
-        "INSERT INTO task_run (external_id, run_id, name, task_key, dynamic_key, created_at, parents)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO task_run (external_id, run_id, name, task_key, dynamic_key, created_at, parents, pass)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT (external_id) DO NOTHING",
         params![
             id.as_bytes().as_slice(),
@@ -1004,7 +1023,8 @@ fn create_task_run(conn: &Connection, t: &CreateTaskRun) -> Result<(i64, Id)> {
             t.task_key,
             t.dynamic_key,
             now_micros(),
-            serde_json::to_string(&t.parents).unwrap_or_else(|_| "[]".into())
+            serde_json::to_string(&t.parents).unwrap_or_else(|_| "[]".into()),
+            t.pass
         ],
     )?;
     let row_id: i64 = conn.query_row(
@@ -1180,6 +1200,30 @@ fn append_logs_with_map(
 
 /// Apply a batch of engine events in order, skipping any whose sequence
 /// number is not greater than the run's stored `report_seq`.
+/// Which event a rejection came from, for the message the server records.
+fn event_kind(event: &ReportEvent) -> &'static str {
+    match event {
+        ReportEvent::TaskRunCreated { .. } => "task_run_created",
+        ReportEvent::TaskRunTransition { .. } => "task_run_transition",
+        ReportEvent::Logs { .. } => "logs",
+        ReportEvent::Custom { .. } => "custom",
+        ReportEvent::Artifact { .. } => "artifact",
+    }
+}
+
+/// Whether one event can be dropped while the rest of its report applies. A
+/// constraint the engine broke concerns that event alone; a database that
+/// cannot be read or written concerns every event, and still fails the report.
+fn is_event_rejection(e: &StoreError) -> bool {
+    match e {
+        StoreError::Sqlite(rusqlite::Error::SqliteFailure(err, _)) => {
+            matches!(err.code, rusqlite::ErrorCode::ConstraintViolation)
+        }
+        StoreError::Invalid(_) | StoreError::NotFound(_) => true,
+        _ => false,
+    }
+}
+
 fn apply_report(conn: &Connection, run_id: i64, events: Vec<ReportEvent>) -> Result<ReportOutcome> {
     let mut last_seq: i64 = conn
         .query_row(
@@ -1217,136 +1261,157 @@ fn apply_report(conn: &Connection, run_id: i64, events: Vec<ReportEvent>) -> Res
             out.skipped += 1;
             continue;
         }
-        match &event {
-            ReportEvent::TaskRunCreated {
-                external_id,
-                name,
-                task_key,
-                dynamic_key,
-                parents,
-                ..
-            } => {
-                remember_before(conn, external_id, &mut before);
-                let (row_id, _) = create_task_run(
-                    conn,
-                    &CreateTaskRun {
-                        run_id,
-                        name: name.clone(),
-                        task_key: task_key.clone(),
-                        dynamic_key: dynamic_key.clone(),
-                        external_id: Some(*external_id),
-                        parents: parents.clone(),
-                    },
-                )?;
-                ext_cache.insert(*external_id, Some(row_id));
-                if !touched.contains(external_id) {
-                    touched.push(*external_id);
-                }
-            }
-            ReportEvent::TaskRunTransition {
-                external_id,
-                state,
-                force,
-                ..
-            } => {
-                remember_before(conn, external_id, &mut before);
-                let row_id = match ext_cache.get(external_id) {
-                    Some(Some(id)) => *id,
-                    _ => match task_run_id_by_external(conn, external_id)? {
-                        Some(id) => {
-                            ext_cache.insert(*external_id, Some(id));
-                            id
-                        }
-                        None => {
-                            // Unknown task run: the create event was lost; skip.
-                            last_seq = event.seq();
-                            out.skipped += 1;
-                            continue;
-                        }
-                    },
-                };
-                match transition(conn, Table::TaskRun, row_id, state.clone(), *force) {
-                    Ok(accepted) => out.task_run_states.push((*external_id, accepted)),
-                    Err(StoreError::RejectedWith { .. }) | Err(StoreError::Rejected(_)) => {
-                        // Rules already applied once (redelivery or a stale
-                        // proposal); the stored state wins.
+        // One rejected event is not a rejected report. A whole batch used to be
+        // discarded for a single bad row, which is how an entire execution of a
+        // run went missing from its history without a word anywhere.
+        let step = (|| -> Result<bool> {
+            match &event {
+                ReportEvent::TaskRunCreated {
+                    external_id,
+                    name,
+                    task_key,
+                    dynamic_key,
+                    parents,
+                    pass,
+                    ..
+                } => {
+                    remember_before(conn, external_id, &mut before);
+                    let (row_id, _) = create_task_run(
+                        conn,
+                        &CreateTaskRun {
+                            run_id,
+                            name: name.clone(),
+                            task_key: task_key.clone(),
+                            dynamic_key: dynamic_key.clone(),
+                            external_id: Some(*external_id),
+                            parents: parents.clone(),
+                            pass: *pass,
+                        },
+                    )?;
+                    ext_cache.insert(*external_id, Some(row_id));
+                    if !touched.contains(external_id) {
+                        touched.push(*external_id);
                     }
-                    Err(e) => return Err(e),
                 }
-                if !touched.contains(external_id) {
-                    touched.push(*external_id);
-                }
-            }
-            ReportEvent::Logs { logs, .. } => {
-                let n = append_logs_with_map(conn, logs, &mut ext_cache)?;
-                out.log_count += n;
-                if n > 0 {
-                    out.last_log_id = Some(conn.last_insert_rowid());
-                }
-            }
-            ReportEvent::Custom {
-                name,
-                payload,
-                task_run_external_id,
-                ..
-            } => {
-                let (resource, run_row) = run_resource(conn, run_id)?;
-                let mut related = run_related(conn, run_id)?;
-                if let Some(ext) = task_run_external_id {
-                    related.push(cereyan_core::Resource {
-                        kind: "task_run".into(),
-                        id: ext.to_string(),
-                        name: String::new(),
-                    });
-                }
-                let (eid, _) = append_event(
-                    conn,
-                    &NewEvent {
-                        name: name.clone(),
-                        run_id: Some(run_id),
-                        flow_id: run_row,
-                        payload: payload.clone(),
-                        resource,
-                        related,
-                    },
-                )?;
-                out.event_ids.push(eid);
-            }
-            ReportEvent::Artifact {
-                external_id,
-                task_run_external_id,
-                artifact_kind,
-                key,
-                data,
-                ..
-            } => {
-                let task_run_id = match task_run_external_id {
-                    Some(ext) => match ext_cache.get(ext) {
-                        Some(v) => *v,
-                        None => {
-                            let v = task_run_id_by_external(conn, ext)?;
-                            ext_cache.insert(*ext, v);
-                            v
+                ReportEvent::TaskRunTransition {
+                    external_id,
+                    state,
+                    force,
+                    ..
+                } => {
+                    remember_before(conn, external_id, &mut before);
+                    let row_id = match ext_cache.get(external_id) {
+                        Some(Some(id)) => *id,
+                        _ => match task_run_id_by_external(conn, external_id)? {
+                            Some(id) => {
+                                ext_cache.insert(*external_id, Some(id));
+                                id
+                            }
+                            None => {
+                                // Unknown task run: the create event was lost; skip.
+                                out.skipped += 1;
+                                return Ok(false);
+                            }
+                        },
+                    };
+                    match transition(conn, Table::TaskRun, row_id, state.clone(), *force) {
+                        Ok(accepted) => out.task_run_states.push((*external_id, accepted)),
+                        Err(StoreError::RejectedWith { .. }) | Err(StoreError::Rejected(_)) => {
+                            // Rules already applied once (redelivery or a stale
+                            // proposal); the stored state wins.
                         }
-                    },
-                    None => None,
-                };
-                let aid = upsert_artifact(
-                    conn,
-                    &UpsertArtifact {
-                        run_id,
-                        task_run_id,
-                        kind: artifact_kind.clone(),
-                        key: key.clone(),
-                        data: data.to_string(),
-                        external_id: Some(*external_id),
-                    },
-                )?;
-                out.artifact_ids.push(aid);
+                        Err(e) => return Err(e),
+                    }
+                    if !touched.contains(external_id) {
+                        touched.push(*external_id);
+                    }
+                }
+                ReportEvent::Logs { logs, .. } => {
+                    let n = append_logs_with_map(conn, logs, &mut ext_cache)?;
+                    out.log_count += n;
+                    if n > 0 {
+                        out.last_log_id = Some(conn.last_insert_rowid());
+                    }
+                }
+                ReportEvent::Custom {
+                    name,
+                    payload,
+                    task_run_external_id,
+                    ..
+                } => {
+                    let (resource, run_row) = run_resource(conn, run_id)?;
+                    let mut related = run_related(conn, run_id)?;
+                    if let Some(ext) = task_run_external_id {
+                        related.push(cereyan_core::Resource {
+                            kind: "task_run".into(),
+                            id: ext.to_string(),
+                            name: String::new(),
+                        });
+                    }
+                    let (eid, _) = append_event(
+                        conn,
+                        &NewEvent {
+                            name: name.clone(),
+                            run_id: Some(run_id),
+                            flow_id: run_row,
+                            payload: payload.clone(),
+                            resource,
+                            related,
+                        },
+                    )?;
+                    out.event_ids.push(eid);
+                }
+                ReportEvent::Artifact {
+                    external_id,
+                    task_run_external_id,
+                    artifact_kind,
+                    key,
+                    data,
+                    ..
+                } => {
+                    let task_run_id = match task_run_external_id {
+                        Some(ext) => match ext_cache.get(ext) {
+                            Some(v) => *v,
+                            None => {
+                                let v = task_run_id_by_external(conn, ext)?;
+                                ext_cache.insert(*ext, v);
+                                v
+                            }
+                        },
+                        None => None,
+                    };
+                    let aid = upsert_artifact(
+                        conn,
+                        &UpsertArtifact {
+                            run_id,
+                            task_run_id,
+                            kind: artifact_kind.clone(),
+                            key: key.clone(),
+                            data: data.to_string(),
+                            external_id: Some(*external_id),
+                        },
+                    )?;
+                    out.artifact_ids.push(aid);
+                }
             }
+            Ok(true)
+        })();
+        match step {
+            Ok(true) => {
+                last_seq = event.seq();
+                out.applied += 1;
+            }
+            Ok(false) => last_seq = event.seq(),
+            Err(e) if is_event_rejection(&e) => {
+                out.rejected.push(RejectedEvent {
+                    seq: event.seq(),
+                    kind: event_kind(&event).into(),
+                    reason: e.to_string(),
+                });
+                last_seq = event.seq();
+            }
+            Err(e) => return Err(e),
         }
-        last_seq = event.seq();
-        out.applied += 1;
     }
     if last_seq != out.last_seq {
         conn.execute(

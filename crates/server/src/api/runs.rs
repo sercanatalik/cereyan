@@ -331,12 +331,21 @@ pub async fn delete_run(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(get, path = "/api/runs/{id}/tasks", params(("id" = i64, Path)), responses((status = 200, body = Vec<TaskRun>)))]
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct PassQuery {
+    /// One execution of the run's body: 0 the first time, the next after a
+    /// resume or an in-process flow retry.
+    #[serde(default)]
+    pub pass: Option<i64>,
+}
+
+#[utoipa::path(get, path = "/api/runs/{id}/tasks", params(("id" = i64, Path), PassQuery), responses((status = 200, body = Vec<TaskRun>)))]
 pub async fn run_tasks(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
+    Query(q): Query<PassQuery>,
 ) -> ApiResult<Json<Vec<TaskRun>>> {
-    Ok(Json(state.store.task_runs_by_run(id)?))
+    Ok(Json(state.store.task_runs_by_run(id, q.pass)?))
 }
 
 #[utoipa::path(post, path = "/api/runs/{id}/transition", params(("id" = i64, Path)), request_body = TransitionBody, responses((status = 200, body = Run), (status = 409, body = TransitionRejected), (status = 404)))]
@@ -447,8 +456,28 @@ pub async fn resume_inner(state: &Arc<AppState>, id: i64, input: Value) -> ApiRe
         .store
         .get_flow(run.flow_id)?
         .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
+    // The answer belongs to the question the run is actually waiting on, which
+    // its Paused state names. The caller sends only the answer, so a stale
+    // client cannot answer a question that has already moved on.
+    let index = run
+        .state
+        .details
+        .get("index")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let prompt = run
+        .state
+        .details
+        .get("prompt")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let mut answers = stored_answers(state, id)?;
+    answers.insert(
+        index.to_string(),
+        serde_json::json!({"prompt": prompt, "input": input}),
+    );
+    let answer = answers_value(&answers);
     let st = state.clone();
-    let answer = serde_json::to_string(&input).unwrap_or_else(|_| "null".into());
     let result = tokio::task::spawn_blocking(move || {
         st.store.kv_set(&crate::state::run_input_key(id), &answer)?;
         let mut next = RunState::new(StateType::Scheduled);
@@ -474,20 +503,74 @@ pub async fn resume_inner(state: &Arc<AppState>, id: i64, input: Value) -> ApiRe
     }
 }
 
-#[utoipa::path(get, path = "/api/runs/{id}/input", params(("id" = i64, Path)), responses((status = 200, description = "{input: <json>} or {input: null} when nothing was stored"), (status = 404)))]
+/// The answers stored for a run: question index to `{prompt, input}`. A value
+/// written before questions were numbered is the bare answer to the first one,
+/// with no prompt to match against. The `v` marker tells the two apart, so an
+/// answer that happens to be an object is not mistaken for the map.
+fn stored_answers(state: &AppState, id: i64) -> ApiResult<Map<String, Value>> {
+    let Some(raw) = state.store.kv_get(&crate::state::run_input_key(id))? else {
+        return Ok(Map::new());
+    };
+    let value: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+    let is_map = value.get("v").and_then(|v| v.as_i64()) == Some(1);
+    if is_map {
+        if let Some(answers) = value.get("answers").and_then(|a| a.as_object()) {
+            return Ok(answers.clone());
+        }
+    }
+    let mut legacy = Map::new();
+    legacy.insert("0".into(), serde_json::json!({ "input": value }));
+    Ok(legacy)
+}
+
+fn answers_value(answers: &Map<String, Value>) -> String {
+    serde_json::json!({"v": 1, "answers": answers}).to_string()
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct InputQuery {
+    /// Which question: 0 is the first `wait_for_input` call of the body.
+    #[serde(default)]
+    pub index: Option<i64>,
+}
+
+#[utoipa::path(get, path = "/api/runs/{id}/input", params(("id" = i64, Path), InputQuery), responses((status = 200, description = "With index: {answer: {prompt, input}} or {answer: null}. Without: the pending question, every answer given, and {input} for the first"), (status = 404)))]
 pub async fn run_input(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
+    Query(q): Query<InputQuery>,
 ) -> ApiResult<Json<Value>> {
-    state
+    let run = state
         .store
         .get_run(id)?
         .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
-    let stored = state.store.kv_get(&crate::state::run_input_key(id))?;
-    let input = stored
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+    let answers = stored_answers(&state, id)?;
+    if let Some(index) = q.index {
+        let answer = answers
+            .get(&index.to_string())
+            .cloned()
+            .unwrap_or(Value::Null);
+        return Ok(Json(serde_json::json!({ "answer": answer })));
+    }
+    let pending = if run.state.state_type == StateType::Paused {
+        serde_json::json!({
+            "prompt": run.state.details.get("prompt").cloned().unwrap_or(Value::Null),
+            "schema": run.state.details.get("schema").cloned().unwrap_or(Value::Null),
+            "index": run.state.details.get("index").cloned().unwrap_or(serde_json::json!(0)),
+        })
+    } else {
+        Value::Null
+    };
+    // `input` stays the first question's answer, for callers written before
+    // questions were numbered.
+    let first = answers
+        .get("0")
+        .and_then(|a| a.get("input"))
+        .cloned()
         .unwrap_or(Value::Null);
-    Ok(Json(serde_json::json!({"input": input})))
+    Ok(Json(
+        serde_json::json!({"pending": pending, "answers": answers, "input": first}),
+    ))
 }
 
 #[utoipa::path(post, path = "/api/runs/{id}/cancel", params(("id" = i64, Path)), responses((status = 200, body = Run), (status = 404)))]
@@ -527,12 +610,19 @@ pub struct RunGraph {
     pub edges: Vec<GraphEdge>,
 }
 
-#[utoipa::path(get, path = "/api/runs/{id}/graph", params(("id" = i64, Path)), responses((status = 200, body = RunGraph)))]
+#[utoipa::path(get, path = "/api/runs/{id}/graph", params(("id" = i64, Path), PassQuery), responses((status = 200, body = RunGraph)))]
 pub async fn run_graph(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
+    Query(q): Query<PassQuery>,
 ) -> ApiResult<Json<RunGraph>> {
-    let tasks = state.store.task_runs_by_run(id)?;
+    // One pass at a time: an edge between passes would join task runs that
+    // never ran together. The latest is the one the run page opens on.
+    let pass = match q.pass {
+        Some(p) => p,
+        None => (state.store.next_pass(id)? - 1).max(0),
+    };
+    let tasks = state.store.task_runs_by_run(id, Some(pass))?;
     let by_ext: std::collections::HashMap<String, i64> = tasks
         .iter()
         .map(|t| (t.external_id.to_string(), t.id))

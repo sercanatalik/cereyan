@@ -3097,6 +3097,11 @@
             },
             "type": "array"
           },
+          "pass": {
+            "description": "Which execution of the run's body created this task run: 0 for the\nfirst, the next for a resume or an in-process flow retry. Dynamic keys\nrestart with each pass, so the pass tells repeated calls apart.",
+            "format": "int64",
+            "type": "integer"
+          },
           "project": {
             "type": "string"
           },
@@ -3430,11 +3435,21 @@
           "parameters": {
             "type": "object"
           },
+          "pass": {
+            "description": "Which execution of the run's body this is: 0 the first time, the next\nafter a resume. The engine counts its own retries up from here and\nreports it with every task run it creates.",
+            "format": "int64",
+            "type": "integer"
+          },
           "payload": {
             "type": "object"
           },
           "project": {
             "type": "string"
+          },
+          "report_seq": {
+            "description": "The last report sequence the store recorded for this run. A fresh engine\nprocess buffers from zero, and the store skips any event at or below the\nrun's sequence as a redelivery, so an engine picking up a run someone\nelse already reported on has to continue that count rather than restart\nit. Without this a resumed run's whole report was silently dropped.",
+            "format": "int64",
+            "type": "integer"
           },
           "run_id": {
             "format": "int64",
@@ -5358,6 +5373,19 @@
               "format": "int64",
               "type": "integer"
             }
+          },
+          {
+            "description": "One execution of the run's body: 0 the first time, the next after a\nresume or an in-process flow retry.",
+            "in": "query",
+            "name": "pass",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -5389,11 +5417,24 @@
               "format": "int64",
               "type": "integer"
             }
+          },
+          {
+            "description": "Which question: 0 is the first `wait_for_input` call of the body.",
+            "in": "query",
+            "name": "index",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "{input: <json>} or {input: null} when nothing was stored"
+            "description": "With index: {answer: {prompt, input}} or {answer: null}. Without: the pending question, every answer given, and {input} for the first"
           },
           "404": {
             "description": ""
@@ -5541,6 +5582,19 @@
             "schema": {
               "format": "int64",
               "type": "integer"
+            }
+          },
+          {
+            "description": "One execution of the run's body: 0 the first time, the next after a\nresume or an in-process flow retry.",
+            "in": "query",
+            "name": "pass",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
             }
           }
         ],
@@ -5998,6 +6052,19 @@
           {
             "in": "query",
             "name": "run_id",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Only task runs of this execution of the run's body.",
+            "in": "query",
+            "name": "pass",
             "required": false,
             "schema": {
               "format": "int64",

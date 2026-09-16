@@ -22,7 +22,7 @@ For Claude Code that is `claude mcp add cereyan -- cereyan mcp` or the same bloc
 
 ## Connect over HTTP
 
-Web agents and custom clients use Streamable HTTP: `POST /mcp` with one JSON-RPC message per request and `Authorization: Bearer <token>` when the server has a token. `initialize` returns an `Mcp-Session-Id` header to send on later requests; `DELETE /mcp` ends the session.
+Web agents and custom clients use Streamable HTTP: `POST /mcp` with one JSON-RPC message per request, `Content-Type: application/json` (any other type answers 415), and `Authorization: Bearer <token>` when the server has a token. A client running in a web page on another origin also needs that page's host in [`allowed_hosts`](secure-the-server.md#reach-the-server-under-another-name). `initialize` returns an `Mcp-Session-Id` header to send on later requests; `DELETE /mcp` ends the session.
 
 ```{.python fixture:served}
 import json, urllib.request

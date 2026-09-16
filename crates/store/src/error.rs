@@ -15,6 +15,8 @@ pub enum StoreError {
         reason: &'static str,
         current: Option<cereyan_core::State>,
     },
+    #[error("migration failed: {0}")]
+    Migration(String),
     #[error("{0} not found")]
     NotFound(&'static str),
     #[error("invalid {0}")]

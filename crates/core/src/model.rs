@@ -109,6 +109,11 @@ pub struct TaskRun {
     pub name: String,
     pub task_key: String,
     pub dynamic_key: String,
+    /// Which execution of the run's body created this task run: 0 for the
+    /// first, the next for a resume or an in-process flow retry. Dynamic keys
+    /// restart with each pass, so the pass tells repeated calls apart.
+    #[serde(default)]
+    pub pass: i64,
     pub state: State,
     pub failure_count: u32,
     pub crash_count: u32,

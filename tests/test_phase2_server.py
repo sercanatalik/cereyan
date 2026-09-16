@@ -86,6 +86,8 @@ def slow_flow():
 
 @app.flow(crash_retries=2)
 def crasher():
+    step()
+    time.sleep(0.3)  # let the task run's report reach the server before dying
     os._exit(7)
 
 @app.flow(crash_retries=0)
@@ -338,6 +340,12 @@ def test_crash_chain_and_limit(sched):
     assert runs[1]["parent_run_id"] == runs[0]["id"] and runs[2]["parent_run_id"] == runs[1]["id"]
     assert runs[1]["created_by"] == f"crash:{runs[0]['id']}"
     assert [r["attempt"] for r in runs] == [0, 1, 2]
+    # A crash rerun is a new run, not another execution of the crashed one, so
+    # each link of the chain numbers its own task runs from zero.
+    assert len({r["id"] for r in runs}) == 3
+    for r in runs:
+        tasks = c._request("GET", f"/api/runs/{r['id']}/tasks")
+        assert all(t["pass"] == 0 for t in tasks), f"run {r['id']} recorded a later pass"
 
     once = start(sched, "crash_once")
     done = sched.wait_run(once["id"], timeout=30)

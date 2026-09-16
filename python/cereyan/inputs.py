@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 import time
 from typing import Any
 
@@ -12,7 +13,7 @@ from .exceptions import CereyanError, RunPaused
 
 
 def wait_for_input(prompt: str, schema: dict | None = None) -> Any:
-    """Return the answer given to this run, pausing it when there is none yet.
+    """Return the answer given to this question, pausing the run when there is none.
 
     Inside a served run the first call transitions the run to ``Paused`` with
     the prompt and ends the attempt; the engine is free while the run waits.
@@ -21,17 +22,37 @@ def wait_for_input(prompt: str, schema: dict | None = None) -> Any:
     reruns the flow from the top and gets the answer from this call. Tasks
     marked ``cache=INPUTS`` are skipped on the replay.
 
+    Questions are numbered in the order the body reaches them, and an answer
+    belongs to the question it answered, so a flow can ask, resume, and ask
+    again. An answer is used only when the prompt at that position still
+    matches the one it was given for; a body that changed asks afresh rather
+    than handing an old answer to a new question.
+
     Outside a served run the answer is read from the terminal, or an error is
     raised when stdin is not interactive.
+
+    Raises:
+        CereyanError: When called outside the thread executing the flow body,
+            such as from a task submitted with ``submit`` or ``map``.
     """
     run = context.current_run()
     if run is None or run.backend.offline:
         return _prompt_terminal(prompt, schema)
-    stored = run.backend.get_input()
+    if threading.get_ident() != run.body_thread:
+        raise CereyanError(
+            f"wait_for_input({prompt!r}) belongs in the flow body: pausing works by raising out of it, "
+            "and from a task on another thread that ends the task instead of the run"
+        )
+    index = run.next_input_index()
+    stored = run.backend.get_input(index)
     if stored is not None:
-        return stored
+        answered = stored.get("prompt")
+        # An answer stored before questions were numbered has no prompt to
+        # match, and answers the first question.
+        if answered is None or answered == prompt:
+            return stored.get("input")
     task = context.current_task_run()
-    raise RunPaused(prompt, schema, task.id if task else None)
+    raise RunPaused(prompt, schema, task.id if task else None, index)
 
 
 def _prompt_terminal(prompt: str, schema: dict | None) -> Any:
@@ -50,10 +71,11 @@ def _prompt_terminal(prompt: str, schema: dict | None) -> Any:
 
 
 def pause_details(exc: RunPaused) -> dict:
-    """The state details recorded when a run pauses: the prompt, its schema, the time asked, and the asking task run."""
+    """The state details recorded when a run pauses: the prompt, its schema, the time asked, the asking task run, and which question is waiting."""
     return {
         "prompt": exc.prompt,
         "schema": exc.schema,
         "asked_at": int(time.time() * 1_000_000),
         "task_run": exc.task_run,
+        "index": exc.index,
     }
