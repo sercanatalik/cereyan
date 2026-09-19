@@ -144,6 +144,19 @@ impl AppState {
         self.config.home.join("server.json")
     }
 
+    /// Bound beyond loopback with no token required: the operator opted out.
+    pub fn exposed(&self) -> bool {
+        !self.addr.ip().is_loopback() && self.config.token.is_none()
+    }
+
+    /// The file holding the token the server generated at start, if it did.
+    pub fn token_file(&self) -> Option<String> {
+        self.config
+            .token_file
+            .as_ref()
+            .map(|p| p.display().to_string())
+    }
+
     /// The URL every client uses: the dialable address followed by the base
     /// path, with no trailing slash. A listener on an unspecified address
     /// answers on loopback, and 0.0.0.0 is not somewhere a client can connect:
@@ -175,6 +188,8 @@ impl AppState {
             "version": self.config.version,
             "auth": self.config.token.is_some(),
             "socket": self.config.socket.as_ref().map(|p| p.display().to_string()),
+            "exposed": self.exposed(),
+            "token_file": self.token_file(),
         });
         std::fs::write(
             self.discovery_path(),

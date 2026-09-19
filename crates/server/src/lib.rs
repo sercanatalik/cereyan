@@ -124,6 +124,13 @@ pub struct ServeConfig {
     /// beside IP addresses, `localhost`, and `host`.
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
+    /// Serve unauthenticated beyond loopback instead of generating a token.
+    #[serde(default)]
+    pub allow_unauthenticated: bool,
+    /// Set by the server when it generated `token` at start: the file that
+    /// holds it, `<home>/token`. Never set from configuration.
+    #[serde(default)]
+    pub token_file: Option<PathBuf>,
 }
 
 fn default_auth_scope() -> String {
@@ -261,10 +268,37 @@ impl Server {
                 })
         })?;
         let addr = listener.local_addr()?;
-        if !addr.ip().is_loopback() && config.token.is_none() {
-            eprintln!(
-                "warning: cereyan is listening on {addr}; the API is unauthenticated and reachable from the network"
-            );
+        // Beyond loopback the port is reachable from the network, so a server
+        // with nothing configured authenticates with a token it generates
+        // unless the operator said otherwise. An enabled authenticator has
+        // already set `token` above, so `token.is_none()` covers both.
+        if !addr.ip().is_loopback() {
+            if config.token.is_none() && !config.allow_unauthenticated {
+                let (token, created) = auth::load_or_create_token_file(&config.home)?;
+                let path = auth::token_file_path(&config.home);
+                config.token = Some(token);
+                config.sources.insert(
+                    "server.token".into(),
+                    SettingSource {
+                        source: "generated".into(),
+                        name: Some(path.display().to_string()),
+                    },
+                );
+                eprintln!(
+                    "cereyan: listening on {addr} beyond loopback with {} API token in {}; processes on this machine read it, other clients set CEREYAN_TOKEN (or start with --allow-unauthenticated)",
+                    if created { "a newly generated" } else { "the generated" },
+                    path.display()
+                );
+                config.token_file = Some(path);
+            } else if config.token.is_none() {
+                eprintln!(
+                    "warning: cereyan is listening on {addr}; the API is unauthenticated and reachable from the network"
+                );
+            } else if config.allow_unauthenticated {
+                eprintln!(
+                    "note: allow_unauthenticated has no effect: a token is required on {addr}"
+                );
+            }
         }
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let state = Arc::new(AppState::new(

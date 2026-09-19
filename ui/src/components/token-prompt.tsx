@@ -55,9 +55,9 @@ export function TokenPrompt({ onSubmit }: { onSubmit?: (token: string) => void }
       }
     >
       <p className="mb-3 text-sm text-muted-foreground">
-        {rejected
-          ? "The server rejected the token. Enter the value from CEREYAN_TOKEN, --token, or [server] token."
-          : "This server requires an API token. Enter the value from CEREYAN_TOKEN, --token, or [server] token."}
+        {rejected ? "The server rejected the token. " : "This server requires an API token. "}
+        Enter the value from CEREYAN_TOKEN, --token, or [server] token, or from the <code>token</code> file in
+        the server's home when it generated one at start.
       </p>
       <Input
         type="password"

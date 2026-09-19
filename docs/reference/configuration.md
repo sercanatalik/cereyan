@@ -41,16 +41,17 @@ title = "Data Platform"   # optional: shown in the top bar and the browser tab
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `host` | string | `127.0.0.1` | Bind address. The server warns when bound to a non-loopback address without a token. |
+| `host` | string | `127.0.0.1` | Bind address. Bound to a non-loopback address without a token, the server generates one into `<home>/token` and requires it, unless `allow_unauthenticated` is set. |
 | `port` | integer | `4200` | TCP port; `0` picks a free port. |
 | `base_path` | string | the root | URL path the TCP listener serves the UI, the API, `/mcp`, and custom routes under, for example `/cereyan`. Segments are letters, digits, `-`, `_`, `.`, or `~`. `/` and the bare base path redirect to `{base_path}/`; other paths outside it answer 404. The Unix socket stays at the root. |
-| `token` | string | unset | API token required on every `/api/*` route except `/api/health`. |
+| `token` | string | unset | API token required on every `/api/*` route except `/api/health`, and on `/mcp`. Unset beyond loopback, the server generates one; see `host`. |
 | `socket` | string | unset | Unix socket path served next to the TCP port; not available on Windows. |
 | `enable_auth` | boolean | `false` | Validate credentials with the registered `@app.authenticator`. The server refuses to start when it is true and none is registered. |
 | `auth_cookie` | string | unset | Cookie the authenticator reads the credential from when there is no `Authorization: Bearer` header. `cereyan_token` is reserved. |
 | `auth_scope` | string | `api` | `api` checks `/api/*` except `/api/health`, and `/mcp`; `all` checks every path except `/api/health`, the UI and custom routes included, and needs `enable_auth`. |
 | `login_url` | string | unset | Sign-in page linked from 401 responses and the UI: an `http` or `https` URL, or a path starting with `/`. |
 | `allowed_hosts` | array of strings | `[]` | Host names the server answers to and accepts browser pages from, beside IP addresses, `localhost`, and `host`. A request whose `Host` names another host, or whose `Origin` is neither the server's own nor a listed host, answers 403. Entries are host names or IP addresses, without a scheme or port. |
+| `allow_unauthenticated` | boolean | `false` | Serve without a token when bound beyond loopback instead of generating one. The server warns at start, reports `exposed: true`, and the UI shows a banner. No effect with a token or `enable_auth`, or on loopback. |
 | `max_engines` | integer | CPU count | Size of the warm engine pool. |
 | `engine_max_runs` | integer | `100` | Runs an engine executes before it is recycled. |
 | `cancel_grace_secs` | integer | `10` | Seconds between SIGTERM and SIGKILL when cancelling a run. |
@@ -99,6 +100,7 @@ The Settings page's Environment tab (`GET /api/settings/environment`) lists ever
 | `enable_auth` | `--enable-auth`, `CEREYAN_ENABLE_AUTH`, `app.serve(enable_auth=)`, `[server] enable_auth`, `false` |
 | `auth_cookie`, `auth_scope`, `login_url` | `--auth-cookie`/`--auth-scope`/`--login-url`, `CEREYAN_AUTH_COOKIE`/`CEREYAN_AUTH_SCOPE`/`CEREYAN_LOGIN_URL`, the same-named `app.serve()` arguments, `[server]` |
 | `allowed_hosts` | `--allowed-host` (repeatable), `CEREYAN_ALLOWED_HOSTS` (comma-separated), `app.serve(allowed_hosts=)`, `[server] allowed_hosts`, empty; the first that sets it wins whole |
+| `allow_unauthenticated` | `--allow-unauthenticated`, `CEREYAN_ALLOW_UNAUTHENTICATED`, `app.serve(allow_unauthenticated=)`, `[server] allow_unauthenticated`, `false` |
 | `crash_retries` | the flow decorator, `[defaults]`, `--crash-retries`, `5` |
 
 ## Environment variables
@@ -113,6 +115,7 @@ The Settings page's Environment tab (`GET /api/settings/environment`) lists ever
 | `CEREYAN_ENABLE_AUTH` | `true`, `false`, `1`, `0`, `yes`, or `no`: call the registered authenticator. |
 | `CEREYAN_AUTH_COOKIE`, `CEREYAN_AUTH_SCOPE`, `CEREYAN_LOGIN_URL` | The authenticator's cookie, the paths checked, and the sign-in page; as the `[server]` keys. |
 | `CEREYAN_ALLOWED_HOSTS` | Comma-separated host names the server answers to; as `[server] allowed_hosts`. |
+| `CEREYAN_ALLOW_UNAUTHENTICATED` | `true`, `false`, `1`, `0`, `yes`, or `no`: serve without a token beyond loopback; as `[server] allow_unauthenticated`. |
 | `CEREYAN_NO_BROWSER` | Do not open the UI on `serve`. |
 
 Set by the server for its engine children, not for users: `CEREYAN_ENGINE_ID`. An engine child finds the server through the `url` in `server.json`, base path included; `CEREYAN_SERVER` overrides that URL for an engine started by hand. Two knobs exist for the test suite and benchmarks only: `CEREYAN_RETENTION_INTERVAL` (seconds between retention passes, default hourly) and `CEREYAN_FAST_CRASH_RERUN`.

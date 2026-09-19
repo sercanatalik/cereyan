@@ -45,6 +45,12 @@ pub struct ServerInfo {
     pub engines: Vec<serde_json::Value>,
     pub queued: usize,
     pub stream_seq: u64,
+    /// Whether a token is required.
+    pub auth: bool,
+    /// Bound beyond loopback with no token required.
+    pub exposed: bool,
+    /// The file holding the generated token when the server generated one.
+    pub token_file: Option<String>,
 }
 
 #[utoipa::path(get, path = "/api/health", responses((status = 200, description = "Server is up")))]
@@ -70,6 +76,9 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         engines: state.supervisor.engines_snapshot(),
         queued: state.supervisor.queue_len(),
         stream_seq: state.stream.latest_seq(),
+        auth: state.config.token.is_some(),
+        exposed: state.exposed(),
+        token_file: state.token_file(),
     })
 }
 

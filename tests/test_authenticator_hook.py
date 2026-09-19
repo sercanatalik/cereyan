@@ -152,7 +152,17 @@ def test_runs_record_the_user_and_engines_never_reach_the_hook(isolated_home, au
 
 
 def test_a_registered_authenticator_is_not_called_while_auth_is_disabled(isolated_home, auth_dir):
+    # Beyond loopback with the authenticator disabled, the server counts as having
+    # no auth: it generates a token unless the operator opts out, as any server would.
     srv = start(isolated_home, auth_dir, CEREYAN_AUTH_COOKIE="SSO_SESSION", CEREYAN_HOST="0.0.0.0")
+    try:
+        assert srv.info["auth"] is True and srv.info["token_file"]
+        assert request(srv.info["url"] + "/api/runs")[0] == 401
+        assert hook_calls(isolated_home) == []
+    finally:
+        srv.stop()
+    srv = start(isolated_home, auth_dir, CEREYAN_AUTH_COOKIE="SSO_SESSION", CEREYAN_HOST="0.0.0.0",
+                CEREYAN_ALLOW_UNAUTHENTICATED="1")
     try:
         assert request(srv.info["url"] + "/api/runs")[0] == 200
         assert hook_calls(isolated_home) == []

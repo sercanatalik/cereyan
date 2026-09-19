@@ -180,9 +180,9 @@ class App:
         """Serve the flows and routes registered so far, blocking until stopped.
 
         Host, port, ``token``, ``socket``, ``base_path``, ``enable_auth``,
-        ``auth_cookie``, ``auth_scope``, ``login_url``, and ``allowed_hosts`` (a
-        list of host names) given here rank below the CLI flags and environment
-        and above ``cereyan.toml``.
+        ``auth_cookie``, ``auth_scope``, ``login_url``, ``allowed_hosts`` (a
+        list of host names), and ``allow_unauthenticated`` given here rank below
+        the CLI flags and environment and above ``cereyan.toml``.
 
         ``ready`` is called with the running server once it accepts requests.
         Called from a thread other than the main thread, ``serve`` installs no
@@ -193,7 +193,7 @@ class App:
 
         directory = os.path.dirname(os.path.abspath(self.source_file)) if self.source_file else os.getcwd()
         keys = ("token", "socket", "base_path", "enable_auth", "auth_cookie", "auth_scope", "login_url",
-                "allowed_hosts")
+                "allowed_hosts", "allow_unauthenticated")
         app_options = {f"app_{key}": options.pop(key, None) for key in keys}
         return serve(directory, app_host=host, app_port=port, discover=False, **app_options, **options)
 

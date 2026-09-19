@@ -2,6 +2,7 @@
 //! optional authenticator hook that validates any other credential. Requests
 //! over the Unix socket are trusted by file mode.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -96,6 +97,34 @@ pub(crate) fn generate_token() -> String {
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Where a server bound beyond loopback keeps the token it generated.
+pub fn token_file_path(home: &Path) -> PathBuf {
+    home.join("token")
+}
+
+/// The generated token of `home`, created on first use and reused after, and
+/// whether this call wrote it. An empty or unreadable file is replaced, since
+/// a token nobody can read protects nothing. The home's own permissions are
+/// the guarantee, as for `secret.key`; the owner-only mode is a second layer.
+pub fn load_or_create_token_file(home: &Path) -> std::io::Result<(String, bool)> {
+    let path = token_file_path(home);
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        let existing = text.trim();
+        if !existing.is_empty() {
+            return Ok((existing.to_string(), false));
+        }
+    }
+    let token = generate_token();
+    std::fs::create_dir_all(home)?;
+    std::fs::write(&path, format!("{token}\n"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok((token, true))
 }
 
 /// Reject auth settings that cannot work; Python names the source first.
@@ -373,5 +402,35 @@ mod tests {
         let user = AuthenticatedUser("alice".into());
         assert_eq!(run_creator(Some(&user), "client"), "user:alice");
         assert_eq!(run_creator(None, "client"), "client");
+    }
+
+    #[test]
+    fn token_file_is_created_reused_and_replaced_when_empty() {
+        let home = tempfile::tempdir().unwrap();
+        let (first, created) = load_or_create_token_file(home.path()).unwrap();
+        assert!(created);
+        assert_eq!(first.len(), 64);
+        assert_eq!(
+            std::fs::read_to_string(token_file_path(home.path())).unwrap(),
+            format!("{first}\n")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(token_file_path(home.path()))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+
+        let (second, created) = load_or_create_token_file(home.path()).unwrap();
+        assert!(!created);
+        assert_eq!(second, first);
+
+        std::fs::write(token_file_path(home.path()), "  \n").unwrap();
+        let (third, created) = load_or_create_token_file(home.path()).unwrap();
+        assert!(created);
+        assert_ne!(third, first);
     }
 }

@@ -40,7 +40,9 @@ A running server records how to reach it so scripts, the CLI, `cereyan mcp`, and
   "started_at": 1788998400000000,
   "version": "1.5.0",
   "auth": true,
-  "socket": "/tmp/cereyan.sock"
+  "socket": "/tmp/cereyan.sock",
+  "exposed": false,
+  "token_file": null
 }
 ```
 
@@ -53,5 +55,7 @@ A running server records how to reach it so scripts, the CLI, `cereyan mcp`, and
 | `version` | The cereyan version. |
 | `auth` | Whether a token is required. The token itself is never written. |
 | `socket` | The Unix socket path when one is served, else `null`. |
+| `exposed` | `true` when the server is bound beyond loopback with no token required, which takes `allow_unauthenticated`. |
+| `token_file` | The path of `<home>/token` when the server generated its token at start, else `null`. Clients on the same machine read the token from it. |
 
 `cereyan.client.read_discovery()` returns it and `cereyan.client.find_server()` turns it into a client after checking `/api/health`.

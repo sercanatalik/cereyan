@@ -207,6 +207,40 @@ def resolve_enable_auth(directory: str, enable_auth: bool | None = None,
     return _enable_auth(directory, enable_auth, app_enable_auth)[0]
 
 
+def _allow_unauthenticated(directory: str, allow_unauthenticated: bool | None = None,
+                           app_allow_unauthenticated: bool | None = None) -> tuple[bool, dict]:
+    if allow_unauthenticated:
+        return True, _source("flag", "--allow-unauthenticated")
+    env = os.environ.get("CEREYAN_ALLOW_UNAUTHENTICATED")
+    if env is not None and env.strip():
+        value = env.strip().lower()
+        if value in _TRUE:
+            return True, _source("env", "CEREYAN_ALLOW_UNAUTHENTICATED")
+        if value in _FALSE:
+            return False, _source("env", "CEREYAN_ALLOW_UNAUTHENTICATED")
+        raise CereyanError(f"invalid CEREYAN_ALLOW_UNAUTHENTICATED {env!r}: expected true, false, 1, 0, yes, or no")
+    if app_allow_unauthenticated is not None:
+        if not isinstance(app_allow_unauthenticated, bool):
+            raise CereyanError(
+                f"invalid app.serve(allow_unauthenticated={app_allow_unauthenticated!r}): expected True or False"
+            )
+        return app_allow_unauthenticated, _source("app", "app.serve(allow_unauthenticated=)")
+    value = server_settings(directory).get("allow_unauthenticated")
+    if value is None:
+        return False, _source("default")
+    if not isinstance(value, bool):
+        raise CereyanError(
+            f"invalid [server] allow_unauthenticated {value!r} in cereyan.toml: expected true or false"
+        )
+    return value, _source("toml", "[server] allow_unauthenticated")
+
+
+def resolve_allow_unauthenticated(directory: str, allow_unauthenticated: bool | None = None,
+                                  app_allow_unauthenticated: bool | None = None) -> bool:
+    """Flag, environment, app.serve(), cereyan.toml. False unless one of them opts out of the generated token."""
+    return _allow_unauthenticated(directory, allow_unauthenticated, app_allow_unauthenticated)[0]
+
+
 def _string_setting(directory: str, key: str, env_name: str, flag_name: str, flag: str | None,
                     app_value: str | None) -> tuple[str | None, dict]:
     """The first of flag, environment, app.serve(), cereyan.toml, with its source."""
@@ -386,11 +420,12 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
           auth_scope: str | None = None, app_auth_scope: str | None = None,
           login_url: str | None = None, app_login_url: str | None = None,
           allowed_hosts: list[str] | None = None,
-          app_allowed_hosts: list[str] | tuple[str, ...] | None = None) -> int:
+          app_allowed_hosts: list[str] | tuple[str, ...] | None = None,
+          allow_unauthenticated: bool | None = None, app_allow_unauthenticated: bool | None = None) -> int:
     """Serve ``directory``. ``host``, ``port``, ``token``, ``socket``, ``base_path``,
-    ``enable_auth``, ``auth_cookie``, ``auth_scope``, ``login_url``, and
-    ``allowed_hosts`` are the CLI flags; the ``app_*`` values come from
-    ``app.serve()`` and rank below the environment."""
+    ``enable_auth``, ``auth_cookie``, ``auth_scope``, ``login_url``,
+    ``allowed_hosts``, and ``allow_unauthenticated`` are the CLI flags; the
+    ``app_*`` values come from ``app.serve()`` and rank below the environment."""
     directory = os.path.abspath(directory or os.getcwd())
     if not os.path.isdir(directory):
         raise CereyanError(f"{directory} is not a directory")
@@ -406,6 +441,9 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     resolved_login_url, sources["server.login_url"] = _login_url(directory, login_url, app_login_url)
     resolved_allowed_hosts, sources["server.allowed_hosts"] = _allowed_hosts(
         directory, allowed_hosts, app_allowed_hosts
+    )
+    resolved_allow_unauthenticated, sources["server.allow_unauthenticated"] = _allow_unauthenticated(
+        directory, allow_unauthenticated, app_allow_unauthenticated
     )
     if resolved_auth_scope == "all" and not resolved_enable_auth:
         raise CereyanError(
@@ -516,6 +554,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "auth_scope": resolved_auth_scope,
         "login_url": resolved_login_url,
         "allowed_hosts": resolved_allowed_hosts,
+        "allow_unauthenticated": resolved_allow_unauthenticated,
         "open_browser": bool(should_open),
         "sources": sources,
         "python_version": platform.python_version(),

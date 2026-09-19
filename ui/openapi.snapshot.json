@@ -2655,6 +2655,10 @@
       },
       "ServerInfo": {
         "properties": {
+          "auth": {
+            "description": "Whether a token is required.",
+            "type": "boolean"
+          },
           "base_path": {
             "description": "URL path every TCP route is served under; empty at the root.",
             "type": "string"
@@ -2662,6 +2666,10 @@
           "engines": {
             "items": {},
             "type": "array"
+          },
+          "exposed": {
+            "description": "Bound beyond loopback with no token required.",
+            "type": "boolean"
           },
           "home": {
             "type": "string"
@@ -2694,6 +2702,13 @@
             "description": "UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`.",
             "type": "string"
           },
+          "token_file": {
+            "description": "The file holding the generated token when the server generated one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "url": {
             "description": "Dialable URL including the base path, with no trailing slash.",
             "type": "string"
@@ -2712,7 +2727,9 @@
           "title",
           "engines",
           "queued",
-          "stream_seq"
+          "stream_seq",
+          "auth",
+          "exposed"
         ],
         "type": "object"
       },
@@ -3541,7 +3558,7 @@
       "name": "MIT"
     },
     "title": "cereyan",
-    "version": "2.0.0"
+    "version": "2.1.0"
   },
   "openapi": "3.1.0",
   "paths": {

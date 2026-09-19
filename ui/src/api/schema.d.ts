@@ -1777,9 +1777,13 @@ export interface components {
             updated_at: components["schemas"]["i64"];
         };
         ServerInfo: {
+            /** @description Whether a token is required. */
+            auth: boolean;
             /** @description URL path every TCP route is served under; empty at the root. */
             base_path: string;
             engines: unknown[];
+            /** @description Bound beyond loopback with no token required. */
+            exposed: boolean;
             home: string;
             /** Format: int32 */
             pid: number;
@@ -1791,6 +1795,8 @@ export interface components {
             stream_seq: number;
             /** @description UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`. */
             title: string;
+            /** @description The file holding the generated token when the server generated one. */
+            token_file?: string | null;
             /** @description Dialable URL including the base path, with no trailing slash. */
             url: string;
             version: string;

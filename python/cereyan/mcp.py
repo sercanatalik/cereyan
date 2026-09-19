@@ -34,12 +34,12 @@ class Transport:
     @classmethod
     def discover(cls, url: str | None = None, token: str | None = None, socket_path: str | None = None,
                  home: str | None = None) -> "Transport":
-        token = resolve_client_token(token)
         if url or socket_path:
-            return cls(url, token, socket_path)
+            return cls(url, resolve_client_token(token), socket_path)
         info = read_discovery(home)
         if not info:
             raise RuntimeError("no cereyan server is running (no server.json in the home directory); start `cereyan serve`")
+        token = resolve_client_token(token, info)
         sock = info.get("socket")
         if sock and not token and os.path.exists(sock):
             return cls(None, None, sock)

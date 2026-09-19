@@ -23,9 +23,14 @@ do with it. You can expect an acknowledgement within a week.
 Cereyan is local-first by design, and some of what might look like a vulnerability is a
 documented choice:
 
-- The server binds `127.0.0.1:4200` by default and has no authentication unless an API token
-  is set. Exposing it on a public interface without a token is a deployment decision, not a
-  defect — see [Secure the server](https://sercanatalik.github.io/cereyan/guides/secure-the-server/).
+- The server binds `127.0.0.1:4200` by default and has no authentication there unless an API
+  token is set: any process on the machine can use it. Bound to any other address it requires
+  a token, generating one into the home when none is configured. Serving on the network
+  without a token takes `allow_unauthenticated`, which the server warns about at start and the
+  UI shows a banner for; a server that was opted out is a deployment decision, not a defect.
+  The check is on the bound address, so a loopback server behind a reverse proxy is not caught
+  and needs a token of its own — see
+  [Secure the server](https://sercanatalik.github.io/cereyan/guides/secure-the-server/).
 - Flows and tasks are arbitrary Python that you supply, executed in engine child processes.
   Anyone who can register a flow can run code as the serving user, by design.
 - The store is a local SQLite file whose permissions are the operating system's to enforce.

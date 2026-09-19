@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0 (2026-09-19)
+
+### Upgrading from 2.0
+
+- **A server bound beyond loopback without a token now requires one it generates.** With `host = "0.0.0.0"` or any non-loopback address and no token, the server creates `<home>/token` on its first start, reuses it after, and requires it on `/api/*` and `/mcp`. Scripts, the CLI, and `cereyan mcp` on the same machine read the file through `server.json` and need nothing; a browser or script elsewhere sends the file's contents as before with a configured token. Set `allow_unauthenticated` to keep serving without a token, which the server warns about as 2.0 did. [Secure the server](https://sercanatalik.github.io/cereyan/guides/secure-the-server/#bind-beyond-loopback)
+
+### Changes
+
+- `server.json` and `GET /api/server` report `exposed` (bound beyond loopback with no token) and `token_file` (the generated token's path); the UI shows a banner on every page while the server is exposed. [`server.json`](https://sercanatalik.github.io/cereyan/reference/exit-codes/#serverjson)
+
 ## 2.0.0 (2026-09-16)
 
 ### Upgrading from 1.x

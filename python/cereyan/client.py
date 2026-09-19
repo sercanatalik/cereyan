@@ -44,9 +44,22 @@ def read_discovery(home: str | None = None) -> dict | None:
         return None
 
 
-def resolve_client_token(token: str | None = None) -> str | None:
-    """The token a client sends: an explicit value, else ``CEREYAN_TOKEN``."""
-    return token or os.environ.get("CEREYAN_TOKEN") or None
+def resolve_client_token(token: str | None = None, info: dict | None = None) -> str | None:
+    """The token a client sends: an explicit value, else ``CEREYAN_TOKEN``, else, when
+    ``info`` is the ``server.json`` of this machine's home and names a ``token_file``,
+    the token the server generated there. Only discovery passes ``info``: a client
+    built for an address by hand never sends this machine's token elsewhere."""
+    explicit = token or os.environ.get("CEREYAN_TOKEN") or None
+    if explicit:
+        return explicit
+    path = (info or {}).get("token_file")
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
 
 
 class _UnixConnection(http.client.HTTPConnection):
@@ -326,10 +339,10 @@ def default_client(home: str | None = None, token: str | None = None) -> Client:
         raise ServerUnavailable("no cereyan server is running (no server.json in the home directory)")
     url = info.get("url") or f"http://{info['host']}:{info['port']}"
     socket_path = info.get("socket")
-    resolved = resolve_client_token(token)
+    resolved = resolve_client_token(token, info)
     # Prefer the socket when the server needs a token we do not have.
     use_socket = bool(socket_path) and not resolved and os.path.exists(socket_path)
-    client = Client(url, token=token, socket_path=socket_path if use_socket else None)
+    client = Client(url, token=resolved, socket_path=socket_path if use_socket else None)
     if not client.health():
         raise ServerUnavailable(f"the server recorded in server.json ({client.base_url}) is not responding")
     if info.get("auth") and not use_socket:

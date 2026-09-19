@@ -129,3 +129,24 @@ def test_allowed_hosts_flag_repeats():
     args = build_parser().parse_args(["serve", "--allowed-host", "a.example", "--allowed-host", "b.example"])
     assert args.allowed_hosts == ["a.example", "b.example"]
     assert build_parser().parse_args(["serve"]).allowed_hosts is None
+
+
+def test_allow_unauthenticated_sources(tmp_path, monkeypatch):
+    bare = project(tmp_path, "bare")
+    monkeypatch.delenv("CEREYAN_ALLOW_UNAUTHENTICATED", raising=False)
+    assert serve_mod._allow_unauthenticated(bare) == (False, src("default"))
+    assert serve_mod._allow_unauthenticated(bare, app_allow_unauthenticated=True) == (
+        True, src("app", "app.serve(allow_unauthenticated=)"))
+    filed = project(tmp_path, "filed", "[server]\nallow_unauthenticated = true\n")
+    assert serve_mod._allow_unauthenticated(filed) == (True, src("toml", "[server] allow_unauthenticated"))
+    monkeypatch.setenv("CEREYAN_ALLOW_UNAUTHENTICATED", "no")
+    assert serve_mod._allow_unauthenticated(filed, app_allow_unauthenticated=True) == (
+        False, src("env", "CEREYAN_ALLOW_UNAUTHENTICATED"))
+    assert serve_mod._allow_unauthenticated(filed, True) == (True, src("flag", "--allow-unauthenticated"))
+    monkeypatch.setenv("CEREYAN_ALLOW_UNAUTHENTICATED", "maybe")
+    with pytest.raises(serve_mod.CereyanError, match="CEREYAN_ALLOW_UNAUTHENTICATED"):
+        serve_mod._allow_unauthenticated(bare)
+    monkeypatch.delenv("CEREYAN_ALLOW_UNAUTHENTICATED")
+    broken = project(tmp_path, "broken", "[server]\nallow_unauthenticated = 'yes'\n")
+    with pytest.raises(serve_mod.CereyanError, match=r"\[server\] allow_unauthenticated"):
+        serve_mod._allow_unauthenticated(broken)

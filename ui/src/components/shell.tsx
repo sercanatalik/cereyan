@@ -81,6 +81,34 @@ export function useUiTitle(): string {
   return title;
 }
 
+const SECURE_GUIDE = "https://sercanatalik.github.io/cereyan/guides/secure-the-server/";
+
+/**
+ * Shown while the server is bound beyond loopback with no token required, which
+ * only happens when the operator started it with `allow_unauthenticated`. It is
+ * not dismissible: the state it names is the reason it is there.
+ */
+export function ExposedBanner() {
+  const server = useQuery({
+    queryKey: ["server"],
+    queryFn: async () => unwrap(await api.GET("/api/server")),
+  });
+  if (!server.data?.exposed) return null;
+  return (
+    <div
+      role="alert"
+      className="shrink-0 border-b border-amber-400/60 bg-amber-50 px-6 py-1.5 text-sm dark:bg-amber-950/30"
+      data-testid="exposed-banner"
+    >
+      <span className="font-medium">This server is reachable from the network without a token. </span>
+      Anyone who can reach its port can start runs and change settings.{" "}
+      <a href={SECURE_GUIDE} className="underline underline-offset-2" target="_blank" rel="noreferrer">
+        Secure the server
+      </a>
+    </div>
+  );
+}
+
 /** The list pages the project scope narrows, which carry the scope sidebar. */
 const SCOPED = ["/", "/runs", "/flows", "/events", "/artifacts"];
 
@@ -153,6 +181,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
+      <ExposedBanner />
       {scoped ? (
         <div className="grid min-h-0 flex-1 grid-cols-[248px_minmax(0,1fr)]">
           <ScopeSidebar />

@@ -1,6 +1,6 @@
 # How to secure the server
 
-By default the server listens on loopback with no authentication: any process on the machine can use it. Web pages open in your browser cannot, because the server answers only to its own addresses and refuses requests from other sites' pages; see [Reach the server under another name](#reach-the-server-under-another-name). Add a token before binding to another address or exposing MCP, and use the Unix socket to let trusted local processes in without the token.
+By default the server listens on loopback with no authentication: any process on the machine can use it. Web pages open in your browser cannot, because the server answers only to its own addresses and refuses requests from other sites' pages; see [Reach the server under another name](#reach-the-server-under-another-name). Bound to any other address, the server requires a token: the one you set, or one it generates into the home; see [Bind beyond loopback](#bind-beyond-loopback). Use the Unix socket to let trusted local processes in without the token.
 
 ## Require a token
 
@@ -11,7 +11,7 @@ token = "change-me"
 
 Or `cereyan serve --token change-me`, `CEREYAN_TOKEN`, or `app.serve(token=...)`, in that precedence. With a token set, every `/api/*` route except `/api/health`, and the `/mcp` endpoint, require `Authorization: Bearer <token>`. Requests without it get 401.
 
-Clients pick the token up from `CEREYAN_TOKEN` or `cereyan --token`; engine children receive it in their environment; the UI prompts for it once and stores it in a `cereyan_token` cookie scoped to `/api` under the base path. `server.json` records `auth: true` and never the token itself.
+Clients pick the token up from `CEREYAN_TOKEN` or `cereyan --token`, and on the server's own machine from the `token` file in the home when the server generated one; engine children receive it in their environment; the UI prompts for it once and stores it in a `cereyan_token` cookie scoped to `/api` under the base path. `server.json` records `auth: true` and never the token itself.
 
 ```python
 from cereyan import client
@@ -28,10 +28,21 @@ Generate the token with something like `python -c "import secrets; print(secrets
 [server]
 host = "0.0.0.0"
 port = 4200
-token = "..."
 ```
 
-The server warns at start when bound to a non-loopback address without a token. There is no TLS: put a reverse proxy in front if the network is not trusted, as below.
+Bound to an address other than loopback, the server requires a token. When none is set, it generates one on the first such start, stores it in `<home>/token` (mode 0600, inside the home only your account can read), and reuses it on every later start; the startup line names the file and never the value. The CLI, the Python client, and `cereyan mcp` on the same machine read the file through `server.json`, so local scripts need nothing. A browser or a script on another machine sends the file's contents as `CEREYAN_TOKEN`, `--token`, or the UI's prompt. Set `[server] token` to use a token of your own instead; the file is then ignored.
+
+To serve without any token on the network, say so:
+
+```toml
+[server]
+host = "0.0.0.0"
+allow_unauthenticated = true
+```
+
+Or `--allow-unauthenticated`, `CEREYAN_ALLOW_UNAUTHENTICATED`, or `app.serve(allow_unauthenticated=True)`. The server then warns at start, `server.json` and `GET /api/server` report `exposed: true`, and the UI shows a banner on every page. With a token set or an authenticator enabled, the setting has no effect and the server says so; on loopback it has no effect and says nothing.
+
+The check is on the bound address only. A server on loopback behind a reverse proxy is not caught: it is reachable from wherever the proxy is, so set a token there yourself. There is no TLS: put a reverse proxy in front if the network is not trusted, as below.
 
 ## Put it behind nginx at a sub-path
 
@@ -52,7 +63,7 @@ location /cereyan/ {
 }
 ```
 
-A `proxy_pass` ending in `/` strips `/cereyan`, and every request then answers 404. The same URLs work without the proxy, at `http://127.0.0.1:4200/cereyan/`, and `/` redirects there. The CLI, the Python client, engines, and `cereyan mcp` read the base path from `server.json`; the Unix socket stays at the root. Keep the server on loopback so the proxy, which terminates TLS, is the only way in.
+A `proxy_pass` ending in `/` strips `/cereyan`, and every request then answers 404. The same URLs work without the proxy, at `http://127.0.0.1:4200/cereyan/`, and `/` redirects there. The CLI, the Python client, engines, and `cereyan mcp` read the base path from `server.json`; the Unix socket stays at the root. Keep the server on loopback so the proxy, which terminates TLS, is the only way in, and set a token: a loopback server generates none, and the proxy makes it reachable all the same.
 
 ## Reach the server under another name
 

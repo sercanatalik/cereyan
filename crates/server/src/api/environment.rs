@@ -197,6 +197,12 @@ fn configuration(state: &AppState) -> Vec<ConfigEntry> {
     push("server", "auth_scope", json!(c.auth_scope), false);
     push("server", "login_url", json!(c.login_url), false);
     push("server", "allowed_hosts", json!(c.allowed_hosts), false);
+    push(
+        "server",
+        "allow_unauthenticated",
+        json!(c.allow_unauthenticated),
+        false,
+    );
     push("defaults", "catchup", json!(c.catchup_default), false);
     push(
         "defaults",

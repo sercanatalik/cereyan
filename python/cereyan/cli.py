@@ -51,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--auth-scope", help="api checks /api/* and /mcp; all also checks the UI and custom routes, and needs --enable-auth (also CEREYAN_AUTH_SCOPE or [server] auth_scope; default api)")
     serve.add_argument("--login-url", help="sign-in page linked from 401 responses and the UI (also CEREYAN_LOGIN_URL or [server] login_url)")
     serve.add_argument("--allowed-host", action="append", dest="allowed_hosts", metavar="HOST", help="also answer to this host name and accept browser pages from it; repeat for more (also CEREYAN_ALLOWED_HOSTS, comma-separated, or [server] allowed_hosts)")
+    serve.add_argument("--allow-unauthenticated", action="store_true", default=None, help="serve without a token when bound beyond loopback instead of generating one into <home>/token (also CEREYAN_ALLOW_UNAUTHENTICATED or [server] allow_unauthenticated)")
     serve.set_defaults(func=cmd_serve)
 
     backfill = sub.add_parser("backfill", help="create runs over a date range (requires a running server)")
@@ -178,6 +179,7 @@ def cmd_serve(args) -> int:
             auth_scope=args.auth_scope,
             login_url=args.login_url,
             allowed_hosts=args.allowed_hosts,
+            allow_unauthenticated=args.allow_unauthenticated,
         )
     except CereyanError as exc:
         print(f"error: {exc}", file=sys.stderr)

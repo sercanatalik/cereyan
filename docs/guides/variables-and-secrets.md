@@ -29,7 +29,7 @@ Variable.set("warehouse/password", "hunter2", secret=True)
 assert Variable.get("warehouse/password") == "hunter2"
 ```
 
-A secret is encrypted at rest with the key in `<home>/secret.key`, created on first use with mode 0600, and shown masked in the UI, the API, and the MCP tools. `Variable.get` decrypts it inside your process. Back up `secret.key` with the database, and treat access to the home directory as access to the secrets.
+A secret is encrypted at rest with the key in `<home>/secret.key`, created on first use with mode 0600, and shown masked in the UI, the API, and the MCP tools. `Variable.get` decrypts it inside your process. Back up `secret.key` with the database, and treat access to the home directory as access to the secrets; the `token` file a server generates when bound beyond loopback lives there under the same protection.
 
 ## From the UI, the API, and an agent
 
