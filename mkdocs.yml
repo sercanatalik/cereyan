@@ -50,6 +50,12 @@ theme:
     - content.code.annotate
     - toc.follow
 
+# The version the landing page shows. Bump it with the release, alongside
+# pyproject.toml, Cargo.toml, Cargo.lock, uv.lock, ui/package.json and
+# python/cereyan/__init__.py.
+extra:
+  version_display: "2.3.0"
+
 extra_css:
   - stylesheets/brand.css
   - stylesheets/home.css

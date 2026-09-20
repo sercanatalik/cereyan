@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.0 (2026-09-20)
+
+Documentation only. The library, the CLI, the server and the UI are unchanged from 2.2.0.
+
+- **A landing page on the documentation home.** The home page is now a landing page rather than a list of links: the offer in one sentence over the pipeline example, the three ways to run the same file on a band carrying the brand mark, the dashboard in a browser frame in both schemes, the four pillars, sections on targets, rules and backfills, the performance targets the benchmarks enforce, and one call to action repeated down the page. Its only prose is the pipeline example itself, so the code on the front page is the code the documentation tests run. [Home](https://sercanatalik.github.io/cereyan/)
+- **One type scale across the site.** Landing typography sits on the same ladder as the documentation pages, a major third anchored at the theme's body copy, declared once as tokens. Material sets a 125 percent root, so the landing page had been rendering a quarter larger than it was drawn; body copy, tables, buttons and small labels all come back onto the scale, and the documentation pages are untouched.
+- **Documentation chrome in step with the app.** A hairline under each section heading, markers on the table of contents, a filled pill on the current page in the section nav, and admonitions as a plain bordered box with a label row instead of a coloured frame and a tinted title. Each type keeps its own icon colour, so a warning still reads differently from a note.
+
 ## 2.2.0 (2026-09-20)
 
 - **Freshness and deadlines.** `@flow(fresh_within=, expect_by=, expected_duration=, overdue_factor=)` derive a PASS, WARN or FAIL health per flow from its recorded runs, shown in a Health column on the Flows page and as `health` on every flow summary; a Running run past its expected duration records `run.overdue` once, for rules to page on. [Detect when something did not happen › Freshness and deadlines](https://sercanatalik.github.io/cereyan/guides/detect-missing-events/#freshness-and-deadlines-in-one-line)

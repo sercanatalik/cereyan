@@ -17,7 +17,7 @@
     <section class="cy-hero">
       <div class="cy-hero__copy">
         <p class="cy-eyebrow">
-          <span class="cy-chip">v{{ config.extra.version_display | default("2.2.0", true) }}</span>
+          {% if config.extra.version_display %}<span class="cy-chip">v{{ config.extra.version_display }}</span>{% endif %}
           <span>MIT licensed</span>
           <span class="cy-dot" aria-hidden="true"></span>
           <span>Python 3.11+</span>
