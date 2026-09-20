@@ -308,6 +308,67 @@ pub async fn get_run(
     Ok(Json(run))
 }
 
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct CompareQuery {
+    /// Two run ids, comma separated: the baseline first, the run in question second.
+    pub ids: String,
+}
+
+pub(crate) fn bundle(state: &AppState, id: i64) -> ApiResult<crate::compare::RunBundle> {
+    let run = state
+        .store
+        .get_run(id)?
+        .ok_or_else(|| ApiError::NotFound(format!("run {id} not found")))?;
+    let tasks = state.store.task_runs_by_run(id, None)?;
+    let errors = state
+        .store
+        .logs(&cereyan_store::LogFilter {
+            run_id: Some(id),
+            min_level: Some(40),
+            limit: Some(500),
+            ..Default::default()
+        })?
+        .items;
+    let artifacts = state.store.artifacts_by_run(id)?;
+    Ok(crate::compare::RunBundle {
+        run,
+        tasks,
+        errors,
+        artifacts,
+    })
+}
+
+#[utoipa::path(get, path = "/api/runs/compare", params(CompareQuery), responses((status = 200, body = crate::compare::RunComparison), (status = 404), (status = 422)))]
+pub async fn compare_runs(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<CompareQuery>,
+) -> ApiResult<Json<crate::compare::RunComparison>> {
+    let ids: Vec<i64> = q
+        .ids
+        .split(',')
+        .map(|s| s.trim().parse::<i64>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| ApiError::Unprocessable("ids must be two run ids, comma separated".into()))?;
+    let [a, b] = ids[..] else {
+        return Err(ApiError::Unprocessable(
+            "ids must name exactly two runs".into(),
+        ));
+    };
+    if a == b {
+        return Err(ApiError::Unprocessable(
+            "ids must be two different runs".into(),
+        ));
+    }
+    let st = state.clone();
+    tokio::task::spawn_blocking(move || {
+        let left = bundle(&st, a)?;
+        let right = bundle(&st, b)?;
+        Ok(Json(crate::compare::compare(&left, &right)))
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?
+}
+
 #[utoipa::path(delete, path = "/api/runs/{id}", params(("id" = i64, Path)), responses((status = 204), (status = 404)))]
 pub async fn delete_run(
     State(state): State<Arc<AppState>>,

@@ -147,6 +147,46 @@
         ]
       }
     },
+    "compare_runs": {
+      "default": {
+        "items": {
+          "artifacts": [
+            "changed",
+            "key",
+            "kind",
+            "left",
+            "right"
+          ],
+          "parameters": [
+            "changed",
+            "key",
+            "left",
+            "right"
+          ],
+          "tasks": [
+            "delta",
+            "key",
+            "left",
+            "name",
+            "right",
+            "state_changed"
+          ]
+        },
+        "keys": [
+          "artifacts",
+          "attributes",
+          "duration",
+          "first_divergence",
+          "left",
+          "new_errors",
+          "parameters",
+          "right",
+          "same_flow",
+          "summary",
+          "tasks"
+        ]
+      }
+    },
     "create_schedule": {
       "default": {
         "keys": [
@@ -650,6 +690,32 @@
         "type": "object"
       },
       "name": "get_run"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "What changed between two runs: parameters and attributes, duration, each task's state and duration, the first task that diverged, error lines and the failure message new on the second run, and artifact differences. The first run is the baseline. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "other_run_id": {
+            "description": "The run in question",
+            "type": "integer"
+          },
+          "run_id": {
+            "description": "The baseline, usually the last good run",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "other_run_id"
+        ],
+        "type": "object"
+      },
+      "name": "compare_runs"
     },
     {
       "annotations": {

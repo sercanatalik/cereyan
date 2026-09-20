@@ -120,6 +120,18 @@ function RunDetail() {
     onSuccess: () => navigate({ to: "/runs" }),
   });
   const r = run.data;
+  // The most recent earlier run of the same flow, for "Compare with previous run".
+  const earlier = useQuery({
+    queryKey: ["previous-run", id, r?.flow_id],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/runs", {
+          params: { query: { flow: r?.flow_name, project: r?.project, limit: 20 } },
+        }),
+      ),
+    enabled: !!r,
+  });
+  const previous = earlier.data?.items.find((x) => x.id < id) ?? null;
   if (!r)
     return (
       <Page crumbs={[{ label: "Runs", to: "/runs" }, { label: runId }]}>
@@ -166,6 +178,15 @@ function RunDetail() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    disabled={!previous}
+                    onSelect={() =>
+                      previous && navigate({ to: "/runs/compare", search: { ids: `${previous.id},${r.id}` } })
+                    }
+                    data-testid="compare-previous"
+                  >
+                    {previous ? "Compare with previous run" : "No earlier run to compare"}
+                  </DropdownMenuItem>
                   <DropdownMenuItem
                     variant="destructive"
                     onSelect={() => window.confirm("Delete this run and its history?") && remove.mutate()}

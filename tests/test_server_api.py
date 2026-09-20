@@ -146,6 +146,45 @@ def test_delete_run(server):
     assert info.value.status == 404
 
 
+def test_compare_runs(server, run_cli):
+    c = server.client
+    first = c.run("etl", day="2026-09-01", n=1)
+    server.wait_run(first["id"])
+    second = c.run("etl", day="2026-09-02", n=1)
+    server.wait_run(second["id"])
+    failed = c.run("fail")
+    server.wait_run(failed["id"])
+    cmp = c.compare_runs(first["id"], second["id"])
+    assert cmp["same_flow"] and cmp["left"]["id"] == first["id"] and cmp["right"]["id"] == second["id"]
+    by_key = {p["key"]: p for p in cmp["parameters"]}
+    assert by_key["day"]["changed"] and by_key["day"]["left"] == "2026-09-01" and by_key["day"]["right"] == "2026-09-02"
+    assert not by_key["n"]["changed"]
+    assert [t["key"] for t in cmp["tasks"]] == ["step-0"]
+    step = cmp["tasks"][0]
+    assert step["left"]["state"]["type"] == "Completed" and step["right"]["state"]["type"] == "Completed"
+    assert step["delta"] is not None and not step["state_changed"]
+    assert cmp["first_divergence"] is None and cmp["new_errors"] == []
+    assert cmp["duration"]["delta"] is not None
+    assert cmp["summary"]["parameters_changed"] == 1 and cmp["summary"]["tasks_state_changed"] == 0
+    # A success against a failure of another flow: the failure message is new.
+    cmp = c.compare_runs(first["id"], failed["id"])
+    assert not cmp["same_flow"]
+    assert any("bad" in m for m in cmp["new_errors"]), cmp["new_errors"]
+    assert cmp["summary"]["new_errors"] >= 1
+    for ids in ("1", f"{first['id']},{first['id']}", f"{first['id']},{second['id']},{failed['id']}", "a,b"):
+        with pytest.raises(ApiError) as err:
+            c._request("GET", "/api/runs/compare", params={"ids": ids})
+        assert err.value.status == 422
+    with pytest.raises(ApiError) as err:
+        c.compare_runs(first["id"], 999_999)
+    assert err.value.status == 404
+    result = run_cli("runs", "compare", str(first["id"]), str(second["id"]))
+    assert result.returncode == 0, result.stderr
+    assert "1 parameter(s) changed" in result.stdout and "param day:" in result.stdout and "task step-0:" in result.stdout
+    result = run_cli("runs", "compare", str(first["id"]), str(failed["id"]), "--json")
+    assert result.returncode == 0 and json.loads(result.stdout)["same_flow"] is False
+
+
 def test_openapi_document_and_snapshot(server):
     doc = server.client._request("GET", "/api/openapi.json")
     paths = sorted(doc["paths"])

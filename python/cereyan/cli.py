@@ -106,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     ls.add_argument("--limit", type=int, default=20, help="number of runs to show")
     ls.add_argument("--json", action="store_true", help="print the runs as JSON")
     ls.set_defaults(func=cmd_runs_ls)
+    compare = runs_sub.add_parser("compare", help="what changed between two runs (requires a running server)")
+    compare.add_argument("baseline", type=int, help="run id of the baseline, usually the last good run")
+    compare.add_argument("other", type=int, help="run id of the run in question")
+    compare.add_argument("--json", action="store_true", help="print the comparison as JSON")
+    compare.set_defaults(func=cmd_runs_compare)
     return parser
 
 
@@ -427,6 +432,48 @@ def _fmt_time(micros: int | None) -> str:
     if micros is None:
         return "-"
     return datetime.fromtimestamp(micros / 1_000_000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _fmt_micros(value) -> str:
+    if value is None:
+        return "-"
+    seconds = value / 1_000_000
+    return f"{seconds:.1f}s" if abs(seconds) < 90 else f"{seconds / 60:.1f}m"
+
+
+def cmd_runs_compare(args) -> int:
+    from . import client as client_module
+
+    server = client_module.find_server(engine.resolved_home())
+    if server is None:
+        print("error: runs compare needs a running server (start `cereyan serve`)", file=sys.stderr)
+        return EXIT_SCHEDULING
+    try:
+        c = server.compare_runs(args.baseline, args.other)
+    except client_module.ApiError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_SCHEDULING
+    if args.json:
+        print(json.dumps(c, indent=2))
+        return EXIT_OK
+    left, right, s = c["left"], c["right"], c["summary"]
+    print(f"{left['name']} ({left['state']['type']}, {_fmt_micros(left['total_run_time'])}) -> "
+          f"{right['name']} ({right['state']['type']}, {_fmt_micros(right['total_run_time'])})"
+          + ("" if c["same_flow"] else "  [different flows]"))
+    print(f"{s['parameters_changed']} parameter(s) changed, {s['tasks_state_changed']} task state(s) changed, "
+          f"{s['tasks_duration_changed']} task duration(s) moved, {s['new_errors']} new error(s), "
+          f"{s['artifacts_changed']} artifact difference(s)")
+    for p in c["parameters"]:
+        if p["changed"]:
+            print(f"  param {p['key']}: {json.dumps(p['left'])} -> {json.dumps(p['right'])}")
+    for t in c["tasks"]:
+        l, r = t["left"], t["right"]
+        mark = " <- first divergence" if t["key"] == c["first_divergence"] else ""
+        print(f"  task {t['key']}: {l['state']['type'] if l else '-'} {_fmt_micros(l['duration']) if l else ''} -> "
+              f"{r['state']['type'] if r else '-'} {_fmt_micros(r['duration']) if r else ''}{mark}")
+    for m in c["new_errors"]:
+        print(f"  new error: {m}")
+    return EXIT_OK
 
 
 def cmd_runs_ls(args) -> int:

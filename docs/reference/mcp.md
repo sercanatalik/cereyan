@@ -23,13 +23,14 @@ Runs created through MCP record `created_by = mcp:<client name>` from the `initi
 
 Every tool description states its effect so a model can decide before calling. A tool returns one text content block holding the JSON whose top-level keys are listed as its response; a failure returns `isError: true` and a message instead. Rule creation is not exposed, and a schedule declared in a flow's code cannot be deleted through MCP: the next restart recreates it from the declaration, so pausing it is what lasts.
 
-### Read-only tools (17)
+### Read-only tools (18)
 
 | Tool | Arguments | Returns |
 |---|---|---|
 | `list_flows` | `group` (string) — Only flows of this group: the one a flow declared, else its project<br>`project` (string) — Only flows of this project | List the registered flows with their project, parameters schema, tags, and any registration error. Response keys: `flows` |
 | `list_runs` | `attributes` (string) — Comma-separated key=value pairs the run's attributes (set_attributes) must match<br>`flow` (string)<br>`group` (string) — Only runs of flows in this group: the one a flow declared, else its project<br>`limit` (integer, 1 to 200, default `20`)<br>`name` (string) — Exact run name<br>`params` (string) — Comma-separated key=value pairs the run's parameters must match, e.g. day=2026-09-01; searches the last 30 days unless start bounds are given<br>`project` (string)<br>`state_name` (string) — A named sub-state such as Late or AwaitingRetry<br>`state_type` (string) — Scheduled, Pending, Running, Completed, Failed, Cancelled, Crashed, Paused, Cancelling | List runs, newest first, with optional filters. Response keys: `next_cursor`, `runs` |
 | `get_run` | `run_id` (integer, required) | One run with its state, parameters, timing, and task runs. Response keys: `run`, `task_runs` |
+| `compare_runs` | `other_run_id` (integer, required) — The run in question<br>`run_id` (integer, required) — The baseline, usually the last good run | What changed between two runs: parameters and attributes, duration, each task's state and duration, the first task that diverged, error lines and the failure message new on the second run, and artifact differences. The first run is the baseline. Response keys: `artifacts`, `attributes`, `duration`, `first_divergence`, `left`, `new_errors`, `parameters`, `right`, `same_flow`, `summary`, `tasks` |
 | `run_logs` | `limit` (integer, 1 to 1000, default `200`)<br>`min_level` (integer)<br>`run_id` (integer, required)<br>`search` (string) | Log lines of a run, oldest first. Filter by minimum level (10 debug, 20 info, 30 warning, 40 error) or a search string. Response keys: `logs`, `next_cursor` |
 | `list_events` | `flow_id` (integer)<br>`limit` (integer, 1 to 500, default `50`)<br>`name` (string) — Exact name or a prefix ending in * such as run.*<br>`run_id` (integer) | Recent events (run and task transitions, schedule changes, rule firings, custom events), newest first. Response keys: `events`, `next_cursor` |
 | `list_artifacts` | `flow` (string)<br>`key` (string)<br>`kind` (string)<br>`limit` (integer, 1 to 200, default `50`)<br>`project` (string)<br>`run_id` (integer) | Artifacts across runs, newest first, with their run, flow, and project. Response keys: `artifacts`, `next_cursor` |
@@ -73,6 +74,9 @@ Recorded from real responses, so a model knows what it gets without a second cal
 |---|---|---|
 | `check_flows` | `findings` | `flow`, `kind`, `level`, `message` |
 | `check_flows` | `flows` | `findings`, `name`, `project`, `schedules` |
+| `compare_runs` | `artifacts` | `changed`, `key`, `kind`, `left`, `right` |
+| `compare_runs` | `parameters` | `changed`, `key`, `left`, `right` |
+| `compare_runs` | `tasks` | `delta`, `key`, `left`, `name`, `right`, `state_changed` |
 | `explain_failure` | `error_logs` | `id`, `level`, `logger`, `message`, `run_id`, `task_run_id`, `timestamp` |
 | `explain_failure` | `events` | `external_id`, `flow_id`, `id`, `name`, `occurred`, `payload`, `related`, `resource`, `run_id`, `seq` |
 | `get_run` | `task_runs` | `crash_count`, `created_at`, `dynamic_key`, `end_time`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `id`, `name`, `parents`, `pass`, `project`, `run_id`, `run_name`, `start_time`, `state`, `task_key`, `total_run_time` |

@@ -465,6 +465,8 @@ pub fn tool_list() -> Vec<Value> {
             }), &[]),
         read_tool("get_run", "One run with its state, parameters, timing, and task runs. Read-only.",
             json!({"run_id": {"type": "integer"}}), &["run_id"]),
+        read_tool("compare_runs", "What changed between two runs: parameters and attributes, duration, each task's state and duration, the first task that diverged, error lines and the failure message new on the second run, and artifact differences. The first run is the baseline. Read-only.",
+            json!({"run_id": {"type": "integer", "description": "The baseline, usually the last good run"}, "other_run_id": {"type": "integer", "description": "The run in question"}}), &["run_id", "other_run_id"]),
         read_tool("run_logs", "Log lines of a run, oldest first. Filter by minimum level (10 debug, 20 info, 30 warning, 40 error) or a search string. Read-only.",
             json!({"run_id": {"type": "integer"}, "min_level": {"type": "integer"}, "search": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 200}}), &["run_id"]),
         read_tool("list_events", "Recent events (run and task transitions, schedule changes, rule firings, custom events), newest first. Read-only.",
@@ -834,6 +836,24 @@ async fn call_tool(
                 .ok_or_else(|| ToolError::Failed(format!("run {id} not found")))?;
             let tasks = state.store.task_runs_by_run(id, None)?;
             Ok(json!({"run": run, "task_runs": tasks}))
+        }
+        "compare_runs" => {
+            let a = arg_i64(args, "run_id")?;
+            let b = arg_i64(args, "other_run_id")?;
+            if a == b {
+                return Err(ToolError::Failed(
+                    "run_id and other_run_id must differ".into(),
+                ));
+            }
+            let st = state.clone();
+            let comparison = tokio::task::spawn_blocking(move || {
+                let left = runs::bundle(&st, a)?;
+                let right = runs::bundle(&st, b)?;
+                Ok::<_, ApiError>(crate::compare::compare(&left, &right))
+            })
+            .await
+            .map_err(|e| ToolError::Failed(e.to_string()))??;
+            Ok(serde_json::to_value(comparison).unwrap_or(Value::Null))
         }
         "run_logs" => {
             let id = arg_i64(args, "run_id")?;

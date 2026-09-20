@@ -193,6 +193,16 @@ class Client:
         """``GET /api/runs/{id}``: one run with its state and parameters."""
         return self._request("GET", f"/api/runs/{run_id}")
 
+    def compare_runs(self, run_id: int, other_run_id: int) -> dict:
+        """``GET /api/runs/compare``: what changed from ``run_id`` (the baseline) to ``other_run_id``.
+
+        Parameters and attributes with a ``changed`` flag, the duration delta, each
+        task's state and duration on both sides, ``first_divergence``, ``new_errors``
+        (error lines and the failure message present only on the second run),
+        artifact differences, and a ``summary`` of counts.
+        """
+        return self._request("GET", "/api/runs/compare", params={"ids": f"{run_id},{other_run_id}"})
+
     def task_runs(self, run_id: int) -> list[dict]:
         """``GET /api/runs/{id}/tasks``: the run's task runs."""
         return self._request("GET", f"/api/runs/{run_id}/tasks")

@@ -168,7 +168,10 @@ def _response_keys(srv):
     keys["list_resources"] = {"default": _keys(call(srv, "list_resources"))}
     keys["flow_dependencies"] = {"default": _keys(call(srv, "flow_dependencies", flow="etl"))}
     keys["check_flows"] = {"default": _keys(call(srv, "check_flows"))}
-    keys["rerun_run"] = {"default": _keys(call(srv, "rerun_run", run_id=started["data"]["run"]["id"]))}
+    rerun = call(srv, "rerun_run", run_id=started["data"]["run"]["id"])
+    keys["rerun_run"] = {"default": _keys(rerun)}
+    srv.wait_run(rerun["data"]["run"]["id"])
+    keys["compare_runs"] = {"default": _keys(call(srv, "compare_runs", run_id=started["data"]["run"]["id"], other_run_id=rerun["data"]["run"]["id"]))}
     keys["flow__agent__etl"] = {"default": _keys(call(srv, "flow__agent__etl", day="2026-09-03"))}
 
     paused = call(srv, "run_flow", flow="ask")["data"]["run"]

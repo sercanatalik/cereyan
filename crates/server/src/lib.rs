@@ -5,6 +5,7 @@
 pub mod api;
 pub mod auth;
 mod base_path;
+pub mod compare;
 mod custom;
 mod dispatch;
 mod events;

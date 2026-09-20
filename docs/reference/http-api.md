@@ -243,6 +243,18 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | 200 | [`BulkResult`](#bulkresult) (application/json) |
 | 422 | no body |
 
+### `GET /api/runs/compare`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `ids` | query | string | yes | Two run ids, comma separated: the baseline first, the run in question second. |
+
+| Status | Body |
+|---|---|
+| 200 | [`RunComparison`](#runcomparison) (application/json) |
+| 404 | no body |
+| 422 | no body |
+
 ### `GET /api/runs/{id}`
 
 | Parameter | In | Type | Required | Description |
@@ -945,6 +957,16 @@ Also served on POST, which is what the engine client speaks.
 | `run_id` | integer (int64) | yes |  |
 | `task_run_id` | integer or null (int64) | no |  |
 
+### `ArtifactDiff`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changed` | boolean | yes | Present on one side only, or `data` differs. |
+| `key` | string or null | no |  |
+| `kind` | string | yes |  |
+| `left` | integer or null (int64) | no |  |
+| `right` | integer or null (int64) | no |  |
+
 ### `ArtifactListItem`
 
 One artifact in the cross-run listing, with its run's identity.
@@ -1035,6 +1057,17 @@ Type: any.
 
 One of: `skip`, `latest`, `all`.
 
+### `CompareSummary`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `artifacts_changed` | integer | yes |  |
+| `attributes_changed` | integer | yes |  |
+| `new_errors` | integer | yes |  |
+| `parameters_changed` | integer | yes |  |
+| `tasks_duration_changed` | integer | yes | Tasks whose duration moved by more than 10 percent and more than a second. |
+| `tasks_state_changed` | integer | yes |  |
+
 ### `ConfigEntry`
 
 | Field | Type | Required | Description |
@@ -1122,6 +1155,14 @@ A flow that runs after the skipped one, directly or further down its chain.
 | `fires` | array of integer (int64) | yes | The skipped fires whose runs of this flow will be created Skipped. |
 | `flow` | string | yes |  |
 | `project` | string | yes |  |
+
+### `DurationDiff`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `delta` | integer or null (int64) | no | right − left, microseconds, when both are known. |
+| `left` | integer or null (int64) | no |  |
+| `right` | integer or null (int64) | no |  |
 
 ### `EmitEventBody`
 
@@ -1586,6 +1627,22 @@ Type: any.
 | `task_counts` | object | no | Task runs of this run counted by state type; empty until tasks exist. |
 | `total_run_time` | null or [`i64`](#i64) | no |  |
 
+### `RunComparison`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `artifacts` | [`ArtifactDiff`](#artifactdiff)[] | yes |  |
+| `attributes` | [`ValueDiff`](#valuediff)[] | yes |  |
+| `duration` | [`DurationDiff`](#durationdiff) | yes |  |
+| `first_divergence` | string or null | no | The first task, in the left run's order, whose state differs or that exists on one side only. |
+| `left` | [`Run`](#run) | yes |  |
+| `new_errors` | array of string | yes | Error-level log lines and the failure message present only on the right. |
+| `parameters` | [`ValueDiff`](#valuediff)[] | yes |  |
+| `right` | [`Run`](#run) | yes |  |
+| `same_flow` | boolean | yes |  |
+| `summary` | [`CompareSummary`](#comparesummary) | yes |  |
+| `tasks` | [`TaskDiff`](#taskdiff)[] | yes |  |
+
 ### `RunGraph`
 
 | Field | Type | Required | Description |
@@ -1812,6 +1869,17 @@ Row counts for the Data tab and the reset dialog.
 | `ui_schedules` | integer (int64) | yes | Schedules not registered from code. |
 | `variables` | integer (int64) | yes |  |
 
+### `TaskDiff`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `delta` | integer or null (int64) | no | right − left duration, microseconds, when both ran. |
+| `key` | string | yes | The dynamic key, `step-0`, matched across the two runs. |
+| `left` | null or [`TaskSide`](#taskside) | no |  |
+| `name` | string | yes |  |
+| `right` | null or [`TaskSide`](#taskside) | no |  |
+| `state_changed` | boolean | yes |  |
+
 ### `TaskRun`
 
 | Field | Type | Required | Description |
@@ -1843,6 +1911,14 @@ Row counts for the Data tab and the reset dialog.
 | `items` | [`TaskRun`](#taskrun)[] | yes |  |
 | `next_cursor` | integer or null (int64) | no |  |
 
+### `TaskSide`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `duration` | integer or null (int64) | no |  |
+| `id` | integer (int64) | yes |  |
+| `state` | [`State`](#state) | yes |  |
+
 ### `TransitionBody`
 
 | Field | Type | Required | Description |
@@ -1872,6 +1948,15 @@ One of: [`UpcomingRun`](#upcomingrun), [`ProjectedFire`](#projectedfire).
 A materialized run in the upcoming list.
 
 Type: any.
+
+### `ValueDiff`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changed` | boolean | yes |  |
+| `key` | string | yes |  |
+| `left` |  | yes |  |
+| `right` |  | yes |  |
 
 ### `VariableBody`
 

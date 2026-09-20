@@ -145,7 +145,7 @@ cereyan mcp [-h] [--url URL] [--socket SOCKET]
 ## `cereyan runs`
 
 ```text
-cereyan runs [-h] {ls} ...
+cereyan runs [-h] {ls,compare} ...
 ```
 
 ### `cereyan runs ls`
@@ -162,6 +162,21 @@ cereyan runs ls [-h] [--flow FLOW] [--project PROJECT] [--group GROUP] [--state 
 | `--state` `STATE` | state type, e.g. Failed. |
 | `--limit` `LIMIT` | number of runs to show. Default `20`. |
 | `--json` | print the runs as JSON. |
+
+### `cereyan runs compare`
+
+```text
+cereyan runs compare [-h] [--json] baseline other
+```
+
+| Argument | Meaning |
+|---|---|
+| `baseline` | run id of the baseline, usually the last good run. |
+| `other` | run id of the run in question. |
+
+| Option | Meaning |
+|---|---|
+| `--json` | print the comparison as JSON. |
 
 ## Exit codes
 

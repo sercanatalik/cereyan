@@ -84,6 +84,42 @@
         ],
         "type": "object"
       },
+      "ArtifactDiff": {
+        "properties": {
+          "changed": {
+            "description": "Present on one side only, or `data` differs.",
+            "type": "boolean"
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "type": "string"
+          },
+          "left": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "right": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "changed"
+        ],
+        "type": "object"
+      },
       "ArtifactListItem": {
         "allOf": [
           {
@@ -381,6 +417,44 @@
           "all"
         ],
         "type": "string"
+      },
+      "CompareSummary": {
+        "properties": {
+          "artifacts_changed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "attributes_changed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "new_errors": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parameters_changed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tasks_duration_changed": {
+            "description": "Tasks whose duration moved by more than 10 percent and more than a second.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tasks_state_changed": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "parameters_changed",
+          "attributes_changed",
+          "tasks_state_changed",
+          "tasks_duration_changed",
+          "new_errors",
+          "artifacts_changed"
+        ],
+        "type": "object"
       },
       "ConfigEntry": {
         "properties": {
@@ -693,6 +767,33 @@
           "project",
           "fires"
         ],
+        "type": "object"
+      },
+      "DurationDiff": {
+        "properties": {
+          "delta": {
+            "description": "right \u2212 left, microseconds, when both are known.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "left": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "right": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "EmitEventBody": {
@@ -2477,6 +2578,76 @@
         ],
         "type": "object"
       },
+      "RunComparison": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDiff"
+            },
+            "type": "array"
+          },
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/ValueDiff"
+            },
+            "type": "array"
+          },
+          "duration": {
+            "$ref": "#/components/schemas/DurationDiff"
+          },
+          "first_divergence": {
+            "description": "The first task, in the left run's order, whose state differs or that exists on one side only.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "left": {
+            "$ref": "#/components/schemas/Run"
+          },
+          "new_errors": {
+            "description": "Error-level log lines and the failure message present only on the right.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ValueDiff"
+            },
+            "type": "array"
+          },
+          "right": {
+            "$ref": "#/components/schemas/Run"
+          },
+          "same_flow": {
+            "type": "boolean"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/CompareSummary"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskDiff"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "left",
+          "right",
+          "same_flow",
+          "parameters",
+          "attributes",
+          "duration",
+          "tasks",
+          "new_errors",
+          "artifacts",
+          "summary"
+        ],
+        "type": "object"
+      },
       "RunGraph": {
         "properties": {
           "edges": {
@@ -3534,6 +3705,54 @@
         ],
         "type": "object"
       },
+      "TaskDiff": {
+        "properties": {
+          "delta": {
+            "description": "right \u2212 left duration, microseconds, when both ran.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "key": {
+            "description": "The dynamic key, `step-0`, matched across the two runs.",
+            "type": "string"
+          },
+          "left": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskSide"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "right": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskSide"
+              }
+            ]
+          },
+          "state_changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "state_changed"
+        ],
+        "type": "object"
+      },
       "TaskRun": {
         "properties": {
           "crash_count": {
@@ -3663,6 +3882,29 @@
         ],
         "type": "object"
       },
+      "TaskSide": {
+        "properties": {
+          "duration": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ],
+        "type": "object"
+      },
       "TransitionBody": {
         "properties": {
           "details": {
@@ -3767,6 +4009,25 @@
           }
         ],
         "description": "A materialized run in the upcoming list."
+      },
+      "ValueDiff": {
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "left": {},
+          "right": {}
+        },
+        "required": [
+          "key",
+          "left",
+          "right",
+          "changed"
+        ],
+        "type": "object"
       },
       "VariableBody": {
         "properties": {
@@ -5864,6 +6125,43 @@
                 }
               }
             },
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/compare": {
+      "get": {
+        "operationId": "compare_runs",
+        "parameters": [
+          {
+            "description": "Two run ids, comma separated: the baseline first, the run in question second.",
+            "in": "query",
+            "name": "ids",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunComparison"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
             "description": ""
           },
           "422": {

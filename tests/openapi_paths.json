@@ -36,6 +36,7 @@
   "/api/rules/{id}/test",
   "/api/runs",
   "/api/runs/bulk",
+  "/api/runs/compare",
   "/api/runs/{id}",
   "/api/runs/{id}/artifacts",
   "/api/runs/{id}/attributes",

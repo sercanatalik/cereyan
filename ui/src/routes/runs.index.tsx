@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Search as SearchIcon, X } from "lucide-react";
 import { useState } from "react";
 import { api, type StateType, unwrap } from "@/api/client";
@@ -200,6 +200,7 @@ function RunsTab({
   const [cursor, setCursor] = useState<number | undefined>();
   const [history, setHistory] = useState<number[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const navigate = useNavigate();
   const query = useQuery({
     queryKey: [
       "runs",
@@ -351,6 +352,21 @@ function RunsTab({
           data-testid="selection-bar"
         >
           <span className="mr-2 text-sm font-medium tabular-nums">{selected.size} selected</span>
+          {selected.size === 2 ? (
+            <Button
+              size="sm"
+              className="bg-primary-foreground/15 text-primary-foreground hover:bg-primary-foreground/25"
+              onClick={() =>
+                navigate({
+                  to: "/runs/compare",
+                  search: { ids: [...selected].sort((a, b) => a - b).join(",") },
+                })
+              }
+              data-testid="compare-selected"
+            >
+              Compare
+            </Button>
+          ) : null}
           <Button
             size="sm"
             className="bg-primary-foreground/15 text-primary-foreground hover:bg-primary-foreground/25"

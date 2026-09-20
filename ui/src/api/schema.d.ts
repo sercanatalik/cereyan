@@ -758,6 +758,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["compare_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduler": {
         parameters: {
             query?: never;
@@ -1107,6 +1123,16 @@ export interface components {
             /** Format: int64 */
             task_run_id?: number | null;
         };
+        ArtifactDiff: {
+            /** @description Present on one side only, or `data` differs. */
+            changed: boolean;
+            key?: string | null;
+            kind: string;
+            /** Format: int64 */
+            left?: number | null;
+            /** Format: int64 */
+            right?: number | null;
+        };
         /** @description One artifact in the cross-run listing, with its run's identity. */
         ArtifactListItem: components["schemas"]["ArtifactRow"] & {
             flow_name: string;
@@ -1194,6 +1220,15 @@ export interface components {
         };
         /** @enum {string} */
         CatchupPolicy: "skip" | "latest" | "all";
+        CompareSummary: {
+            artifacts_changed: number;
+            attributes_changed: number;
+            new_errors: number;
+            parameters_changed: number;
+            /** @description Tasks whose duration moved by more than 10 percent and more than a second. */
+            tasks_duration_changed: number;
+            tasks_state_changed: number;
+        };
         ConfigEntry: {
             key: string;
             /** @description True when the value is set and hidden. */
@@ -1295,6 +1330,17 @@ export interface components {
             fires: number[];
             flow: string;
             project: string;
+        };
+        DurationDiff: {
+            /**
+             * Format: int64
+             * @description right − left, microseconds, when both are known.
+             */
+            delta?: number | null;
+            /** Format: int64 */
+            left?: number | null;
+            /** Format: int64 */
+            right?: number | null;
         };
         EmitEventBody: {
             /** Format: int64 */
@@ -1909,6 +1955,21 @@ export interface components {
             };
             total_run_time?: null | components["schemas"]["i64"];
         };
+        RunComparison: {
+            artifacts: components["schemas"]["ArtifactDiff"][];
+            attributes: components["schemas"]["ValueDiff"][];
+            duration: components["schemas"]["DurationDiff"];
+            /** @description The first task, in the left run's order, whose state differs or that exists on one side only. */
+            first_divergence?: string | null;
+            left: components["schemas"]["Run"];
+            /** @description Error-level log lines and the failure message present only on the right. */
+            new_errors: string[];
+            parameters: components["schemas"]["ValueDiff"][];
+            right: components["schemas"]["Run"];
+            same_flow: boolean;
+            summary: components["schemas"]["CompareSummary"];
+            tasks: components["schemas"]["TaskDiff"][];
+        };
         RunGraph: {
             edges: components["schemas"]["GraphEdge"][];
             nodes: components["schemas"]["GraphNode"][];
@@ -2250,6 +2311,19 @@ export interface components {
             /** Format: int64 */
             variables: number;
         };
+        TaskDiff: {
+            /**
+             * Format: int64
+             * @description right − left duration, microseconds, when both ran.
+             */
+            delta?: number | null;
+            /** @description The dynamic key, `step-0`, matched across the two runs. */
+            key: string;
+            left?: null | components["schemas"]["TaskSide"];
+            name: string;
+            right?: null | components["schemas"]["TaskSide"];
+            state_changed: boolean;
+        };
         TaskRun: {
             /** Format: int32 */
             crash_count: number;
@@ -2288,6 +2362,13 @@ export interface components {
             /** Format: int64 */
             next_cursor?: number | null;
         };
+        TaskSide: {
+            /** Format: int64 */
+            duration?: number | null;
+            /** Format: int64 */
+            id: number;
+            state: components["schemas"]["State"];
+        };
         TransitionBody: {
             details?: Record<string, never>;
             force?: boolean;
@@ -2315,6 +2396,12 @@ export interface components {
             skipped_at?: number | null;
             /** @description Who skipped it (`ui`, `api`), when `skipped`. */
             skipped_by?: string | null;
+        };
+        ValueDiff: {
+            changed: boolean;
+            key: string;
+            left: unknown;
+            right: unknown;
         };
         VariableBody: {
             name: string;
@@ -3948,6 +4035,40 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BulkResult"];
                 };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    compare_runs: {
+        parameters: {
+            query: {
+                /** @description Two run ids, comma separated: the baseline first, the run in question second. */
+                ids: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunComparison"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             422: {
                 headers: {

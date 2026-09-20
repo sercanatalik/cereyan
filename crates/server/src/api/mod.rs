@@ -106,6 +106,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         runs::delete_run,
         runs::patch_attributes,
         runs::bulk_runs,
+        runs::compare_runs,
         runs::run_tasks,
         runs::run_graph,
         runs::transition_run,
@@ -182,6 +183,13 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         crate::scheduler::Pause,
         pause::SchedulerStatus,
         pause::PauseBody,
+        crate::compare::RunComparison,
+        crate::compare::ValueDiff,
+        crate::compare::DurationDiff,
+        crate::compare::TaskSide,
+        crate::compare::TaskDiff,
+        crate::compare::ArtifactDiff,
+        crate::compare::CompareSummary,
         cereyan_core::Flow,
         cereyan_core::Run,
         cereyan_core::TaskRun,
@@ -294,6 +302,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(runs::get_run).delete(runs::delete_run),
         )
         .route("/api/runs/bulk", post(runs::bulk_runs))
+        .route("/api/runs/compare", get(runs::compare_runs))
         .route(
             "/api/runs/{id}/attributes",
             axum::routing::patch(runs::patch_attributes).post(runs::patch_attributes),
