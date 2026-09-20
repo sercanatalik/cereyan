@@ -114,7 +114,9 @@ def test_until_resumes_on_its_own(held):
     status = c.pause_scheduler(reason="blip", until=until)
     assert status["paused"] and status["until"] == int(until.timestamp() * 1_000_000)
     wait_until(lambda: not c.scheduler()["paused"], timeout=15)
-    assert c.events(kind="scheduler.resumed")
+    # The flag clears before the event is written: resuming re-arms every
+    # schedule first, and the event records what that did.
+    wait_until(lambda: c.events(kind="scheduler.resumed"), timeout=15)
     # A string works too, and an unparseable one is refused before any request.
     c.pause_scheduler(until="2099-01-01T00:00:00Z")
     assert c.scheduler()["until"] == int(datetime(2099, 1, 1, tzinfo=timezone.utc).timestamp() * 1_000_000)
