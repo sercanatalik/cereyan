@@ -307,6 +307,24 @@
           }
         ]
       },
+      "BackupResult": {
+        "properties": {
+          "backups": {
+            "description": "`db-*.sqlite` copies after pruning.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "description": "The copy just written.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "backups"
+        ],
+        "type": "object"
+      },
       "CatchupPolicy": {
         "enum": [
           "skip",
@@ -507,6 +525,11 @@
             "description": "Where a reset writes its copy.",
             "type": "string"
           },
+          "backups": {
+            "description": "`db-*.sqlite` copies in it.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "bytes": {
             "format": "int64",
             "minimum": 0,
@@ -535,7 +558,8 @@
           "wal_bytes",
           "counts",
           "stale_projects",
-          "backup_dir"
+          "backup_dir",
+          "backups"
         ],
         "type": "object"
       },
@@ -2735,6 +2759,21 @@
       },
       "Settings": {
         "properties": {
+          "backup_every": {
+            "description": "Hours between scheduled backups; 0 is off.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "backup_keep": {
+            "description": "Scheduled copies kept.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "backups": {
+            "description": "`db-*.sqlite` copies under the backup directory.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "catchup_default": {
             "type": "string"
           },
@@ -2773,6 +2812,25 @@
           "host": {
             "type": "string"
           },
+          "keep_last_runs_per_flow": {
+            "description": "Runs per flow retention never deletes.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_backup_at": {
+            "description": "Microseconds since the epoch of the last backup, scheduled or on demand.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "last_backup_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "max_engines": {
             "minimum": 0,
             "type": "integer"
@@ -2791,6 +2849,16 @@
             "type": "object"
           },
           "retain_days": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "retain_failed_runs_days": {
+            "description": "Days to keep Failed and Crashed runs; 0 means `retain_runs_days`.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "retain_runs_days": {
+            "description": "Days to keep terminal runs; 0 keeps them.",
             "format": "int64",
             "type": "integer"
           },
@@ -2847,6 +2915,12 @@
           "crash_retries_default",
           "catchup_default",
           "retain_days",
+          "retain_runs_days",
+          "retain_failed_runs_days",
+          "keep_last_runs_per_flow",
+          "backup_every",
+          "backup_keep",
+          "backups",
           "email_configured",
           "secret_key_present",
           "secret_key_missing",
@@ -2858,7 +2932,28 @@
       },
       "SettingsPatch": {
         "properties": {
+          "backup_every": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "backup_keep": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "crash_retries": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "keep_last_runs_per_flow": {
             "format": "int64",
             "type": [
               "integer",
@@ -2879,6 +2974,20 @@
             ]
           },
           "retain_days": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "retain_failed_runs_days": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "retain_runs_days": {
             "format": "int64",
             "type": [
               "integer",
@@ -3852,6 +3961,29 @@
                 }
               }
             },
+            "description": ""
+          }
+        },
+        "tags": [
+          "database"
+        ]
+      }
+    },
+    "/api/database/backup": {
+      "post": {
+        "operationId": "backup_database",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupResult"
+                }
+              }
+            },
+            "description": ""
+          },
+          "500": {
             "description": ""
           }
         },

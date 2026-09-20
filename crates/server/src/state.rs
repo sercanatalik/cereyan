@@ -41,6 +41,11 @@ pub struct AppState {
     /// Mutable settings (retention days), persisted to cereyan.toml on change.
     pub mcp: crate::mcp::Sessions,
     pub retain_days: std::sync::atomic::AtomicI64,
+    pub retain_runs_days: std::sync::atomic::AtomicI64,
+    pub retain_failed_runs_days: std::sync::atomic::AtomicI64,
+    pub keep_last_runs_per_flow: std::sync::atomic::AtomicI64,
+    pub backup_every: std::sync::atomic::AtomicI64,
+    pub backup_keep: std::sync::atomic::AtomicI64,
     pub crash_retries_default: std::sync::atomic::AtomicI64,
     /// UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`.
     pub title: RwLock<String>,
@@ -76,6 +81,13 @@ impl AppState {
     ) -> Result<AppState, ServerError> {
         let live: HashSet<i64> = config.live_flows.iter().copied().collect();
         let retain_days = config.retain_days;
+        let retention = (
+            config.retain_runs_days,
+            config.retain_failed_runs_days,
+            config.keep_last_runs_per_flow,
+            config.backup_every,
+            config.backup_keep,
+        );
         let crash_retries_default = config.crash_retries_default;
         let sources = config.sources.clone();
         let title = crate::ui::normalize_title(config.title.as_deref()).unwrap_or_else(|e| {
@@ -102,6 +114,11 @@ impl AppState {
             rules: crate::rules::RulesState::default(),
             rule_dispatcher: RwLock::new(None),
             retain_days: std::sync::atomic::AtomicI64::new(retain_days),
+            retain_runs_days: std::sync::atomic::AtomicI64::new(retention.0),
+            retain_failed_runs_days: std::sync::atomic::AtomicI64::new(retention.1),
+            keep_last_runs_per_flow: std::sync::atomic::AtomicI64::new(retention.2),
+            backup_every: std::sync::atomic::AtomicI64::new(retention.3),
+            backup_keep: std::sync::atomic::AtomicI64::new(retention.4),
             crash_retries_default: std::sync::atomic::AtomicI64::new(crash_retries_default),
             title: RwLock::new(title),
             sources: RwLock::new(sources),

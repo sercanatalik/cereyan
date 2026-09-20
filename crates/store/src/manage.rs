@@ -178,6 +178,44 @@ impl Store {
         Ok(path)
     }
 
+    /// The scheduled and on-demand copies, `db-*.sqlite`, oldest first by
+    /// modification time, then by name: two copies within one second differ
+    /// only by a `-n` suffix, which does not sort in the order they were made.
+    /// Pre-migration copies carry another prefix and are not listed.
+    pub fn list_backups(&self) -> Result<Vec<PathBuf>> {
+        let dir = self.home().join(BACKUP_DIR);
+        let mut out: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+        };
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            if name.is_some_and(|n| n.starts_with("db-") && n.ends_with(".sqlite")) {
+                let modified = entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                out.push((modified, path));
+            }
+        }
+        out.sort();
+        Ok(out.into_iter().map(|(_, p)| p).collect())
+    }
+
+    /// Remove the oldest `db-*.sqlite` copies beyond `keep`; returns how many went.
+    pub fn prune_backups(&self, keep: usize) -> Result<usize> {
+        let copies = self.list_backups()?;
+        let excess = copies.len().saturating_sub(keep);
+        for path in &copies[..excess] {
+            std::fs::remove_file(path)?;
+        }
+        Ok(excess)
+    }
+
     /// Delete the history, or everything but what `live_flows` registered
     /// from code, then compact the file.
     pub fn reset(&self, scope: ResetScope, live_flows: &[i64]) -> Result<DeletedCounts> {
@@ -192,7 +230,7 @@ impl Store {
 }
 
 /// `YYYYMMDD-HHMMSS` in UTC for a time in microseconds since the epoch.
-fn utc_stamp(micros: i64) -> String {
+pub(crate) fn utc_stamp(micros: i64) -> String {
     let secs = micros.div_euclid(1_000_000);
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).

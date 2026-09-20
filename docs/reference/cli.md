@@ -5,7 +5,7 @@
 The `cereyan` command. Every subcommand accepts the global options first, for example `cereyan --home /tmp/h run pipeline.py:etl`.
 
 ```text
-cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,check,backfill,mcp,runs} ...
+cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,check,backup,backfill,mcp,runs} ...
 ```
 
 ## Global options
@@ -74,6 +74,16 @@ cereyan check [-h] [--json] [--strict] [--now NOW] [dir]
 | `--json` | print the report as one JSON object. |
 | `--strict` | treat warnings as errors. |
 | `--now` `NOW` | reference instant for schedule previews, ISO 8601 (default: now; naive means UTC). |
+
+## `cereyan backup`
+
+```text
+cereyan backup [-h] [--json]
+```
+
+| Option | Meaning |
+|---|---|
+| `--json` | print the copy's path as JSON. |
 
 ## `cereyan backfill`
 

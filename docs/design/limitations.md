@@ -42,7 +42,7 @@ Cereyan is built for one machine, one wheel, and pipelines that can always be re
 - One server per machine, because the home and its advisory lock are global.
 - The engine pool bounds concurrent runs at `max_engines`, default the CPU count; a run occupies an engine for its whole duration, including time spent waiting on I/O.
 - Artifacts are limited to 1 MB and variables to 64 KB.
-- Retention deletes logs and events older than `retain_days`; runs and task runs stay.
+- Retention deletes logs and events older than `retain_days`, and runs older than `retain_runs_days` when that is set; persisted results under `storage/` are a cache keyed by task inputs and are not deleted per run.
 - Unix sockets and engine niceness do not exist on Windows.
 - A timeout or a cancel interrupts a running flow in Python code and in `time.sleep` on every platform, and in any blocking system call on Linux and macOS. A flow stuck in a call the platform cannot interrupt, such as a loop inside a C extension or most blocking I/O on Windows, is timed out when the call returns offline, and ended by the supervisor when served.
 - Schedules, dependencies, backfills, data rules, clock-armed proactive rules, and pausing need a running server; offline scripts record runs and fire code rules that a server has registered.

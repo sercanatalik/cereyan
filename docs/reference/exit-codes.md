@@ -22,6 +22,7 @@ One home per machine, resolved from `--home`, then `CEREYAN_HOME`, then `~/.cere
 | `server.json` | Written by a running server and removed on shutdown; see below. |
 | `secret.key` | Created when the first secret variable is set; encrypts secrets at rest. |
 | `storage/` | Persisted task results and cache entries. |
+| `backups/` | Copies of the database: `db-<time>.sqlite` from scheduled, on-demand, and reset backups, and `pre-migration-v<n>-<time>.sqlite` written before a schema upgrade. |
 
 A corrupted `db.sqlite` is moved aside on open and a fresh store is created; history is a cache and the code plus targets are the source of truth.
 

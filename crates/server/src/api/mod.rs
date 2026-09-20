@@ -140,6 +140,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         projects::delete_project,
         database::get_database,
         database::reset_database,
+        database::backup_database,
         vocabulary::get_vocabulary,
         observability::list_events,
         observability::get_event,
@@ -224,6 +225,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         database::DatabaseInfo,
         database::ResetBody,
         database::ResetResult,
+        database::BackupResult,
         cereyan_store::DeletedCounts,
         cereyan_store::TableCounts,
         vocabulary::Vocabulary,
@@ -325,6 +327,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/api/database", get(database::get_database))
         .route("/api/database/reset", post(database::reset_database))
+        .route("/api/database/backup", post(database::backup_database))
         .route("/api/vocabulary", get(vocabulary::get_vocabulary))
         .route(
             "/api/events",

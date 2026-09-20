@@ -78,6 +78,21 @@ pub struct ServeConfig {
     /// Days to keep logs and events (default 30).
     #[serde(default = "default_retain_days")]
     pub retain_days: i64,
+    /// Days to keep terminal runs; 0 keeps them forever.
+    #[serde(default)]
+    pub retain_runs_days: i64,
+    /// Days to keep Failed and Crashed runs; 0 means `retain_runs_days`.
+    #[serde(default)]
+    pub retain_failed_runs_days: i64,
+    /// Runs per flow that retention never deletes (default 10).
+    #[serde(default = "default_keep_last_runs")]
+    pub keep_last_runs_per_flow: i64,
+    /// Hours between scheduled backups; 0 is off.
+    #[serde(default)]
+    pub backup_every: i64,
+    /// Scheduled copies to keep (default 7).
+    #[serde(default = "default_backup_keep")]
+    pub backup_keep: i64,
     /// Default catch-up policy name reported in settings.
     #[serde(default = "default_catchup")]
     pub catchup_default: String,
@@ -173,6 +188,12 @@ fn default_tls() -> String {
 }
 fn default_retain_days() -> i64 {
     30
+}
+fn default_keep_last_runs() -> i64 {
+    10
+}
+fn default_backup_keep() -> i64 {
+    7
 }
 fn default_catchup() -> String {
     "skip".into()
@@ -318,12 +339,19 @@ impl Server {
             .write()
             .unwrap_or_else(|e| e.into_inner()) = rule_dispatcher;
         rules::load(&state);
-        if let Ok(Some(v)) = state.store.kv_get("settings.retain_days") {
-            if let Ok(d) = v.parse::<i64>() {
-                state
-                    .retain_days
-                    .store(d, std::sync::atomic::Ordering::Relaxed);
-                state.mark_edited("defaults.retain_days");
+        for (key, slot) in [
+            ("retain_days", &state.retain_days),
+            ("retain_runs_days", &state.retain_runs_days),
+            ("retain_failed_runs_days", &state.retain_failed_runs_days),
+            ("keep_last_runs_per_flow", &state.keep_last_runs_per_flow),
+            ("backup_every", &state.backup_every),
+            ("backup_keep", &state.backup_keep),
+        ] {
+            if let Ok(Some(v)) = state.store.kv_get(&format!("settings.{key}")) {
+                if let Ok(d) = v.parse::<i64>() {
+                    slot.store(d, std::sync::atomic::Ordering::Relaxed);
+                    state.mark_edited(&format!("defaults.{key}"));
+                }
             }
         }
         if let Ok(Some(v)) = state.store.kv_get("settings.crash_retries") {

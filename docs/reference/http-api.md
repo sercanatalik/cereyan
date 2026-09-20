@@ -808,6 +808,13 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 |---|---|
 | 200 | [`DatabaseInfo`](#databaseinfo) (application/json) |
 
+### `POST /api/database/backup`
+
+| Status | Body |
+|---|---|
+| 200 | [`BackupResult`](#backupresult) (application/json) |
+| 500 | no body |
+
 ### `POST /api/database/reset`
 
 **Request body** (application/json): [`ResetBody`](#resetbody)
@@ -940,6 +947,13 @@ A stored artifact attached to a run and optionally a task run.
 
 Type: any.
 
+### `BackupResult`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `backups` | integer | yes | `db-*.sqlite` copies after pruning. |
+| `path` | string | yes | The copy just written. |
+
 ### `CatchupPolicy`
 
 One of: `skip`, `latest`, `all`.
@@ -998,6 +1012,7 @@ know it yet (offline handoff from another project).
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `backup_dir` | string | yes | Where a reset writes its copy. |
+| `backups` | integer | yes | `db-*.sqlite` copies in it. |
 | `bytes` | integer (int64) | yes |  |
 | `counts` | [`TableCounts`](#tablecounts) | yes |  |
 | `path` | string | yes |  |
@@ -1557,6 +1572,9 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `backup_every` | integer (int64) | yes | Hours between scheduled backups; 0 is off. |
+| `backup_keep` | integer (int64) | yes | Scheduled copies kept. |
+| `backups` | integer | yes | `db-*.sqlite` copies under the backup directory. |
 | `catchup_default` | string | yes |  |
 | `crash_retries_default` | integer (int64) | yes |  |
 | `custom_routes` | [`RouteSpec`](#routespec)[] | yes |  |
@@ -1567,11 +1585,16 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `engine_saturation_risk` | boolean | yes |  |
 | `home` | string | yes |  |
 | `host` | string | yes |  |
+| `keep_last_runs_per_flow` | integer (int64) | yes | Runs per flow retention never deletes. |
+| `last_backup_at` | integer or null (int64) | no | Microseconds since the epoch of the last backup, scheduled or on demand. |
+| `last_backup_path` | string or null | no |  |
 | `max_engines` | integer | yes |  |
 | `pid` | integer (int32) | yes |  |
 | `port` | integer (int32) | yes |  |
 | `resources` | object | yes |  |
 | `retain_days` | integer (int64) | yes |  |
+| `retain_failed_runs_days` | integer (int64) | yes | Days to keep Failed and Crashed runs; 0 means `retain_runs_days`. |
+| `retain_runs_days` | integer (int64) | yes | Days to keep terminal runs; 0 keeps them. |
 | `saturation_flows` | array of string | yes |  |
 | `saturation_reason` | string or null | no |  |
 | `secret_key_missing` | boolean | yes |  |
@@ -1585,9 +1608,14 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `backup_every` | integer or null (int64) | no |  |
+| `backup_keep` | integer or null (int64) | no |  |
 | `crash_retries` | integer or null (int64) | no |  |
+| `keep_last_runs_per_flow` | integer or null (int64) | no |  |
 | `resources` | object or null | no |  |
 | `retain_days` | integer or null (int64) | no |  |
+| `retain_failed_runs_days` | integer or null (int64) | no |  |
+| `retain_runs_days` | integer or null (int64) | no |  |
 | `title` | string or null | no | UI title; an empty string removes `[ui] title` and restores `cereyan`. |
 
 ### `SkipBody`

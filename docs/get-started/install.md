@@ -35,7 +35,7 @@ The first run creates the runtime home, `~/.cereyan` by default, holding the SQL
 pip install --upgrade cereyan
 ```
 
-The first start of a newer version migrates the database in place. A migration that rebuilds a table, such as the `task_run` rebuild in 2.0.0, makes that start take longer on a large store. A migrated database cannot be opened by an older version, which refuses to start and asks you to upgrade, so to keep a way back, stop the server and copy `db.sqlite` from the home before upgrading. Read the changelog's *Upgrading from* list when the major version changes.
+The first start of a newer version migrates the database in place. Before it does, the store writes a copy to `<home>/backups/pre-migration-v<old>-<time>.sqlite`, and refuses to migrate if that copy cannot be written, so there is always a way back: stop the server, put the copy in place of `db.sqlite`, delete `db.sqlite-wal` and `db.sqlite-shm`, and install the older version. A migration that rebuilds a table, such as the `task_run` rebuild in 2.0.0, makes that start take longer on a large store. A migrated database cannot be opened by an older version, which refuses to start and asks you to upgrade. Read the changelog's *Upgrading from* list when the major version changes.
 
 ## Windows
 

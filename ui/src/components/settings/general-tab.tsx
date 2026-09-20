@@ -19,6 +19,11 @@ export function GeneralTab() {
   });
   const [resources, setResources] = useState<{ name: string; total: string }[]>([]);
   const [retain, setRetain] = useState("");
+  const [retainRuns, setRetainRuns] = useState("");
+  const [retainFailed, setRetainFailed] = useState("");
+  const [keepLast, setKeepLast] = useState("");
+  const [backupEvery, setBackupEvery] = useState("");
+  const [backupKeep, setBackupKeep] = useState("");
   const [crash, setCrash] = useState("");
   const [title, setTitle] = useState("");
   useEffect(() => {
@@ -32,6 +37,11 @@ export function GeneralTab() {
       })),
     );
     setRetain(String(s.retain_days));
+    setRetainRuns(String(s.retain_runs_days));
+    setRetainFailed(String(s.retain_failed_runs_days));
+    setKeepLast(String(s.keep_last_runs_per_flow));
+    setBackupEvery(String(s.backup_every));
+    setBackupKeep(String(s.backup_keep));
     setCrash(String(s.crash_retries_default));
   }, [settings.data]);
   const save = useMutation({
@@ -43,6 +53,11 @@ export function GeneralTab() {
               resources.filter((r) => r.name).map((r) => [r.name, Number(r.total) || 0]),
             ),
             retain_days: Number(retain),
+            retain_runs_days: Number(retainRuns),
+            retain_failed_runs_days: Number(retainFailed),
+            keep_last_runs_per_flow: Number(keepLast),
+            backup_every: Number(backupEvery),
+            backup_keep: Number(backupKeep),
             crash_retries: Number(crash),
           },
         }),
@@ -149,6 +164,51 @@ export function GeneralTab() {
               className="mt-1 w-32"
               value={retain}
               onChange={(e) => setRetain(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground" htmlFor="retain-runs">
+            Retention days (runs; 0 keeps them)
+            <Input
+              id="retain-runs"
+              className="mt-1 w-32"
+              value={retainRuns}
+              onChange={(e) => setRetainRuns(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground" htmlFor="retain-failed">
+            Retention days (failed and crashed runs; 0 uses the run value)
+            <Input
+              id="retain-failed"
+              className="mt-1 w-32"
+              value={retainFailed}
+              onChange={(e) => setRetainFailed(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground" htmlFor="keep-last">
+            Runs kept per flow
+            <Input
+              id="keep-last"
+              className="mt-1 w-32"
+              value={keepLast}
+              onChange={(e) => setKeepLast(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground" htmlFor="backup-every">
+            Backup every (hours; 0 is off)
+            <Input
+              id="backup-every"
+              className="mt-1 w-32"
+              value={backupEvery}
+              onChange={(e) => setBackupEvery(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground" htmlFor="backup-keep">
+            Backups kept
+            <Input
+              id="backup-keep"
+              className="mt-1 w-32"
+              value={backupKeep}
+              onChange={(e) => setBackupKeep(e.target.value)}
             />
           </label>
           <label className="block text-xs text-muted-foreground" htmlFor="crash">

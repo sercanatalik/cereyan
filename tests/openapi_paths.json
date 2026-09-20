@@ -5,6 +5,7 @@
   "/api/backfills/{id}/prefilter",
   "/api/counts",
   "/api/database",
+  "/api/database/backup",
   "/api/database/reset",
   "/api/engine/failed",
   "/api/engine/heartbeat",

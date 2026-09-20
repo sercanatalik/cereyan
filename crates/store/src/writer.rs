@@ -409,6 +409,16 @@ pub enum WriteCommand {
         limit: i64,
         reply: Reply<usize>,
     },
+    /// Delete up to `limit` terminal runs older than their cutoff (`failed_before`
+    /// for Failed and Crashed, `before` otherwise), sparing runs of live backfills
+    /// and each flow's newest `keep_per_flow`; returns (id, flow id, state type).
+    DeleteExpiredRuns {
+        before: i64,
+        failed_before: i64,
+        keep_per_flow: i64,
+        limit: i64,
+        reply: Reply<Vec<(i64, i64, String)>>,
+    },
     IncrementalVacuum {
         pages: i64,
         reply: Reply<()>,
@@ -849,6 +859,16 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
                 .map_err(Into::into)
             }
         }),
+        WriteCommand::DeleteExpiredRuns {
+            before,
+            failed_before,
+            keep_per_flow,
+            limit,
+            reply,
+        } => ack(
+            reply,
+            delete_expired_runs(conn, before, failed_before, keep_per_flow, limit),
+        ),
         WriteCommand::IncrementalVacuum { pages, reply } => ack(
             reply,
             conn.execute_batch(&format!("PRAGMA incremental_vacuum({pages})"))
@@ -1442,6 +1462,55 @@ fn delete_run(conn: &Connection, run_id: i64) -> Result<bool> {
     Ok(n > 0)
 }
 
+/// Terminal state types as the `run` table spells them.
+const TERMINAL: &str = "'Completed', 'Failed', 'Cancelled', 'Crashed'";
+
+/// The retention pass for runs. A run's age is its end time, else its state
+/// time, else its creation time. A backfill is live while it is not cancelled
+/// and still has a non-terminal run. `keep_per_flow` counts terminal runs, so
+/// a flow always keeps that much finished history whatever is running. The schema cascades from `run` to task
+/// runs, states, logs, events, and artifacts; the `run.input` answer is a kv
+/// row and goes explicitly.
+fn delete_expired_runs(
+    conn: &Connection,
+    before: i64,
+    failed_before: i64,
+    keep_per_flow: i64,
+    limit: i64,
+) -> Result<Vec<(i64, i64, String)>> {
+    let sql = format!(
+        "SELECT r.id, r.flow_id, r.state_type FROM run r
+         WHERE r.state_type IN ({TERMINAL})
+           AND COALESCE(r.end_time, r.state_timestamp, r.created_at)
+               < CASE WHEN r.state_type IN ('Failed', 'Crashed') THEN ?2 ELSE ?1 END
+           AND (r.backfill_id IS NULL OR NOT EXISTS (
+                 SELECT 1 FROM backfill b
+                 WHERE b.id = r.backfill_id AND b.cancelled = 0
+                   AND EXISTS (SELECT 1 FROM run x WHERE x.backfill_id = b.id
+                               AND x.state_type NOT IN ({TERMINAL}))))
+           AND r.id NOT IN (SELECT n.id FROM run n
+                            WHERE n.flow_id = r.flow_id AND n.state_type IN ({TERMINAL})
+                            ORDER BY n.id DESC LIMIT ?3)
+         ORDER BY r.id LIMIT ?4"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows: Vec<(i64, i64, String)> = stmt
+        .query_map(
+            params![before, failed_before, keep_per_flow.max(0), limit],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?
+        .collect::<std::result::Result<_, _>>()?;
+    if rows.is_empty() {
+        return Ok(rows);
+    }
+    let ids = id_list(&rows.iter().map(|r| r.0).collect::<Vec<_>>());
+    conn.execute_batch(&format!(
+        "DELETE FROM kv WHERE key IN (SELECT 'run.input:' || id FROM run WHERE id IN ({ids}));
+         DELETE FROM run WHERE id IN ({ids});"
+    ))?;
+    Ok(rows)
+}
+
 /// A comma-separated id list for `IN (...)`; SQLite reads `IN ()` as empty.
 fn id_list(ids: &[i64]) -> String {
     ids.iter()
@@ -1882,4 +1951,79 @@ fn upsert_artifact(conn: &Connection, a: &UpsertArtifact) -> Result<i64> {
         params![ext.as_bytes().as_slice(), a.run_id, a.task_run_id, a.kind, a.key, a.data, now],
     )?;
     Ok(conn.last_insert_rowid())
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+
+    fn store() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+        crate::migrations::apply(&conn).unwrap();
+        conn.execute_batch(
+            "INSERT INTO flow (id, external_id, project, name, module, source_dir, created_at, last_seen_at)
+             VALUES (1, X'01', 'p', 'f', 'm', '/d', 0, 0), (2, X'02', 'p', 'g', 'm', '/d', 0, 0);
+             INSERT INTO backfill (id, external_id, flow_id, parameter, start_value, end_value, interval_secs, concurrency, total, created_at)
+             VALUES (7, X'07', 1, 'day', 'a', 'b', 1, 1, 2, 0);",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn run(conn: &Connection, id: i64, flow: i64, state: &str, end: i64, backfill: Option<i64>) {
+        conn.execute(
+            "INSERT INTO run (id, external_id, flow_id, name, state_type, created_at, end_time, backfill_id)
+             VALUES (?1, ?2, ?3, 'r', ?4, ?5, ?5, ?6)",
+            params![id, vec![id as u8], flow, state, end, backfill],
+        )
+        .unwrap();
+    }
+
+    fn ids(conn: &Connection) -> Vec<i64> {
+        let mut s = conn.prepare("SELECT id FROM run ORDER BY id").unwrap();
+        s.query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn keeps_running_backfill_and_newest_runs() {
+        let conn = store();
+        run(&conn, 1, 1, "Completed", 10, None);
+        run(&conn, 2, 1, "Completed", 20, None);
+        run(&conn, 3, 1, "Completed", 30, None);
+        run(&conn, 4, 1, "Running", 5, None);
+        run(&conn, 5, 2, "Completed", 10, Some(7));
+        run(&conn, 6, 2, "Pending", 10, Some(7));
+        run(&conn, 8, 2, "Failed", 10, None);
+        run(&conn, 9, 2, "Completed", 15, None);
+        conn.execute(
+            "INSERT INTO kv (key, value, updated_at) VALUES ('run.input:1', 'x', 0)",
+            [],
+        )
+        .unwrap();
+        // Completed older than 100, failed older than 5: run 8 (failed at 10) survives.
+        let gone = delete_expired_runs(&conn, 100, 5, 1, 500).unwrap();
+        assert_eq!(gone.iter().map(|g| g.0).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(gone[0].2, "Completed");
+        // 3 is flow 1's newest, 4 is running, 5 is in a live backfill, 8 is a
+        // young failure, 9 is flow 2's newest.
+        assert_eq!(ids(&conn), vec![3, 4, 5, 6, 8, 9]);
+        let kv: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM kv WHERE key = 'run.input:1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kv, 0);
+        // Once the backfill's last run ends, its runs age out too.
+        conn.execute("UPDATE run SET state_type = 'Completed' WHERE id = 6", [])
+            .unwrap();
+        let gone = delete_expired_runs(&conn, 100, 100, 1, 500).unwrap();
+        assert_eq!(gone.iter().map(|g| g.0).collect::<Vec<_>>(), vec![5, 6, 8]);
+        assert_eq!(ids(&conn), vec![3, 4, 9]);
+    }
 }

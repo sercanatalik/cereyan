@@ -24,6 +24,29 @@ pub struct DatabaseInfo {
     pub stale_projects: usize,
     /// Where a reset writes its copy.
     pub backup_dir: String,
+    /// `db-*.sqlite` copies in it.
+    pub backups: usize,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct BackupResult {
+    /// The copy just written.
+    pub path: String,
+    /// `db-*.sqlite` copies after pruning.
+    pub backups: usize,
+}
+
+#[utoipa::path(post, path = "/api/database/backup", responses((status = 200, body = BackupResult), (status = 500)))]
+pub async fn backup_database(State(state): State<Arc<AppState>>) -> ApiResult<Json<BackupResult>> {
+    let st = state.clone();
+    let path = tokio::task::spawn_blocking(move || crate::retention::run_backup(&st))
+        .await
+        .map_err(join)?
+        .map_err(|e| ApiError::Internal(format!("could not copy the database: {e}")))?;
+    Ok(Json(BackupResult {
+        path: path.display().to_string(),
+        backups: state.store.list_backups().map(|v| v.len()).unwrap_or(0),
+    }))
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -87,6 +110,7 @@ pub async fn get_database(State(state): State<Arc<AppState>>) -> ApiResult<Json<
             .join(cereyan_store::BACKUP_DIR)
             .display()
             .to_string(),
+        backups: state.store.list_backups().map(|v| v.len()).unwrap_or(0),
     }))
 }
 

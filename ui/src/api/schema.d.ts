@@ -101,6 +101,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/database/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["backup_database"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/database/reset": {
         parameters: {
             query?: never;
@@ -1041,6 +1057,12 @@ export interface components {
             };
             tag: string;
         };
+        BackupResult: {
+            /** @description `db-*.sqlite` copies after pruning. */
+            backups: number;
+            /** @description The copy just written. */
+            path: string;
+        };
         /** @enum {string} */
         CatchupPolicy: "skip" | "latest" | "all";
         ConfigEntry: {
@@ -1104,6 +1126,8 @@ export interface components {
         DatabaseInfo: {
             /** @description Where a reset writes its copy. */
             backup_dir: string;
+            /** @description `db-*.sqlite` copies in it. */
+            backups: number;
             /** Format: int64 */
             bytes: number;
             counts: components["schemas"]["TableCounts"];
@@ -1802,6 +1826,18 @@ export interface components {
             version: string;
         };
         Settings: {
+            /**
+             * Format: int64
+             * @description Hours between scheduled backups; 0 is off.
+             */
+            backup_every: number;
+            /**
+             * Format: int64
+             * @description Scheduled copies kept.
+             */
+            backup_keep: number;
+            /** @description `db-*.sqlite` copies under the backup directory. */
+            backups: number;
             catchup_default: string;
             /** Format: int64 */
             crash_retries_default: number;
@@ -1815,6 +1851,17 @@ export interface components {
             engine_saturation_risk: boolean;
             home: string;
             host: string;
+            /**
+             * Format: int64
+             * @description Runs per flow retention never deletes.
+             */
+            keep_last_runs_per_flow: number;
+            /**
+             * Format: int64
+             * @description Microseconds since the epoch of the last backup, scheduled or on demand.
+             */
+            last_backup_at?: number | null;
+            last_backup_path?: string | null;
             max_engines: number;
             /** Format: int32 */
             pid: number;
@@ -1823,6 +1870,16 @@ export interface components {
             resources: Record<string, never>;
             /** Format: int64 */
             retain_days: number;
+            /**
+             * Format: int64
+             * @description Days to keep Failed and Crashed runs; 0 means `retain_runs_days`.
+             */
+            retain_failed_runs_days: number;
+            /**
+             * Format: int64
+             * @description Days to keep terminal runs; 0 keeps them.
+             */
+            retain_runs_days: number;
             saturation_flows: string[];
             saturation_reason?: string | null;
             secret_key_missing: boolean;
@@ -1836,12 +1893,22 @@ export interface components {
         };
         SettingsPatch: {
             /** Format: int64 */
+            backup_every?: number | null;
+            /** Format: int64 */
+            backup_keep?: number | null;
+            /** Format: int64 */
             crash_retries?: number | null;
+            /** Format: int64 */
+            keep_last_runs_per_flow?: number | null;
             resources?: {
                 [key: string]: number;
             } | null;
             /** Format: int64 */
             retain_days?: number | null;
+            /** Format: int64 */
+            retain_failed_runs_days?: number | null;
+            /** Format: int64 */
+            retain_runs_days?: number | null;
             /** @description UI title; an empty string removes `[ui] title` and restores `cereyan`. */
             title?: string | null;
         };
@@ -2230,6 +2297,31 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DatabaseInfo"];
                 };
+            };
+        };
+    };
+    backup_database: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupResult"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -57,6 +57,7 @@ impl Store {
         let lock = open::take_lock(home)?;
         let db_path = home.join(DB_FILE);
         let write_conn = open::open_writer(&db_path)?;
+        migrations::backup_before_upgrade(&write_conn, home)?;
         migrations::apply(&write_conn)?;
 
         let mut readers = Vec::with_capacity(READ_POOL_SIZE);
@@ -374,6 +375,23 @@ impl Store {
         self.write(|reply| WriteCommand::DeleteExpired {
             table: table.into(),
             before,
+            limit,
+            reply,
+        })
+    }
+
+    /// Delete up to `limit` expired terminal runs; see `WriteCommand::DeleteExpiredRuns`.
+    pub fn delete_expired_runs(
+        &self,
+        before: i64,
+        failed_before: i64,
+        keep_per_flow: i64,
+        limit: i64,
+    ) -> Result<Vec<(i64, i64, String)>> {
+        self.write(|reply| WriteCommand::DeleteExpiredRuns {
+            before,
+            failed_before,
+            keep_per_flow,
             limit,
             reply,
         })

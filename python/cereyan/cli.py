@@ -62,6 +62,10 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--now", help="reference instant for schedule previews, ISO 8601 (default: now; naive means UTC)")
     check.set_defaults(func=cmd_check)
 
+    backup = sub.add_parser("backup", help="write a consistent copy of the store to <home>/backups/ (through the running server, or directly)")
+    backup.add_argument("--json", action="store_true", help="print the copy's path as JSON")
+    backup.set_defaults(func=cmd_backup)
+
     backfill = sub.add_parser("backfill", help="create runs over a date range (requires a running server)")
     backfill.add_argument("flow", help="flow name, optionally project/flow")
     backfill.add_argument("--param", required=True, help="date or datetime parameter name")
@@ -211,6 +215,22 @@ def cmd_check(args) -> int:
     else:
         print(render(report))
     return EXIT_FAILED if failed else EXIT_OK
+
+
+def cmd_backup(args) -> int:
+    from . import client as client_module
+
+    try:
+        server = client_module.find_server(engine.resolved_home())
+        if server is not None:
+            path = server._request("POST", "/api/database/backup")["path"]
+        else:
+            path = engine.get_store().backup()
+    except (client_module.ApiError, RuntimeError, OSError) as exc:
+        print(f"error: could not write the copy: {exc}", file=sys.stderr)
+        return EXIT_SCHEDULING
+    print(json.dumps({"path": path}) if args.json else path)
+    return EXIT_OK
 
 
 def cmd_run(args) -> int:

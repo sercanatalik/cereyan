@@ -31,6 +31,21 @@ pub struct Settings {
     pub crash_retries_default: i64,
     pub catchup_default: String,
     pub retain_days: i64,
+    /// Days to keep terminal runs; 0 keeps them.
+    pub retain_runs_days: i64,
+    /// Days to keep Failed and Crashed runs; 0 means `retain_runs_days`.
+    pub retain_failed_runs_days: i64,
+    /// Runs per flow retention never deletes.
+    pub keep_last_runs_per_flow: i64,
+    /// Hours between scheduled backups; 0 is off.
+    pub backup_every: i64,
+    /// Scheduled copies kept.
+    pub backup_keep: i64,
+    /// Microseconds since the epoch of the last backup, scheduled or on demand.
+    pub last_backup_at: Option<i64>,
+    pub last_backup_path: Option<String>,
+    /// `db-*.sqlite` copies under the backup directory.
+    pub backups: usize,
     pub email_configured: bool,
     pub secret_key_present: bool,
     pub secret_key_missing: bool,
@@ -46,6 +61,16 @@ pub struct SettingsPatch {
     pub resources: Option<HashMap<String, f64>>,
     #[serde(default)]
     pub retain_days: Option<i64>,
+    #[serde(default)]
+    pub retain_runs_days: Option<i64>,
+    #[serde(default)]
+    pub retain_failed_runs_days: Option<i64>,
+    #[serde(default)]
+    pub keep_last_runs_per_flow: Option<i64>,
+    #[serde(default)]
+    pub backup_every: Option<i64>,
+    #[serde(default)]
+    pub backup_keep: Option<i64>,
     #[serde(default)]
     pub crash_retries: Option<i64>,
     /// UI title; an empty string removes `[ui] title` and restores `cereyan`.
@@ -141,6 +166,27 @@ pub async fn get_settings(State(state): State<Arc<AppState>>) -> Json<Settings> 
             .load(std::sync::atomic::Ordering::Relaxed),
         catchup_default: state.config.catchup_default.clone(),
         retain_days: state.retain_days.load(std::sync::atomic::Ordering::Relaxed),
+        retain_runs_days: state
+            .retain_runs_days
+            .load(std::sync::atomic::Ordering::Relaxed),
+        retain_failed_runs_days: state
+            .retain_failed_runs_days
+            .load(std::sync::atomic::Ordering::Relaxed),
+        keep_last_runs_per_flow: state
+            .keep_last_runs_per_flow
+            .load(std::sync::atomic::Ordering::Relaxed),
+        backup_every: state
+            .backup_every
+            .load(std::sync::atomic::Ordering::Relaxed),
+        backup_keep: state.backup_keep.load(std::sync::atomic::Ordering::Relaxed),
+        last_backup_at: state
+            .store
+            .kv_get("backup.last_at")
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse().ok()),
+        last_backup_path: state.store.kv_get("backup.last_path").ok().flatten(),
+        backups: state.store.list_backups().map(|v| v.len()).unwrap_or(0),
         email_configured: state.config.email.is_some(),
         secret_key_present: key_present,
         secret_key_missing: !key_present && secrets_count > 0,
@@ -155,8 +201,7 @@ pub async fn get_settings(State(state): State<Arc<AppState>>) -> Json<Settings> 
 fn persist_toml(
     state: &AppState,
     resources: Option<&HashMap<String, f64>>,
-    retain_days: Option<i64>,
-    crash_retries: Option<i64>,
+    defaults: &[(&str, Option<i64>)],
     title: Option<&str>,
 ) -> Result<(), String> {
     let Some(dir) = &state.config.served_dir else {
@@ -179,16 +224,15 @@ fn persist_toml(
             }
         }
     }
-    if retain_days.is_some() || crash_retries.is_some() {
+    if defaults.iter().any(|(_, v)| v.is_some()) {
         let table = doc
             .entry("defaults")
             .or_insert_with(|| toml::Value::Table(toml::Table::new()));
         if let toml::Value::Table(t) = table {
-            if let Some(d) = retain_days {
-                t.insert("retain_days".into(), toml::Value::Integer(d));
-            }
-            if let Some(c) = crash_retries {
-                t.insert("crash_retries".into(), toml::Value::Integer(c));
+            for (key, value) in defaults {
+                if let Some(v) = value {
+                    t.insert((*key).into(), toml::Value::Integer(*v));
+                }
             }
         }
     }
@@ -241,19 +285,37 @@ pub async fn patch_settings(
             &serde_json::to_string(&merged).unwrap_or_default(),
         );
     }
-    if let Some(days) = body.retain_days {
-        if days < 0 {
-            return Err(ApiError::Unprocessable(
-                "retain_days must be zero or more".into(),
-            ));
+    for (key, value, slot) in [
+        ("retain_days", body.retain_days, &state.retain_days),
+        (
+            "retain_runs_days",
+            body.retain_runs_days,
+            &state.retain_runs_days,
+        ),
+        (
+            "retain_failed_runs_days",
+            body.retain_failed_runs_days,
+            &state.retain_failed_runs_days,
+        ),
+        (
+            "keep_last_runs_per_flow",
+            body.keep_last_runs_per_flow,
+            &state.keep_last_runs_per_flow,
+        ),
+        ("backup_every", body.backup_every, &state.backup_every),
+        ("backup_keep", body.backup_keep, &state.backup_keep),
+    ] {
+        let Some(v) = value else { continue };
+        if v < 0 {
+            return Err(ApiError::Unprocessable(format!(
+                "{key} must be zero or more"
+            )));
         }
-        state
-            .retain_days
-            .store(days, std::sync::atomic::Ordering::Relaxed);
+        slot.store(v, std::sync::atomic::Ordering::Relaxed);
         let _ = state
             .store
-            .kv_set("settings.retain_days", &days.to_string());
-        state.mark_edited("defaults.retain_days");
+            .kv_set(&format!("settings.{key}"), &v.to_string());
+        state.mark_edited(&format!("defaults.{key}"));
     }
     if let Some(c) = body.crash_retries {
         if c < 0 {
@@ -274,8 +336,15 @@ pub async fn patch_settings(
     persist_toml(
         &state,
         body.resources.as_ref(),
-        body.retain_days,
-        body.crash_retries,
+        &[
+            ("retain_days", body.retain_days),
+            ("retain_runs_days", body.retain_runs_days),
+            ("retain_failed_runs_days", body.retain_failed_runs_days),
+            ("keep_last_runs_per_flow", body.keep_last_runs_per_flow),
+            ("backup_every", body.backup_every),
+            ("backup_keep", body.backup_keep),
+            ("crash_retries", body.crash_retries),
+        ],
         body.title.as_deref().map(str::trim),
     )
     .map_err(ApiError::Internal)?;

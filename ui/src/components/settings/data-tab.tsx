@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { KeyValueList } from "@/components/key-value-list";
@@ -11,6 +11,14 @@ import { bytes, count } from "./format";
 
 /** What the store holds, and removing it. */
 export function DataTab() {
+  const queryClient = useQueryClient();
+  const backupNow = useMutation({
+    mutationFn: async () => unwrap(await api.POST("/api/database/backup")),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["database"] });
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
   const database = useQuery({
     queryKey: ["database"],
     queryFn: async () => unwrap(await api.GET("/api/database")),
@@ -42,6 +50,20 @@ export function DataTab() {
                   { label: "WAL", value: bytes(d.wal_bytes) },
                   { label: "Retention", value: `${s?.retain_days ?? "-"} days for logs and events` },
                   {
+                    label: "Run retention",
+                    value: s?.retain_runs_days
+                      ? `${s.retain_runs_days} days, keeping ${s.keep_last_runs_per_flow} per flow`
+                      : "off",
+                  },
+                  {
+                    label: "Last backup",
+                    value: s?.last_backup_at
+                      ? `${formatTime(s.last_backup_at)} · ${d.backups} kept`
+                      : d.backups
+                        ? `${d.backups} kept`
+                        : "none",
+                  },
+                  {
                     label: "Secret key",
                     value: s?.secret_key_present
                       ? "present"
@@ -60,6 +82,25 @@ export function DataTab() {
                   { label: "Artifacts", value: count(d.counts.artifacts) },
                 ]}
               />
+              <div className="col-span-2 flex items-center gap-3">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => backupNow.mutate()}
+                  disabled={backupNow.isPending}
+                  data-testid="backup-now"
+                >
+                  Back up now
+                </Button>
+                {backupNow.isSuccess ? (
+                  <span className="break-all font-mono text-xs text-muted-foreground">
+                    {backupNow.data.path}
+                  </span>
+                ) : null}
+                {backupNow.isError ? (
+                  <span className="text-xs text-destructive">{String(backupNow.error)}</span>
+                ) : null}
+              </div>
             </>
           ) : (
             "Loading"

@@ -20,6 +20,11 @@ open_browser = true
 catchup = "skip"
 crash_retries = 5
 retain_days = 30
+retain_runs_days = 0          # optional: delete terminal runs older than this; 0 keeps them
+retain_failed_runs_days = 0   # optional: a longer horizon for Failed and Crashed runs
+keep_last_runs_per_flow = 10  # never delete a flow's newest runs
+backup_every = 0              # optional: hours between scheduled copies; 0 is off
+backup_keep = 7               # scheduled copies kept
 
 [resources]
 db = 4
@@ -65,6 +70,11 @@ title = "Data Platform"   # optional: shown in the top bar and the browser tab
 | `catchup` | string | `skip` | Catch-up policy for schedules that do not set one: `skip`, `latest`, or `all`. |
 | `crash_retries` | integer | `5` | Reruns of a crashed run before it is marked Failed. |
 | `retain_days` | integer | `30` | Days of logs and events kept by retention. |
+| `retain_runs_days` | integer | `0` | Days after which a Completed, Failed, Cancelled, or Crashed run is deleted with its task runs, logs, events, and artifacts; `0` keeps runs forever. Running runs and runs of a live backfill are never deleted. |
+| `retain_failed_runs_days` | integer | `0` | The horizon for Failed and Crashed runs; `0` uses `retain_runs_days`. |
+| `keep_last_runs_per_flow` | integer | `10` | Each flow's newest finished runs that retention never deletes, whatever their age. |
+| `backup_every` | integer | `0` | Hours between scheduled copies of the database, written to `<home>/backups/`; `0` is off. |
+| `backup_keep` | integer | `7` | Scheduled and on-demand copies kept; older `db-*.sqlite` files are deleted. Pre-migration copies are never pruned. |
 
 ### `[resources]`
 

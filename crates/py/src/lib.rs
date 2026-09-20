@@ -542,6 +542,14 @@ impl Store {
             .map_err(to_py)
     }
 
+    /// Write a consistent copy to `<home>/backups/` and return its path.
+    fn backup(&self, py: Python<'_>) -> PyResult<String> {
+        let store = self.inner.clone();
+        py.detach(move || store.backup())
+            .map(|p| p.display().to_string())
+            .map_err(to_py)
+    }
+
     fn delete_run(&self, py: Python<'_>, run_id: i64) -> PyResult<bool> {
         let store = self.inner.clone();
         py.detach(move || store.delete_run(run_id)).map_err(to_py)

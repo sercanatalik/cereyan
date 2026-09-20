@@ -217,6 +217,15 @@ fn configuration(state: &AppState) -> Vec<ConfigEntry> {
         json!(state.retain_days.load(Ordering::Relaxed)),
         false,
     );
+    for (key, slot) in [
+        ("retain_runs_days", &state.retain_runs_days),
+        ("retain_failed_runs_days", &state.retain_failed_runs_days),
+        ("keep_last_runs_per_flow", &state.keep_last_runs_per_flow),
+        ("backup_every", &state.backup_every),
+        ("backup_keep", &state.backup_keep),
+    ] {
+        push("defaults", key, json!(slot.load(Ordering::Relaxed)), false);
+    }
     push("ui", "title", json!(state.title()), false);
     let mut totals: Vec<(String, f64)> = state.supervisor.resource_totals().into_iter().collect();
     totals.sort_by(|a, b| a.0.cmp(&b.0));
