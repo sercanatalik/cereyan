@@ -37,6 +37,22 @@
   --cy-measure: 1160px;
   --cy-frame: calc(var(--cy-measure) + var(--cy-gutter) * 2);
 
+  /* The type ladder, shared with the documentation pages: a major third, 1.25 per
+     step, anchored at the theme's 16 px body copy.
+
+     Material sets `html { font-size: 125% }`, so a rem here is 20 px, not 16. That
+     correction lives in these tokens and nowhere else. Take every type size from
+     them: a literal rem font-size written in this file renders a quarter larger
+     than the number suggests. The px value beside each step is what it paints. */
+  --cy-t-hero: 3.05rem;      /* 61.0  hero */
+  --cy-t-2xl: 1.955rem;      /* 39.1  section heads, features title, closing CTA */
+  --cy-t-xl: 1.5625rem;      /* 31.25 performance lede, hero floor */
+  --cy-t-lg: 1.25rem;        /* 25.0  feature heads, command band lede */
+  --cy-t-md: 1rem;           /* 20.0  hero lead, pillar heads, card heads */
+  --cy-t-body: 0.8rem;       /* 16.0  body copy, buttons, tables, section ledes */
+  --cy-t-code: 0.68rem;      /* 13.6  code, matching the theme's 0.85em of body */
+  --cy-t-sm: 0.64rem;        /* 12.8  kickers, captions, legends, pills, feed rows */
+
   background: var(--cy-ground);
   color: var(--cy-ink);
   font-feature-settings: "tnum" 1;
@@ -64,10 +80,8 @@
   --cy-scheduled-bg: #2a2622; --cy-scheduled-dot: #46413b;
 }
 
-.cy-home h1,
-.cy-home h2,
-.cy-home h3 { margin: 0; letter-spacing: -0.025em; font-weight: 600; text-wrap: pretty; }
-.cy-home p { margin: 0; }
+.cy-home :where(h1, h2, h3) { margin: 0; letter-spacing: -0.025em; font-weight: 600; text-wrap: pretty; }
+.cy-home :where(p) { margin: 0; }
 .cy-home code { font-family: var(--md-code-font-family, "Geist Mono", ui-monospace, monospace); }
 
 /* ---------- atoms ---------- */
@@ -76,7 +90,7 @@
 
 .cy-chip {
   font-family: var(--md-code-font-family, monospace);
-  font-size: 0.75rem;
+  font-size: var(--cy-t-sm);
   border: 1px solid var(--cy-line-strong);
   border-radius: 999px;
   padding: 0.2em 0.7em;
@@ -91,13 +105,13 @@
 
 .cy-eyebrow {
   display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem;
-  font-size: 0.75rem;
+  font-size: var(--cy-t-sm);
   color: var(--cy-faint);
 }
 
 .cy-btn {
   display: inline-block;
-  font-size: 0.9375rem;
+  font-size: var(--cy-t-body);
   font-weight: 500;
   border-radius: 9px;
   padding: 0.85em 1.5em;
@@ -117,7 +131,7 @@
 .cy-btn--invert:hover { background: #ffffff; color: #1f1c19; }
 
 .cy-more {
-  font-size: 0.9375rem;
+  font-size: var(--cy-t-body);
   font-weight: 500;
   color: var(--cy-ink);
   text-decoration: none;
@@ -134,14 +148,13 @@
   border: 1px solid var(--cy-line);
   border-radius: 9px;
   padding: 0.8em 1.1em;
-  font-size: 0.875rem;
+  font-size: var(--cy-t-code);
 }
 .cy-install--dark {
   background: var(--cy-deep-ink);
   border-color: #3a342e;
   color: #faf9f5;
   padding: 0.95em 1.4em;
-  font-size: 0.9375rem;
 }
 .cy-install--dark .cy-prompt { color: #7d746b; }
 
@@ -150,7 +163,7 @@
 
 .cy-state {
   display: inline-flex; align-items: center; gap: 0.4em;
-  font-size: 0.75rem; font-weight: 500;
+  font-size: var(--cy-t-sm); font-weight: 500;
   border-radius: 999px;
   padding: 0.15em 0.65em;
   white-space: nowrap;
@@ -190,8 +203,8 @@
 }
 
 .cy-hero__copy { display: flex; flex-direction: column; gap: 1.6rem; }
-.cy-h1 { font-size: clamp(2.25rem, 4.4vw, 3.875rem); line-height: 1.04; letter-spacing: -0.035em; }
-.cy-lead { font-size: clamp(1rem, 1.4vw, 1.125rem); line-height: 1.55; color: var(--cy-muted); }
+.cy-h1 { font-size: clamp(var(--cy-t-xl), 4.4vw, var(--cy-t-hero)); line-height: 1.04; letter-spacing: -0.035em; }
+.cy-lead { font-size: clamp(var(--cy-t-body), 1.4vw, var(--cy-t-md)); line-height: 1.55; color: var(--cy-muted); }
 .cy-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.875rem; }
 
 .cy-hero__code {
@@ -205,7 +218,7 @@
   padding: 0.7rem 1.1rem;
   border-bottom: 1px solid var(--cy-line);
   font-family: var(--md-code-font-family, monospace);
-  font-size: 0.75rem;
+  font-size: var(--cy-t-sm);
   color: var(--cy-faint);
 }
 /* The card carries its own colour scheme, so the rendered block and its syntax
@@ -222,7 +235,7 @@
 .cy-codecard__body .highlight > pre { border-radius: 0; }
 .cy-codecard__body .md-typeset__scrollwrap,
 .cy-codecard__body .highlighttable { margin: 0; }
-.cy-codecard__body code { font-size: 0.8125rem; line-height: 1.55; }
+.cy-codecard__body code { font-size: var(--cy-t-code); line-height: 1.55; }
 
 /* ---------- command band ---------- */
 
@@ -255,21 +268,21 @@
   gap: clamp(28px, 5vw, 72px);
   align-items: start;
 }
-.cy-band__lede h2 { font-size: clamp(1.35rem, 2.2vw, 1.625rem); line-height: 1.2; color: #faf9f5; }
-.cy-band__lede p { margin-top: 0.6rem; font-size: 0.875rem; line-height: 1.5; color: var(--cy-deep-muted); }
+.cy-band__lede h2 { font-size: clamp(var(--cy-t-md), 2.2vw, var(--cy-t-lg)); line-height: 1.2; color: #faf9f5; }
+.cy-band__lede p { margin-top: 0.6rem; font-size: var(--cy-t-body); line-height: 1.5; color: var(--cy-deep-muted); }
 
 .cy-commands { margin: 0; display: flex; flex-direction: column; }
 .cy-commands dt {
   padding-top: 1.05rem;
   border-top: 1px solid var(--cy-deep-line);
-  font-size: 0.875rem;
+  font-size: var(--cy-t-code);
   color: #faf9f5;
   overflow-wrap: anywhere;
 }
 .cy-commands dt:first-child { padding-top: 0; border-top: 0; }
 .cy-commands dd {
   margin: 0.25rem 0 1.05rem;
-  font-size: 0.84rem;
+  font-size: var(--cy-t-sm);
   color: var(--cy-deep-muted);
 }
 .cy-commands dd:last-child { margin-bottom: 0; }
@@ -283,8 +296,8 @@
   margin-bottom: 2.1rem;
 }
 .cy-section__head > div { max-width: 40rem; }
-.cy-section__head h2 { font-size: clamp(1.6rem, 2.9vw, 2.375rem); line-height: 1.12; }
-.cy-section__head p { margin-top: 0.75rem; font-size: 1.0625rem; line-height: 1.55; color: var(--cy-muted); }
+.cy-section__head h2 { font-size: clamp(var(--cy-t-lg), 2.9vw, var(--cy-t-2xl)); line-height: 1.12; }
+.cy-section__head p { margin-top: 0.75rem; font-size: var(--cy-t-body); line-height: 1.55; color: var(--cy-muted); }
 .cy-section__head code {
   background: var(--cy-wash);
   padding: 0.1em 0.4em;
@@ -308,7 +321,7 @@
 }
 .cy-shot__url {
   font-family: var(--md-code-font-family, monospace);
-  font-size: 0.7rem;
+  font-size: var(--cy-t-sm);
   color: var(--cy-faint);
   background: var(--cy-paper);
   border: 1px solid var(--cy-line);
@@ -330,13 +343,13 @@
   gap: clamp(24px, 3vw, 32px);
 }
 .cy-pillar { display: flex; flex-direction: column; gap: 0.75rem; }
-.cy-pillar h3 { font-size: 1.1875rem; }
-.cy-pillar p { font-size: 0.9rem; line-height: 1.6; color: var(--cy-muted); }
+.cy-pillar h3 { font-size: var(--cy-t-md); }
+.cy-pillar p { font-size: var(--cy-t-body); line-height: 1.6; color: var(--cy-muted); }
 
 /* ---------- features ---------- */
 
 .cy-home .cy-features__title {
-  font-size: clamp(1.6rem, 2.9vw, 2.375rem);
+  font-size: clamp(var(--cy-t-lg), 2.9vw, var(--cy-t-2xl));
   line-height: 1.12;
   max-width: 42rem;
   margin-bottom: 2.5rem;
@@ -355,11 +368,11 @@
 .cy-feature--flip .cy-feature__copy { order: 2; }
 
 .cy-feature__copy { display: flex; flex-direction: column; gap: 0.7rem; align-items: flex-start; }
-.cy-feature__copy h3 { font-size: 1.5rem; }
-.cy-feature__copy p { font-size: 0.9375rem; line-height: 1.6; color: var(--cy-muted); }
+.cy-feature__copy h3 { font-size: var(--cy-t-lg); }
+.cy-feature__body { font-size: var(--cy-t-body); line-height: 1.6; color: var(--cy-muted); }
 .cy-kicker {
   font-family: var(--md-code-font-family, monospace);
-  font-size: 0.7rem;
+  font-size: var(--cy-t-sm);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--cy-faint);
@@ -379,7 +392,7 @@
 .cy-snippet {
   margin: 0 0 1rem;
   font-family: var(--md-code-font-family, monospace);
-  font-size: 0.8125rem;
+  font-size: var(--cy-t-code);
   line-height: 1.55;
   color: #ded8cf;
   overflow-x: auto;
@@ -391,7 +404,7 @@
   display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem;
   border-top: 1px solid #332e28;
   padding-top: 0.9rem;
-  font-size: 0.78rem;
+  font-size: var(--cy-t-sm);
   color: #a9a096;
 }
 
@@ -400,7 +413,7 @@
   padding: 0.55rem 1rem;
   border-bottom: 1px solid var(--cy-line);
   background: var(--cy-ground);
-  font-size: 0.78rem;
+  font-size: var(--cy-t-sm);
   font-weight: 500;
 }
 .cy-feed__live { font-weight: 400; color: var(--cy-faint); display: inline-flex; align-items: center; gap: 0.4em; }
@@ -409,7 +422,7 @@
 .cy-feed__list li {
   display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
   padding: 0.55rem 1rem;
-  font-size: 0.78rem;
+  font-size: var(--cy-t-sm);
 }
 .cy-feed__list li:nth-child(even) { background: var(--cy-ground); }
 .cy-feed__list time { font-family: var(--md-code-font-family, monospace); color: var(--cy-faint); }
@@ -419,9 +432,9 @@
 .cy-home .cy-backfill__cmd {
   display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.75rem;
   margin-bottom: 1rem;
-  font-size: 0.8125rem;
+  font-size: var(--cy-t-code);
 }
-.cy-backfill__cmd span { color: var(--cy-faint); font-size: 0.75rem; }
+.cy-backfill__cmd span { color: var(--cy-faint); font-size: var(--cy-t-sm); }
 .cy-backfill__grid { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 6px; }
 .cy-backfill__grid span { height: 26px; border-radius: 5px; }
 .cy-backfill__grid .is-completed { background: var(--cy-completed-bg); }
@@ -430,7 +443,7 @@
 .cy-backfill__grid .is-failed    { background: var(--cy-failed-bg); }
 .cy-backfill__grid .is-scheduled { background: var(--cy-scheduled-bg); border: 1px solid var(--cy-line); }
 
-.cy-home .cy-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem; font-size: 0.75rem; color: var(--cy-muted); }
+.cy-home .cy-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem; font-size: var(--cy-t-sm); color: var(--cy-muted); }
 .cy-legend span { display: inline-flex; align-items: center; gap: 0.4em; }
 .cy-legend span::before { content: ""; width: 8px; height: 8px; border-radius: 2px; }
 .cy-legend .is-completed::before { background: var(--cy-completed-dot); }
@@ -452,13 +465,13 @@
   gap: clamp(28px, 5vw, 72px);
   align-items: start;
 }
-.cy-perf__lede h2 { font-size: clamp(1.5rem, 2.5vw, 2rem); line-height: 1.14; }
-.cy-perf__lede p { margin: 0.75rem 0 1.1rem; font-size: 0.9375rem; line-height: 1.6; color: var(--cy-muted); }
+.cy-perf__lede h2 { font-size: clamp(var(--cy-t-lg), 2.5vw, var(--cy-t-xl)); line-height: 1.14; }
+.cy-perf__lede p { margin: 0.75rem 0 1.1rem; font-size: var(--cy-t-body); line-height: 1.6; color: var(--cy-muted); }
 
-.cy-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.cy-table { width: 100%; border-collapse: collapse; font-size: var(--cy-t-body); }
 .cy-table caption {
   text-align: left;
-  font-size: 0.7rem;
+  font-size: var(--cy-t-sm);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--cy-faint);
@@ -487,12 +500,12 @@
   padding: 1.75rem 1.875rem;
   display: flex; flex-direction: column; gap: 0.75rem;
 }
-.cy-card h3 { font-size: 1.3125rem; }
-.cy-card p { font-size: 0.9rem; line-height: 1.6; color: var(--cy-muted); }
-.cy-card__links { display: flex; flex-wrap: wrap; gap: 0.625rem; margin-top: 0.25rem !important; }
+.cy-card h3 { font-size: var(--cy-t-md); }
+.cy-card p { font-size: var(--cy-t-body); line-height: 1.6; color: var(--cy-muted); }
+.cy-card__links { display: flex; flex-wrap: wrap; gap: 0.625rem; margin-top: 0.25rem; }
 .cy-card__links a:not(.cy-more) {
   font-family: var(--md-code-font-family, monospace);
-  font-size: 0.78rem;
+  font-size: var(--cy-t-sm);
   text-decoration: none;
   color: var(--cy-ink);
   border: 1px solid var(--cy-line-strong);
@@ -511,8 +524,8 @@
   display: flex; flex-direction: column; align-items: center; gap: 1.4rem;
   text-align: center;
 }
-.cy-cta h2 { font-size: clamp(1.75rem, 3.4vw, 2.625rem); line-height: 1.1; color: #faf9f5; max-width: 22ch; }
-.cy-cta > p { font-size: 1rem; line-height: 1.55; color: var(--cy-deep-muted); max-width: 44ch; }
+.cy-cta h2 { font-size: clamp(var(--cy-t-lg), 3.4vw, var(--cy-t-2xl)); line-height: 1.1; color: #faf9f5; max-width: 22ch; }
+.cy-cta > p { font-size: var(--cy-t-body); line-height: 1.55; color: var(--cy-deep-muted); max-width: 44ch; }
 .cy-cta .cy-actions { justify-content: center; }
 
 /* ---------- narrow screens ---------- */
