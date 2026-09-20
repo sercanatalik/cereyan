@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 (2026-09-20)
 
 - **Freshness and deadlines.** `@flow(fresh_within=, expect_by=, expected_duration=, overdue_factor=)` derive a PASS, WARN or FAIL health per flow from its recorded runs, shown in a Health column on the Flows page and as `health` on every flow summary; a Running run past its expected duration records `run.overdue` once, for rules to page on. [Detect when something did not happen › Freshness and deadlines](https://sercanatalik.github.io/cereyan/guides/detect-missing-events/#freshness-and-deadlines-in-one-line)
 - **Backfills take explicit values, skip what is done, or restate.** `values` lists the parameter values instead of a range, `missing_only` leaves out values whose latest run completed, and `force` tags the runs `cereyan:force` so they ignore targets, caches, checkpoints and `bulk_complete`. On the API, `Client.backfill`, `cereyan backfill --values/--missing-only/--force`, the MCP tool, and the dialog. [Backfill a date range › Pick the values](https://sercanatalik.github.io/cereyan/guides/backfill/#pick-the-values-skip-the-done-ones-or-restate)
