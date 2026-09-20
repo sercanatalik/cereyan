@@ -139,7 +139,10 @@ def obs(isolated_home, obs_dir, tmp_path):
 
     engine.close_store()
     hook = tmp_path / "rulehook.txt"
-    srv = ServerProcess(str(isolated_home), str(obs_dir), env={"RULE_HOOK_FILE": str(hook), "CEREYAN_RETENTION_INTERVAL": "2"})
+    # Four engines: some tests hold two or three runs at once and still need a
+    # free engine for the run that emits the event they react to.
+    srv = ServerProcess(str(isolated_home), str(obs_dir), env={"RULE_HOOK_FILE": str(hook), "CEREYAN_RETENTION_INTERVAL": "2"},
+                        extra=["--max-engines", "4"])
     srv.hook = hook
     try:
         yield srv
@@ -442,7 +445,12 @@ def test_email_action_over_local_smtp(obs):
         rule = c.create_rule({"name": "mail", "when": {"events": ["run.failed"]}, "do": [{"kind": "email", "to": ["ops@example.com"]}]})
         run = c._request("POST", f"/api/flows/{fid(srv, 'fail')}/runs", body={"parameters": {}})
         srv.wait_run(run["id"])
-        firing = wait_until(lambda: (f := c._request("GET", f"/api/rules/{rule['id']}/firings")) and f[0], timeout=20)
+        # The firing is recorded before its actions run, so wait for the outcome.
+        firing = wait_until(
+            lambda: next((f for f in c._request("GET", f"/api/rules/{rule['id']}/firings")
+                          if f["outcomes"][0]["status"] != "pending"), None),
+            timeout=20,
+        )
         assert firing["outcomes"][0]["status"] == "completed", firing
         body = b"".join(received).decode(errors="replace")
         assert "ValueError: bad" in body and "Subject:" in body

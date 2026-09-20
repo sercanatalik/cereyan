@@ -245,6 +245,14 @@ impl AppState {
             self.store.task_run_counts()?,
             flows.iter().map(|f| (f.id, f.project.clone())).collect(),
         );
+        // A server that comes up inside a global pause must not dispatch runs
+        // whose time passed while it was down; resuming re-arms them.
+        let paused = self
+            .store
+            .kv_get(crate::scheduler::PAUSE_KEY)
+            .ok()
+            .flatten()
+            .is_some();
         for run in self.store.active_runs()? {
             let Some(flow) = flows.iter().find(|f| f.id == run.flow_id) else {
                 continue;
@@ -255,10 +263,11 @@ impl AppState {
                     // Never picked up: queue it again (future scheduled runs
                     // are re-armed by the scheduler instead).
                     self.index.adopt_run(&run, key.clone());
-                    if run
-                        .scheduled_time
-                        .map(|t| t <= now_micros())
-                        .unwrap_or(true)
+                    if !paused
+                        && run
+                            .scheduled_time
+                            .map(|t| t <= now_micros())
+                            .unwrap_or(true)
                     {
                         self.supervisor.enqueue_simple(run.id, key);
                     }

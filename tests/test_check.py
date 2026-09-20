@@ -97,8 +97,16 @@ def test_clean_directory_exits_zero_and_leaves_no_store(run_cli, write_module, i
     assert flows["nightly"]["schedules"][0]["next"] == [
         "2026-09-20T06:00:00+00:00", "2026-09-21T06:00:00+00:00", "2026-09-22T06:00:00+00:00",
     ]
-    # The interval preview is rendered in the schedule's zone.
-    assert all(t.endswith("+03:00") for t in flows["report"]["schedules"][0]["next"])
+    # The interval preview is rendered in the schedule's zone, or in UTC where
+    # Python has no IANA database (Windows without the `tzdata` package).
+    try:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo("Europe/Istanbul")
+        offset = "+03:00"
+    except Exception:
+        offset = "+00:00"
+    assert all(t.endswith(offset) for t in flows["report"]["schedules"][0]["next"])
     assert len(flows["report"]["schedules"][0]["next"]) == 3
 
 

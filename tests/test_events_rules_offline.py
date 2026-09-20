@@ -133,9 +133,15 @@ def test_code_rule_runs_offline(store):
     with pytest.raises(RuntimeError):
         boom()
     assert calls and calls[0][0] == "run.failed"
-    rows = json.loads(store.list_rules())
-    assert rows[0]["source"] == "code" and rows[0]["do"][0]["kind"] == "call"
-    assert rows[0]["fire_count"] == 1
+    # Every code rule defined in this process is registered, including one of
+    # the same name that another test module imports, so pick this one by the
+    # qualified name of its callable.
+    row = next(
+        r for r in json.loads(store.list_rules())
+        if r["do"][0].get("callable", "").endswith("test_code_rule_runs_offline.<locals>.notify")
+    )
+    assert row["source"] == "code" and row["do"][0]["kind"] == "call"
+    assert row["fire_count"] == 1
     with pytest.raises(RuntimeError):
         boom()
     assert len(calls) == 2  # once per run, two runs
