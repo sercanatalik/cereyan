@@ -12,6 +12,7 @@ from . import artifacts, events, states, task_state
 from .events import emit_event
 from .attributes import set_attributes
 from .inputs import wait_for_input
+from .waits import Snooze, WaitTimeout, sleep, sleep_until, wait_for_event, wait_for_target
 from .results import INPUTS, SOURCE, CachePolicy
 from .routes import HTTPError, Request, Response
 from .runners import Future, ProcessRunner, ThreadRunner
@@ -33,6 +34,12 @@ __all__ = [
     "Future",
     "INPUTS",
     "Interval",
+    "Snooze",
+    "WaitTimeout",
+    "sleep",
+    "sleep_until",
+    "wait_for_event",
+    "wait_for_target",
     "task_state",
     "Unique",
     "LocalTarget",

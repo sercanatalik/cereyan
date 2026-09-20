@@ -68,10 +68,12 @@ def _prompt_terminal(prompt: str, schema: dict | None) -> Any:
 
 def pause_details(exc: RunPaused) -> dict:
     """The state details recorded when a run pauses: the prompt, its schema, the time asked, the asking task run, and which question is waiting."""
-    return {
+    details = {
         "prompt": exc.prompt,
         "schema": exc.schema,
         "asked_at": int(time.time() * 1_000_000),
         "task_run": exc.task_run,
         "index": exc.index,
     }
+    details.update(getattr(exc, "details", None) or {})
+    return details

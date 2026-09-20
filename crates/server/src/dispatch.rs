@@ -229,6 +229,7 @@ pub fn after_transition(state: &Arc<AppState>, run: &Run, previous: Option<&Stat
         StateType::Completed => {
             trigger_dependents(state, &flow, run);
         }
+        StateType::Paused => crate::waits::arm(state, run),
         _ => {}
     }
     if run.state.is_terminal() {

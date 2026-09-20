@@ -19,7 +19,7 @@ from .. import _core, context, names
 from .. import masking
 from .. import logging as run_logging
 from ..config import load_project_config
-from ..exceptions import Abort, CereyanError, RunPaused
+from ..exceptions import Abort, CereyanError, RunPaused, Snooze
 from ..results import ResultStore, _hash_inputs, cache_key, checkpoint_key, encode
 from ..runners import Future, ThreadRunner, UpstreamFailed, collect_futures, resolve_futures
 from ..schedules import retry_delay_for
@@ -322,16 +322,40 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
                 _wait_for_futures(ctx, logger)
                 break
             except RunPaused as exc:
-                # Waiting for a person: end the attempt cleanly, no hooks.
+                # Waiting for a person, a time, an event, or a target: end the
+                # attempt cleanly, no hooks; the server wakes the run.
                 _wait_for_futures(ctx, logger)
                 from ..inputs import pause_details
 
                 try:
-                    backend.transition_run("Paused", None, exc.prompt, pause_details(exc))
+                    backend.transition_run("Paused", exc.name, exc.prompt, pause_details(exc))
                 except RunRejected as rejected:
                     logger.warning("run %s could not pause: %s", run.name, rejected)
                     return None
-                logger.info("run %s paused for input: %s", run.name, exc.prompt)
+                logger.info("run %s paused (%s): %s", run.name, exc.name or "input", exc.prompt)
+                return None
+            except Snooze as exc:
+                _wait_for_futures(ctx, logger)
+                from ..task_state import _snooze_count
+
+                snoozes = _snooze_count(ctx)
+                if backend.offline:
+                    logger.info("run %s snoozed for %.1fs (%d so far)", run.name, exc.seconds, snoozes)
+                    time.sleep(exc.seconds)
+                    ctx.start_pass()
+                    ctx.replaying = bool(ctx.checkpoints)
+                    continue
+                details = {
+                    "prompt": "snooze", "reason": "snooze", "snoozes": snoozes, "index": ctx.next_input_index(),
+                    "wake_at": int(time.time() * 1_000_000) + int(exc.seconds * 1_000_000), "seconds": exc.seconds,
+                    "asked_at": int(time.time() * 1_000_000),
+                }
+                try:
+                    backend.transition_run("Paused", "Sleeping", str(exc), details)
+                except RunRejected as rejected:
+                    logger.warning("run %s could not snooze: %s", run.name, rejected)
+                    return None
+                logger.info("run %s snoozed for %.1fs (%d so far)", run.name, exc.seconds, snoozes)
                 return None
             except KeyboardInterrupt as exc:
                 if backend.cancel_requested():
@@ -690,8 +714,8 @@ def _run_task_attempts(run: context.RunContext, task, args: tuple, kwargs: dict,
                 run_hooks(task.on_completion, task, _run_dict(run), state, logger)
                 return result
             except BaseException as exc:
-                if isinstance(exc, RunPaused):
-                    backend.transition_task_run(external_id, "Cancelled", None, "paused for input", None)
+                if isinstance(exc, (RunPaused, Snooze)):
+                    backend.transition_task_run(external_id, "Cancelled", None, "snoozed" if isinstance(exc, Snooze) else "paused", None)
                     raise
                 cancelled = isinstance(exc, (KeyboardInterrupt, TaskCancelled)) and backend.cancel_requested()
                 timed_out = isinstance(exc, TimeoutError) and task.timeout_seconds and "exceeded" in str(exc)

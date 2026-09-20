@@ -263,6 +263,11 @@ impl AppState {
                         self.supervisor.enqueue_simple(run.id, key);
                     }
                 }
+                StateType::Paused => {
+                    // Waiting for a person, a time, an event, or a target: no
+                    // engine holds it. Timed waits are re-armed by the scheduler.
+                    self.index.adopt_run(&run, key);
+                }
                 _ => {
                     let alive = run
                         .engine_pid
@@ -331,6 +336,15 @@ impl AppState {
             self.supervisor.run_finished(run_id);
             self.timer.remove_run_events(run_id);
             self.supervisor.ensure_capacity(self);
+        }
+        if run.state.state_type == StateType::Paused {
+            // No engine owns a waiting run: a restart must not adopt the old
+            // one, find it gone, and crash the run.
+            let _ = self.store.set_run_engine(run_id, None, None);
+            self.index.update(run_id, |r| {
+                r.engine_pid = None;
+                r.engine_id = None;
+            });
         }
         if run.state.is_terminal() {
             // The answers belong to this run's questions and nothing asks them

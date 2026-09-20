@@ -35,6 +35,8 @@ pub enum TimerEvent {
     RuleClock(i64),
     /// The global pause's `until` arrived; the value is the pause's `since`.
     SchedulerResume(i64),
+    /// A paused run's wake time arrived (a sleep, an event deadline, a target poke).
+    WakeRun(i64),
 }
 
 #[derive(Default)]

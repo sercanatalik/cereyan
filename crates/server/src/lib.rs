@@ -23,6 +23,7 @@ mod supervisor;
 pub mod timer;
 mod ui;
 mod validate;
+mod waits;
 
 pub use auth::{AuthenticatedUser, Authenticator};
 pub use custom::{check_conflicts, DispatchRequest, DispatchResponse, RouteDispatcher, RouteSpec};

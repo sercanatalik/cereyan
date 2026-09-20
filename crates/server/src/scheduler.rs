@@ -393,6 +393,8 @@ fn start_inner(state: &Arc<AppState>, with_catch_up: bool) {
             }
         }
     }
+    // Paused runs that asked to be woken keep their wake time across a restart.
+    crate::waits::rearm_all(state);
     state
         .timer
         .push(now + PERSIST_EVERY_SECS * 1_000_000, TimerEvent::Persist);
@@ -1082,6 +1084,7 @@ fn handle(state: &Arc<AppState>, event: TimerEvent) {
         }
         TimerEvent::Expectation(id) => crate::rules::expectation_due(state, id),
         TimerEvent::RuleClock(rule_id) => crate::rules::clock_tick(state, rule_id),
+        TimerEvent::WakeRun(run_id) => crate::waits::on_timer(state, run_id),
         TimerEvent::SchedulerResume(since) => {
             if state.pause().is_some_and(|p| p.since == since) {
                 resume_all(state);

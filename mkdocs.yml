@@ -164,6 +164,7 @@ nav:
           - React to events with rules: guides/rules.md
           - Detect when something did not happen: guides/detect-missing-events.md
           - Pause a run for approval: guides/human-approval.md
+          - Wait without holding an engine: guides/wait-durably.md
       - Extending:
           - Add custom HTTP routes: guides/custom-routes.md
           - Publish artifacts: guides/artifacts.md

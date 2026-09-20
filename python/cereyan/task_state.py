@@ -67,3 +67,11 @@ def items() -> dict[str, Any]:
     """Every entry this task stored in this run, as a dict."""
     backend, scope = _scope()
     return {row["key"]: row["value"] for row in backend.task_state_list() if row["scope"] == scope}
+
+
+def _snooze_count(run) -> int:
+    """Increment and return the run's snooze count, kept in the flow-scope state store."""
+    raw = run.backend.task_state_get("", "snoozes")
+    n = (json.loads(raw) if raw is not None else 0) + 1
+    run.backend.task_state_set("", "snoozes", json.dumps(n))
+    return n

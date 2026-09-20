@@ -43,7 +43,7 @@ Scheduled ──▶ Pending ──▶ Running ──▶ Completed
 | `Cancelling` | Asked to stop |
 | `Completed`, `Failed`, `Cancelled`, `Crashed` | Terminal |
 
-Named sub-states refine a type: `Late` and `AwaitingRetry` and `AwaitingResource` (Scheduled), `Retrying` (Running), `TimedOut` (Failed), `Cached`, `Replayed` and `Skipped` (Completed). The exact transition rules, shared by the offline and served paths, are on the [States and transitions](../reference/states.md) page.
+Named sub-states refine a type: `Late` and `AwaitingRetry` and `AwaitingResource` (Scheduled), `Retrying` (Running), `TimedOut` (Failed), `Cached`, `Replayed` and `Skipped` (Completed), `Sleeping`, `AwaitingEvent` and `AwaitingTarget` (Paused). The exact transition rules, shared by the offline and served paths, are on the [States and transitions](../reference/states.md) page.
 
 ## What a run records
 

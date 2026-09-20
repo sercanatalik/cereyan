@@ -1148,7 +1148,7 @@ pub async fn resume_inner(state: &Arc<AppState>, id: i64, input: Value) -> ApiRe
 
 /// The answers stored for a run: question index to `{prompt, input}`. Anything
 /// else under the key, including a value without the `v` marker, holds no answers.
-fn stored_answers(state: &AppState, id: i64) -> ApiResult<Map<String, Value>> {
+pub(crate) fn stored_answers(state: &AppState, id: i64) -> ApiResult<Map<String, Value>> {
     let Some(raw) = state.store.kv_get(&crate::state::run_input_key(id))? else {
         return Ok(Map::new());
     };
@@ -1163,7 +1163,7 @@ fn stored_answers(state: &AppState, id: i64) -> ApiResult<Map<String, Value>> {
         .unwrap_or_default())
 }
 
-fn answers_value(answers: &Map<String, Value>) -> String {
+pub(crate) fn answers_value(answers: &Map<String, Value>) -> String {
     serde_json::json!({"v": 1, "answers": answers}).to_string()
 }
 

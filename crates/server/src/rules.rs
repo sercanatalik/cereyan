@@ -414,6 +414,7 @@ fn context_for(state: &AppState, event: &Event) -> RunContext {
 
 /// Evaluate every candidate rule against a freshly recorded event.
 pub fn on_event(state: &Arc<AppState>, event: Event) {
+    crate::waits::on_event(state, &event);
     if event.name.starts_with("rule.") {
         return;
     }

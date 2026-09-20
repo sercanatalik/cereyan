@@ -73,10 +73,13 @@ pub enum StateName {
     Cached,
     Replayed,
     Skipped,
+    Sleeping,
+    AwaitingEvent,
+    AwaitingTarget,
 }
 
 impl StateName {
-    pub const ALL: [StateName; 8] = [
+    pub const ALL: [StateName; 11] = [
         StateName::Late,
         StateName::AwaitingRetry,
         StateName::AwaitingResource,
@@ -85,6 +88,9 @@ impl StateName {
         StateName::Cached,
         StateName::Replayed,
         StateName::Skipped,
+        StateName::Sleeping,
+        StateName::AwaitingEvent,
+        StateName::AwaitingTarget,
     ];
 
     pub fn state_type(self) -> StateType {
@@ -95,6 +101,9 @@ impl StateName {
             StateName::Retrying => StateType::Running,
             StateName::TimedOut => StateType::Failed,
             StateName::Cached | StateName::Replayed | StateName::Skipped => StateType::Completed,
+            StateName::Sleeping | StateName::AwaitingEvent | StateName::AwaitingTarget => {
+                StateType::Paused
+            }
         }
     }
 
@@ -108,6 +117,9 @@ impl StateName {
             StateName::Cached => "Cached",
             StateName::Replayed => "Replayed",
             StateName::Skipped => "Skipped",
+            StateName::Sleeping => "Sleeping",
+            StateName::AwaitingEvent => "AwaitingEvent",
+            StateName::AwaitingTarget => "AwaitingTarget",
         }
     }
 
