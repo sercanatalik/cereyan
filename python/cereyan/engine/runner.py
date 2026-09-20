@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .. import _core, context, names
+from .. import masking
 from .. import logging as run_logging
 from ..config import load_project_config
 from ..exceptions import Abort, CereyanError, RunPaused
@@ -102,12 +103,12 @@ def _set_outcome(run: dict | None, tasks: list[dict]) -> None:
 
 
 def _error_message(exc: BaseException) -> str:
-    text = str(exc)
+    text = masking.mask(str(exc))
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
 
 def _failure_details(exc: BaseException) -> dict:
-    details = {"traceback": traceback.format_exc(), "exception": type(exc).__name__}
+    details = {"traceback": masking.mask(traceback.format_exc()), "exception": type(exc).__name__}
     if isinstance(exc, Abort):
         # A refused retry, not an exhausted one: the UI and rules can tell them
         # apart without parsing the message.

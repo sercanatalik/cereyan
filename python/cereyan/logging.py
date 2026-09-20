@@ -10,7 +10,7 @@ import logging
 import sys
 from typing import TYPE_CHECKING
 
-from . import context
+from . import context, masking
 
 if TYPE_CHECKING:
     from .engine.backends import Backend
@@ -45,6 +45,8 @@ class RunLogHandler(logging.Handler):
             record.exc_text = logging.Formatter().formatException(record.exc_info)
         if record.exc_text:
             message = f"{message}\n{record.exc_text}"
+        if masking.active():
+            message = masking.mask(message)
         try:
             self.backend.log(
                 task_run.id if task_run is not None else None,

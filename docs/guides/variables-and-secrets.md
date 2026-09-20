@@ -29,7 +29,7 @@ Variable.set("warehouse/password", "hunter2", secret=True)
 assert Variable.get("warehouse/password") == "hunter2"
 ```
 
-A secret is encrypted at rest with the key in `<home>/secret.key`, created on first use with mode 0600, and shown masked in the UI, the API, and the MCP tools. `Variable.get` decrypts it inside your process. Back up `secret.key` with the database, and treat access to the home directory as access to the secrets; the `token` file a server generates when bound beyond loopback lives there under the same protection.
+A secret is encrypted at rest with the key in `<home>/secret.key`, created on first use with mode 0600, and shown masked in the UI, the API, and the MCP tools. `Variable.get` decrypts it inside your process, and from that moment the process masks the value in everything it records about a run: log lines, lines captured with `log_prints`, exception text, and a failed run's message and traceback all show `***` where the secret was, offline and served alike. A JSON secret's string values are masked one by one. What is not masked: secrets shorter than four characters, a value a flow changed before logging it (a slice, an encoding, a template), artifacts and results, and anything written to files or to stdout outside `log_prints`. The engine's own terminal output stays as your code wrote it; only what is stored is masked. Back up `secret.key` with the database, and treat access to the home directory as access to the secrets; the `token` file a server generates when bound beyond loopback lives there under the same protection.
 
 ## From the UI, the API, and an agent
 

@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from . import _core
+from . import masking
 from .exceptions import CereyanError
 from .params import to_json_value
 
@@ -58,10 +59,16 @@ class Variable:
         mode, handle = _access()
         if mode == "store":
             try:
-                text = handle.get_variable(name)
+                found = handle.get_variable_flagged(name)
             except RuntimeError as exc:
                 raise CereyanError(str(exc)) from None
-            return default if text is None else json.loads(text)
+            if found is None:
+                return default
+            text, secret = found
+            value = json.loads(text)
+            if secret:
+                masking.register(value)
+            return value
         from .client import ApiError
 
         try:
@@ -77,9 +84,11 @@ class Variable:
             from . import engine
 
             try:
-                return json.loads(_core.decrypt_secret(engine.resolved_home(), raw))
+                value = json.loads(_core.decrypt_secret(engine.resolved_home(), raw))
             except RuntimeError as exc:
                 raise CereyanError(str(exc)) from None
+            masking.register(value)
+            return value
         return data.get("value", default)
 
     @staticmethod

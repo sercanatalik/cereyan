@@ -542,6 +542,28 @@ impl Store {
             .map_err(to_py)
     }
 
+    /// A variable's value (decrypted for a secret) with whether it is a secret,
+    /// so the offline reader knows what to register for log masking.
+    fn get_variable_flagged(
+        &self,
+        py: Python<'_>,
+        name: String,
+    ) -> PyResult<Option<(String, bool)>> {
+        let store = self.inner.clone();
+        let home = store.home().to_path_buf();
+        let result: Result<Option<(String, bool)>, String> =
+            py.detach(
+                move || match store.get_variable(&name).map_err(|e| e.to_string())? {
+                    None => Ok(None),
+                    Some((row, raw)) if row.secret => cereyan_store::secrets::decrypt(&home, &raw)
+                        .map(|text| Some((text, true)))
+                        .map_err(|e| e.to_string()),
+                    Some((_, raw)) => Ok(Some((raw, false))),
+                },
+            );
+        result.map_err(PyRuntimeError::new_err)
+    }
+
     /// Write a consistent copy to `<home>/backups/` and return its path.
     fn backup(&self, py: Python<'_>) -> PyResult<String> {
         let store = self.inner.clone();
