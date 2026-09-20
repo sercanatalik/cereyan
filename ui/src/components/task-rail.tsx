@@ -75,57 +75,45 @@ export function TaskRail({
                 ? formatDuration(now * 1000 - t.start_time)
                 : "";
           return (
-            <button
-              key={t.id}
-              type="button"
-              role="option"
-              aria-selected={selected}
-              data-task-id={t.id}
-              onClick={() => onSelect(selected ? undefined : t.id)}
-              className={cn(
-                "grid grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-md px-2 py-1.5 text-left hover:bg-accent/60",
-                selected && "bg-accent",
-              )}
-            >
-              <StateDot type={t.state.type} title={t.state.name} />
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate font-medium">{t.dynamic_key}</span>
-                {sub ? (
-                  <span
-                    className="text-[11.5px] leading-[15px] text-muted-foreground"
-                    data-testid="retry-line"
-                  >
-                    {sub}
-                  </span>
-                ) : null}
-              </span>
-              <span className="flex items-center gap-1 text-xs tabular-nums text-muted-foreground">
-                {duration}
-                {onRerunFrom ? (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    title={`Rerun from ${t.dynamic_key}`}
-                    aria-label={`Rerun from ${t.dynamic_key}`}
-                    data-testid="rerun-from"
-                    className="rounded px-1 hover:bg-accent hover:text-foreground"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRerunFrom(t);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onRerunFrom(t);
-                      }
-                    }}
-                  >
-                    ↻
-                  </span>
-                ) : null}
-              </span>
-            </button>
+            <div key={t.id} className="flex items-stretch">
+              <button
+                type="button"
+                role="option"
+                aria-selected={selected}
+                data-task-id={t.id}
+                onClick={() => onSelect(selected ? undefined : t.id)}
+                className={cn(
+                  "grid min-w-0 flex-1 grid-cols-[14px_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-md px-2 py-1.5 text-left hover:bg-accent/60",
+                  selected && "bg-accent",
+                )}
+              >
+                <StateDot type={t.state.type} title={t.state.name} />
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium">{t.dynamic_key}</span>
+                  {sub ? (
+                    <span
+                      className="text-[11.5px] leading-[15px] text-muted-foreground"
+                      data-testid="retry-line"
+                    >
+                      {sub}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-xs tabular-nums text-muted-foreground">{duration}</span>
+              </button>
+              {onRerunFrom ? (
+                <button
+                  type="button"
+                  title={`Rerun from ${t.dynamic_key}`}
+                  aria-label={`Rerun from ${t.dynamic_key}`}
+                  data-testid="rerun-from"
+                  className="rounded px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                  onClick={() => onRerunFrom(t)}
+                >
+                  ↻
+                </button>
+              ) : null}
+            </div>
           );
         })}
         {tasks.length === 0 ? <div className="px-2 py-3 text-muted-foreground">No task runs yet.</div> : null}
