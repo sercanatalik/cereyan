@@ -19,7 +19,7 @@ Cereyan borrows its vocabulary from Prefect and its file-oriented idempotency fr
 | States | Same names, plus `Cancelling` and named sub-states | The transition rules are on the [states page](../reference/states.md). |
 | Events | Events | Names are `run.completed` rather than `prefect.flow-run.Completed`. |
 | Flow run retries, `retry_delay_seconds` | `retries`, `retry_delay` | `exponential(...)` replaces `exponential_backoff`. |
-| Global concurrency limits, tag limits | Resources, `max_concurrent` | Named semaphores declared in configuration. |
+| Global concurrency limits, tag limits | Resources, `max_concurrent` | Named semaphores declared in configuration; `"tag:<name>"` totals limit runs by tag and `"api:*"` totals key a resource by parameter. |
 | Prefect Cloud, workspaces, RBAC, SSO | none | One machine, one user level, one token. |
 | Assets, SLAs, incident management | none | Not planned. |
 | `prefect-*` integration packages | none | Use the library directly inside tasks. |

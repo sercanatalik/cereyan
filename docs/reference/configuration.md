@@ -82,7 +82,7 @@ title = "Data Platform"   # optional: shown in the top bar and the browser tab
 
 ### `[resources]`
 
-Each key is a resource name and its value the total, for example `db = 4`. Resources are shared by every project on the machine.
+Each key is a resource name and its value the total, for example `db = 4`. A key with `*` is a pattern total for every rendered name it matches (`"api:*" = 1` gives `api:acme` and `api:globex` one slot each), and `"tag:gpu" = 1` limits every run tagged `gpu`. Resources are shared by every project on the machine. See [Keyed resources](../guides/resources-and-overlap.md#keyed-resources).
 
 ### `[email]`
 

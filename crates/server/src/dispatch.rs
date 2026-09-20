@@ -20,9 +20,32 @@ pub fn backfill_resource(backfill_id: i64) -> String {
     format!("backfill:{backfill_id}")
 }
 
-/// Resources a run needs before it may be dispatched.
-pub fn run_needs(flow: &Flow, options: &FlowOptions, run: &Run) -> Vec<(String, f64)> {
-    let mut needs = options.resource_amounts();
+/// Resources a run needs before it may be dispatched: the flow's declared
+/// resources with their names rendered from the run's parameters, a `tag:<t>`
+/// unit for every tag that has a total, the flow's concurrency cap, and the
+/// backfill's slot.
+pub fn run_needs(
+    state: &AppState,
+    flow: &Flow,
+    options: &FlowOptions,
+    run: &Run,
+) -> Vec<(String, f64)> {
+    let mut needs: Vec<(String, f64)> = options
+        .resource_amounts()
+        .into_iter()
+        .map(|(name, amount)| {
+            (
+                cereyan_core::unique::render_template(&name, &run.parameters),
+                amount,
+            )
+        })
+        .collect();
+    for tag in &run.tags {
+        let name = format!("tag:{tag}");
+        if state.supervisor.resource_declared(&name) && !needs.iter().any(|(n, _)| *n == name) {
+            needs.push((name, 1.0));
+        }
+    }
     if let Some(cap) = options.max_concurrent {
         if cap > 0 {
             needs.push((flow_cap_resource(flow), 1.0));
@@ -139,7 +162,7 @@ pub fn enqueue_run(state: &Arc<AppState>, run: &Run, flow: &Flow, not_before: Op
         key,
         priority,
         order: run.scheduled_time.unwrap_or(run.created_at),
-        needs: run_needs(flow, &options, run),
+        needs: run_needs(state, flow, &options, run),
         not_before,
     });
     state.supervisor.ensure_capacity(state);

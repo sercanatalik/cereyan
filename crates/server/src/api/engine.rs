@@ -417,10 +417,19 @@ pub async fn acquire(
     State(state): State<Arc<AppState>>,
     Json(req): Json<AcquireRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // Names may be templates over the run's parameters (`api:{{ tenant }}`).
+    let parameters = state
+        .store
+        .get_run(req.run_id)?
+        .map(|r| r.parameters)
+        .unwrap_or_default();
     let needs: Vec<(String, f64)> = req
         .resources
         .iter()
-        .filter_map(|(k, v)| v.as_f64().map(|n| (k.clone(), n)))
+        .filter_map(|(k, v)| {
+            v.as_f64()
+                .map(|n| (cereyan_core::unique::render_template(k, &parameters), n))
+        })
         .collect();
     let deadline = tokio::time::Instant::now() + Duration::from_millis(req.wait_ms.min(30_000));
     loop {

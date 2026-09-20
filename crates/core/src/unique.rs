@@ -37,6 +37,35 @@ pub fn render_key(template: Option<&str>, parameters: &Map<String, Value>) -> St
     }
 }
 
+/// Render `{{ name }}` or `{name}` placeholders over parameters, as resource
+/// names and unique keys do; text without placeholders is returned as is.
+pub fn render_template(text: &str, parameters: &Map<String, Value>) -> String {
+    if !text.contains('{') {
+        return text.to_string();
+    }
+    // `{{ x }}` becomes `{x}`, then the single-brace renderer does the rest.
+    let mut normalised = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("{{") {
+        normalised.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        match after.find("}}") {
+            Some(end) => {
+                normalised.push('{');
+                normalised.push_str(after[..end].trim());
+                normalised.push('}');
+                rest = &after[end + 2..];
+            }
+            None => {
+                normalised.push_str(&rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    normalised.push_str(rest);
+    render_key(Some(&normalised), parameters)
+}
+
 /// The stored key: the flow, the rendered key, and the period bucket (fixed
 /// windows of `period` seconds, as Oban does) when a period is set.
 pub fn unique_key(
@@ -78,5 +107,10 @@ mod tests {
             "flow:7|a|2"
         );
         assert_eq!(idempotency_key(7, " k "), "flow:7|idem:k|");
+        assert_eq!(
+            render_template("api:{{ day }}/{n}", &params),
+            "api:2026-09-20/3"
+        );
+        assert_eq!(render_template("plain", &params), "plain");
     }
 }

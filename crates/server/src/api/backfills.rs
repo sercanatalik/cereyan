@@ -347,7 +347,7 @@ pub fn enqueue_all(state: &Arc<AppState>, backfill_id: i64, flow: &Flow, skip_va
                 key: key.clone(),
                 priority: run.priority,
                 order: run.scheduled_time.unwrap_or(run.created_at),
-                needs: crate::dispatch::run_needs(flow, &options, run),
+                needs: crate::dispatch::run_needs(state, flow, &options, run),
                 not_before: None,
             });
         }

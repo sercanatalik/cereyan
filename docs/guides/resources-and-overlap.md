@@ -48,7 +48,31 @@ def train() -> str:
 assert train() == "select 1"
 ```
 
-A run or task run waits as `AwaitingResource` until every resource it declares has capacity, and a `resource.exhausted` event records the first wait. Units are released on every terminal state, on pause, and when an engine dies. Resources are global to the machine, so two projects declaring `db` share the same four units. A resource that is not declared in configuration has no limit.
+A run or task run waits as `AwaitingResource` until every resource it declares has capacity, and a `resource.exhausted` event records the first wait. Units are released on every terminal state, on pause, and when an engine dies. Resources are global to the machine, so two projects declaring `db` share the same four units. A resource that is not declared in configuration has a total of one.
+
+### Keyed resources
+
+A resource name can be a template over the run's parameters, and a total can cover a family of names:
+
+```toml
+[resources]
+"api:*" = 1        # one call per tenant at a time
+"tag:gpu" = 1      # one run tagged gpu at a time, whatever its flow
+```
+
+```python
+from cereyan import flow, task
+
+@flow(resources={"api:{{ tenant }}": 1})
+def call(tenant: str) -> str:
+    return tenant
+
+@task(resources={"db:{shard}": 1})
+def load(shard: str) -> str:
+    return shard
+```
+
+`{{ tenant }}` and `{tenant}` both render from the run's parameters when the run is admitted (flow resources) or the task starts (task resources), offline and served alike; an unknown name renders empty. A total whose key contains `*` applies to every rendered name it matches that has no total of its own, so `api:acme` and `api:globex` each get one slot and never wait on each other; such instances appear in the resources snapshot while in use and go away when idle. `tag:<name>` limits apply to every run carrying that tag, on top of the flow's own resources.
 
 ## Keep runs unique
 

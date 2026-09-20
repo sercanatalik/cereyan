@@ -165,3 +165,18 @@ def test_check_directory_from_python(write_module, isolated_home, capsys):
     assert {f["name"] for f in report["flows"]} == {"nightly", "report"}
     assert capsys.readouterr().out == ""
     assert not os.path.exists(os.path.join(str(isolated_home), "db.sqlite"))
+
+
+def test_templated_resource_covered_by_a_pattern_total(run_cli, write_module, tmp_path):
+    d = tmp_path / "patterns"
+    d.mkdir()
+    (d / "pipeline.py").write_text(
+        "from cereyan import App\napp = App('pat')\n"
+        "@app.flow(resources={'api:{{ tenant }}': 1})\ndef call(tenant: str = 'a'):\n    return tenant\n"
+        "@app.flow(resources={'lonely': 1})\ndef other():\n    return 1\n"
+    )
+    (d / "cereyan.toml").write_text('[resources]\n"api:*" = 2\n')
+    result = run_cli("check", str(d), "--json")
+    assert result.returncode == 0, result.stderr
+    warnings = [f for f in json.loads(result.stdout)["findings"] if f["kind"] == "resource"]
+    assert [w["message"] for w in warnings] == ["resource 'lonely' is not in [resources] of cereyan.toml"]

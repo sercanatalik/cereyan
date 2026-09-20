@@ -534,12 +534,29 @@ def follow_run(server, run_id: int, out=None, poll: float = 0.2) -> dict:
 # tasks
 
 
+def render_resource_name(name: str, parameters: dict[str, Any]) -> str:
+    """`api:{{ tenant }}` or `api:{tenant}` with the run's parameter filled in; an
+    unknown name renders empty, as the server renders flow-level names."""
+    import re
+
+    def value(match):
+        v = parameters.get(match.group(1).strip())
+        if v is None:
+            return ""
+        return v if isinstance(v, str) else json.dumps(v)
+
+    return re.sub(r"\{\{([^}]*)\}\}|\{([^{}]*)\}", lambda m: value(type("M", (), {"group": lambda self, i: m.group(1) if m.group(1) is not None else m.group(2)})()), name)
+
+
 def _acquire_resources(run: context.RunContext, task, logger):
-    """Task-level resources: lease through the server, or a local semaphore offline."""
+    """Task-level resources: lease through the server, or a local semaphore offline.
+    Names are templates over the run's parameters, rendered here so the offline
+    semaphores and the server's leases key on the same name."""
     if not task.resources:
         return None
     backend = run.backend
-    return backend.acquire_resources(task.resources, logger)
+    rendered = {render_resource_name(name, run.parameters): amount for name, amount in task.resources.items()}
+    return backend.acquire_resources(rendered, logger)
 
 
 def _release_resources(run: context.RunContext, lease) -> None:

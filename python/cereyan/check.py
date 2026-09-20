@@ -70,6 +70,19 @@ def reference_micros(now: datetime | str | None) -> int:
     return int(now.timestamp() * 1_000_000)
 
 
+def _resource_declared(name: str, totals: dict) -> bool:
+    """Whether a resource name, possibly templated (`api:{{ tenant }}`), has a
+    total: its own, or a pattern total such as `api:*` that matches it once
+    every placeholder is read as a wildcard."""
+    import re
+    from fnmatch import fnmatchcase
+
+    if name in totals:
+        return True
+    wild = re.sub(r"\{\{[^}]*\}\}|\{[^}]*\}", "*", name)
+    return any("*" in key and (fnmatchcase(wild, key) or fnmatchcase(key, wild)) for key in totals)
+
+
 def check_directory(directory: str, now: datetime | str | None = None) -> dict[str, Any]:
     """Import ``directory`` as ``cereyan serve`` would and report on it.
 
@@ -127,7 +140,7 @@ def check_directory(directory: str, now: datetime | str | None = None) -> dict[s
                                     + (", ".join(entry["next"]) or "never"), flow=label))
             previews.append(entry)
         for name in sorted(f.resources):
-            if name not in totals:
+            if not _resource_declared(name, totals):
                 own.append(_finding("warning", "resource",
                                     f"resource '{name}' is not in [resources] of cereyan.toml", flow=label))
         findings.extend(own)

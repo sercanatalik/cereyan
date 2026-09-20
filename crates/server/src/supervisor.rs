@@ -118,9 +118,65 @@ pub struct Resources {
     next_lease: u64,
 }
 
+/// Whether `pattern` (with `*` matching any run of characters) matches `name`.
+pub fn glob_matches(pattern: &str, name: &str) -> bool {
+    fn go(p: &[u8], n: &[u8]) -> bool {
+        match p.first() {
+            None => n.is_empty(),
+            Some(b'*') => (0..=n.len()).any(|i| go(&p[1..], &n[i..])),
+            Some(c) => n.first() == Some(c) && go(&p[1..], &n[1..]),
+        }
+    }
+    go(pattern.as_bytes(), name.as_bytes())
+}
+
+/// Keyed instances at zero usage are dropped past this many.
+const IDLE_INSTANCES_KEPT: usize = 256;
+
 impl Resources {
+    /// The explicit total, else the first pattern total (`api:*`) that matches,
+    /// else 1.
     pub fn total(&self, name: &str) -> f64 {
-        *self.totals.get(name).unwrap_or(&1.0)
+        if let Some(t) = self.totals.get(name) {
+            return *t;
+        }
+        self.pattern_for(name)
+            .and_then(|p| self.totals.get(p))
+            .copied()
+            .unwrap_or(1.0)
+    }
+
+    /// The pattern total that gives `name` its total, when it has no explicit one.
+    pub fn pattern_for(&self, name: &str) -> Option<&str> {
+        if self.totals.contains_key(name) {
+            return None;
+        }
+        let mut patterns: Vec<&String> = self.totals.keys().filter(|k| k.contains('*')).collect();
+        patterns.sort();
+        patterns
+            .into_iter()
+            .find(|p| glob_matches(p, name))
+            .map(|p| p.as_str())
+    }
+
+    /// Whether a limit exists for `name` at all, explicit or by pattern.
+    pub fn is_declared(&self, name: &str) -> bool {
+        self.totals.contains_key(name) || self.pattern_for(name).is_some()
+    }
+
+    /// Drop keyed instances nobody holds once there are many of them.
+    fn evict_idle(&mut self) {
+        let idle: Vec<String> = self
+            .used
+            .iter()
+            .filter(|(n, u)| **u <= 1e-9 && !self.totals.contains_key(*n))
+            .map(|(n, _)| n.clone())
+            .collect();
+        if idle.len() > IDLE_INSTANCES_KEPT {
+            for n in idle {
+                self.used.remove(&n);
+            }
+        }
     }
     pub fn free(&self, name: &str) -> f64 {
         self.total(name) - *self.used.get(name).unwrap_or(&0.0)
@@ -157,6 +213,7 @@ impl Resources {
             }
             *list = kept;
         }
+        self.evict_idle();
     }
     pub fn release_all(&mut self, run_id: i64) {
         if let Some(list) = self.leases.remove(&run_id) {
@@ -166,6 +223,7 @@ impl Resources {
                 }
             }
         }
+        self.evict_idle();
     }
 }
 
@@ -346,13 +404,22 @@ impl Supervisor {
             names
                 .into_iter()
                 .map(|n| {
-                    (
-                        n.clone(),
-                        serde_json::json!({"total": r.total(n), "used": r.used.get(n).copied().unwrap_or(0.0)}),
-                    )
+                    let mut entry = serde_json::json!({"total": r.total(n), "used": r.used.get(n).copied().unwrap_or(0.0)});
+                    if let Some(p) = r.pattern_for(n) {
+                        entry["pattern"] = serde_json::Value::String(p.to_string());
+                    }
+                    (n.clone(), entry)
                 })
                 .collect(),
         )
+    }
+
+    /// Whether a total is declared for `name`, explicitly or by pattern.
+    pub fn resource_declared(&self, name: &str) -> bool {
+        self.resources
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_declared(name)
     }
 
     pub fn resource_totals(&self) -> HashMap<String, f64> {
