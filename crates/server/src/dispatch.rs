@@ -616,6 +616,14 @@ fn trigger_dependents_at(state: &Arc<AppState>, upstream: &Flow, run: &Run, dept
             unique,
             ..Default::default()
         });
+        if let Err(cereyan_store::StoreError::UniqueConflict { existing }) = &created {
+            if let (Some(spec), Ok(Some(holder))) = (
+                opts.unique.as_ref().filter(|u| u.on_conflict == "debounce"),
+                state.store.get_run(*existing),
+            ) {
+                crate::api::runs::debounce_holder(state, &holder, &params, spec);
+            }
+        }
         if let Ok((run_id, _)) = created {
             if let Ok(Some(new_run)) = state.store.get_run(run_id) {
                 state

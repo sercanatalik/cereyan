@@ -53,15 +53,31 @@ class Unique:
         states: State types in which an existing run counts, default every
             non-terminal one. Add ``"Completed"`` to keep a key taken after the run ends.
         on_conflict: ``"skip"`` (the default) answers with the run that holds the key
-            and creates nothing; ``"replace"`` cancels it and creates the new run.
+            and creates nothing; ``"replace"`` cancels it and creates the new run;
+            ``"debounce"`` creates the run ``debounce`` seconds ahead and, while it has
+            not started, every further submission moves its start to now plus
+            ``debounce`` (at most ``max_wait`` after its creation) and replaces its
+            parameters; ``"throttle"`` keeps the first run in any sliding window of
+            ``period`` seconds and answers the others with it.
+        debounce: Seconds a debounced run waits after the last submission.
+        max_wait: The longest a debounced run may be pushed back from its creation.
     """
 
     def __init__(self, key: str | None = None, period: float | None = None,
-                 states: Iterable[str] = (), on_conflict: str = "skip") -> None:
-        if on_conflict not in ("skip", "replace"):
-            raise ValueError("on_conflict must be 'skip' or 'replace'")
+                 states: Iterable[str] = (), on_conflict: str = "skip",
+                 debounce: float | None = None, max_wait: float | None = None) -> None:
+        if on_conflict not in ("skip", "replace", "debounce", "throttle"):
+            raise ValueError("on_conflict must be 'skip', 'replace', 'debounce', or 'throttle'")
         if period is not None and float(period) <= 0:
             raise ValueError("period must be a positive number of seconds")
+        if on_conflict == "debounce" and (debounce is None or float(debounce) <= 0):
+            raise ValueError("on_conflict='debounce' needs debounce=<seconds>")
+        if on_conflict == "throttle" and period is None:
+            raise ValueError("on_conflict='throttle' needs period=<seconds>")
+        if max_wait is not None and float(max_wait) <= 0:
+            raise ValueError("max_wait must be a positive number of seconds")
+        self.debounce = float(debounce) if debounce is not None else None
+        self.max_wait = float(max_wait) if max_wait is not None else None
         known = ("Scheduled", "Pending", "Running", "Paused", "Cancelling", "Completed", "Failed", "Cancelled", "Crashed")
         self.states = tuple(states)
         for st in self.states:
@@ -73,7 +89,8 @@ class Unique:
 
     def spec(self) -> dict[str, Any]:
         """The declaration as the server records it in the flow's options."""
-        return {"key": self.key, "period": self.period, "states": list(self.states), "on_conflict": self.on_conflict}
+        return {"key": self.key, "period": self.period, "states": list(self.states), "on_conflict": self.on_conflict,
+                "debounce": self.debounce, "max_wait": self.max_wait}
 
     def __repr__(self) -> str:
         return f"Unique(key={self.key!r}, period={self.period!r}, states={self.states!r}, on_conflict={self.on_conflict!r})"

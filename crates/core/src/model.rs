@@ -265,8 +265,14 @@ pub struct UniqueSpec {
     pub period: Option<f64>,
     /// State types in which an existing run counts; empty means every non-terminal one.
     pub states: Vec<String>,
-    /// `skip` (answer with the existing run) or `replace` (cancel it and create anew).
+    /// `skip` (answer with the existing run), `replace` (cancel it and create
+    /// anew), `debounce` (move the waiting run along and take the new
+    /// parameters), or `throttle` (keep the first run per sliding `period`).
     pub on_conflict: String,
+    /// `debounce`: seconds a run waits after the last submission before it starts.
+    pub debounce: Option<f64>,
+    /// `debounce`: the longest a run may be pushed back from its creation.
+    pub max_wait: Option<f64>,
 }
 
 impl Default for UniqueSpec {
@@ -276,6 +282,8 @@ impl Default for UniqueSpec {
             period: None,
             states: Vec::new(),
             on_conflict: "skip".into(),
+            debounce: None,
+            max_wait: None,
         }
     }
 }

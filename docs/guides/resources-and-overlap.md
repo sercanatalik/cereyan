@@ -96,6 +96,20 @@ def sync() -> None:
 
 Without `key`, every parameter is the key. `period` buckets the key by fixed clock windows, and adding `Completed` to `states` keeps the key taken after the run ends, so `hourly_report` runs at most once per region per hour whatever asks for it. `on_conflict="replace"` cancels the run that holds the key and creates the new one; a run that is already winding down keeps it.
 
+Two more policies compose a unique key with a delayed start. `on_conflict="debounce"` with `debounce=30` creates the run thirty seconds ahead and, while it has not started, every further submission for the same key moves its start to thirty seconds from now and replaces its parameters, so a document saved ten times in a minute renders once, with the last version; `max_wait` caps how far the run can be pushed from its creation. `on_conflict="throttle"` with `period=60` keeps the first run of a key in any sliding minute and answers the rest with it, so a bursty webhook starts one run per minute.
+
+```python
+from cereyan import Unique, flow
+
+@flow(unique=Unique(key="{doc}", on_conflict="debounce", debounce=30, max_wait=300))
+def render(doc: str, version: int) -> str:
+    return f"{doc}:{version}"
+
+@flow(unique=Unique(key="{source}", on_conflict="throttle", period=60))
+def ping(source: str) -> str:
+    return source
+```
+
 A request can carry its own key instead: `idempotency_key` (and `idempotency_ttl`, a day by default) on `POST /api/runs`, `POST /api/flows/{id}/runs` and `Client.run` makes a repeated call, a webhook delivered twice for instance, answer with the run first created whatever its state. Runs started by a dependency are keyed by their upstream run, so an upstream completion processed twice starts one downstream run.
 
 ## Order the queue

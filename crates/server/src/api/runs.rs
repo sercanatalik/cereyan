@@ -74,11 +74,66 @@ pub fn unique_check_for(
     }
     let spec = FlowOptions::from_map(&flow.options).unique?;
     let rendered = cereyan_core::unique::render_key(spec.key.as_deref(), parameters);
-    Some(cereyan_store::UniqueCheck {
-        key: cereyan_core::unique::unique_key(flow.id, &rendered, spec.period, now),
-        states: spec.counting_states(),
-        since: None,
+    Some(match spec.on_conflict.as_str() {
+        // Only a run that has not started can be moved along; a started one
+        // opens a new window.
+        "debounce" => cereyan_store::UniqueCheck {
+            key: cereyan_core::unique::unique_key(flow.id, &rendered, None, now),
+            states: vec!["Scheduled".into()],
+            since: None,
+        },
+        // The first run in any sliding window wins, whatever became of it.
+        "throttle" => cereyan_store::UniqueCheck {
+            key: cereyan_core::unique::unique_key(flow.id, &rendered, None, now),
+            states: Vec::new(),
+            since: Some(now - (spec.period.unwrap_or(0.0).max(0.0) * 1_000_000.0) as i64),
+        },
+        _ => cereyan_store::UniqueCheck {
+            key: cereyan_core::unique::unique_key(flow.id, &rendered, spec.period, now),
+            states: spec.counting_states(),
+            since: None,
+        },
     })
+}
+
+/// A debounced run's start when created or moved: now plus the debounce.
+pub fn debounce_start(spec: &cereyan_core::UniqueSpec) -> Option<i64> {
+    (spec.on_conflict == "debounce").then(|| {
+        cereyan_core::now_micros() + (spec.debounce.unwrap_or(0.0).max(0.0) * 1_000_000.0) as i64
+    })
+}
+
+/// `debounce`: the run that holds the key moves along to now plus the debounce
+/// (capped at its creation plus `max_wait`) and takes the new parameters.
+/// A holder that already started is answered as it is.
+pub fn debounce_holder(
+    state: &Arc<AppState>,
+    holder: &Run,
+    parameters: &Map<String, Value>,
+    spec: &cereyan_core::UniqueSpec,
+) -> Run {
+    if holder.state.state_type != StateType::Scheduled || holder.engine_pid.is_some() {
+        return holder.clone();
+    }
+    let Some(mut at) = debounce_start(spec) else {
+        return holder.clone();
+    };
+    if let Some(cap) = spec.max_wait.filter(|w| *w > 0.0) {
+        at = at.min(holder.created_at + (cap * 1_000_000.0) as i64);
+    }
+    let params = serde_json::to_string(parameters).unwrap_or_else(|_| "{}".into());
+    if state
+        .store
+        .reschedule_run(holder.id, at, &params)
+        .unwrap_or(false)
+    {
+        crate::scheduler::arm_run(state, holder.id, at, false);
+        if let Ok(Some(updated)) = state.store.get_run(holder.id) {
+            state.publish_run(&updated);
+            return updated;
+        }
+    }
+    holder.clone()
 }
 
 async fn insert_run(
@@ -309,6 +364,19 @@ pub async fn create_run_checked(
             .unique
             .as_ref()
             .is_some_and(|u| u.on_conflict == "replace");
+    let debounce = if idempotency.is_none() {
+        options
+            .unique
+            .clone()
+            .filter(|u| u.on_conflict == "debounce")
+    } else {
+        None
+    };
+    // A debounced run is created for later, so a burst can move it along.
+    let not_before = match (&debounce, not_before) {
+        (Some(spec), given) => debounce_start(spec).map(|d| given.map_or(d, |g| g.max(d))),
+        (None, given) => given,
+    };
     let make = |unique: Option<cereyan_store::UniqueCheck>| CreateRun {
         flow_id,
         name: name.clone(),
@@ -347,6 +415,8 @@ pub async fn create_run_checked(
                     }
                     Err(e) => return Err(e.into()),
                 }
+            } else if let Some(spec) = &debounce {
+                return Ok((debounce_holder(state, &holder, &effective, spec), true));
             } else {
                 return Ok((holder, true));
             }

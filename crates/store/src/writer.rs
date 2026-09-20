@@ -488,6 +488,13 @@ pub enum WriteCommand {
         engine_id: Option<String>,
         reply: Reply<()>,
     },
+    /// A debounced run moves along: a new start time and the latest parameters.
+    RescheduleRun {
+        run_id: i64,
+        scheduled_time: i64,
+        parameters: String,
+        reply: Reply<bool>,
+    },
     CreateTaskRun(CreateTaskRun, Reply<(i64, Id)>),
     TransitionTaskRun {
         task_run_id: i64,
@@ -1068,6 +1075,20 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
                 None => Ok(accepted),
             }
         }),
+        WriteCommand::RescheduleRun {
+            run_id,
+            scheduled_time,
+            parameters,
+            reply,
+        } => ack(
+            reply,
+            conn.execute(
+                "UPDATE run SET scheduled_time = ?1, parameters = ?2 WHERE id = ?3 AND state_type = 'Scheduled'",
+                params![scheduled_time, parameters, run_id],
+            )
+            .map(|n| n > 0)
+            .map_err(Into::into),
+        ),
         WriteCommand::SetRunEngine {
             run_id,
             engine_pid,

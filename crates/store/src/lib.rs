@@ -491,6 +491,22 @@ impl Store {
         })
     }
 
+    /// Move a Scheduled run's start and replace its parameters; false when it
+    /// is not Scheduled any more.
+    pub fn reschedule_run(
+        &self,
+        run_id: i64,
+        scheduled_time: i64,
+        parameters: &str,
+    ) -> Result<bool> {
+        self.write(|reply| WriteCommand::RescheduleRun {
+            run_id,
+            scheduled_time,
+            parameters: parameters.to_string(),
+            reply,
+        })
+    }
+
     pub fn set_run_engine(
         &self,
         run_id: i64,

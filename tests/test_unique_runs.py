@@ -170,3 +170,91 @@ def test_offline_unique_flow(isolated_home):
     assert len(json.loads(store.list_runs())["items"]) == 2
     with pytest.raises(ValueError):
         Unique(on_conflict="maybe")
+
+
+DEBOUNCE_PIPELINE = '''
+import time
+from cereyan import App, Unique
+
+app = App("burst")
+
+@app.flow(unique=Unique(key="{doc}", on_conflict="debounce", debounce=3, max_wait=8))
+def render(doc: str = "a", version: int = 1):
+    return f"{doc}:{version}"
+
+@app.flow(unique=Unique(key="every-ping", on_conflict="throttle", period=3))
+def ping(n: int = 0):
+    return n
+'''
+
+
+@pytest.fixture
+def burst(isolated_home, tmp_path):
+    from cereyan import engine
+
+    engine.close_store()
+    d = tmp_path / "burst"
+    d.mkdir()
+    (d / "pipeline.py").write_text(DEBOUNCE_PIPELINE)
+    server = ServerProcess(str(isolated_home), str(d))
+    try:
+        yield server
+    finally:
+        server.stop()
+
+
+def test_debounce_moves_one_run_along_with_the_latest_parameters(burst):
+    c = burst.client
+    t0 = time.time()
+    first = c.run("render", doc="a", version=1)
+    assert first.get("conflict") is None and first["state"]["type"] == "Scheduled"
+    assert first["scheduled_time"] >= int(t0 * 1_000_000) + 2_500_000
+    time.sleep(0.5)
+    second = c.run("render", doc="a", version=2)
+    time.sleep(0.5)
+    third = c.run("render", doc="a", version=3)
+    assert second["conflict"] is True and third["conflict"] is True
+    assert second["id"] == first["id"] == third["id"]
+    assert third["parameters"]["version"] == 3 and third["scheduled_time"] > first["scheduled_time"]
+    other = c.run("render", doc="b", version=9)
+    assert other.get("conflict") is None and other["id"] != first["id"]
+    done = burst.wait_run(first["id"], timeout=30)
+    assert done["state"]["type"] == "Completed" and done["parameters"]["version"] == 3
+    assert done["start_time"] >= third["scheduled_time"] - 300_000
+    doc_a = [r for r in c.runs(flow="render", limit=20)["items"] if r["parameters"]["doc"] == "a"]
+    assert len(doc_a) == 1, [(r["id"], r["created_by"], r["state"], r["scheduled_time"], r["unique_key"]) for r in doc_a]
+    # A started run opens a new window: the next submission is a new run.
+    again = c.run("render", doc="a", version=4)
+    assert again.get("conflict") is None and again["id"] != first["id"]
+    burst.wait_run(other["id"])
+    burst.wait_run(again["id"])
+
+
+def test_debounce_cap_and_throttle(burst):
+    c = burst.client
+    t0 = time.time()
+    run = c.run("render", doc="cap", version=0)
+    for i in range(1, 8):
+        time.sleep(1)
+        moved = c.run("render", doc="cap", version=i)
+        assert moved["id"] == run["id"]
+    # max_wait=8: the run started about eight seconds after its creation despite the burst.
+    done = burst.wait_run(run["id"], timeout=40)
+    assert done["state"]["type"] == "Completed"
+    started = done["start_time"] / 1_000_000 - t0
+    assert 7.5 <= started <= 11.5, started
+    # throttle: the first run in a three-second window is kept, the others answer with it.
+    a = c.run("ping", n=1)
+    b = c.run("ping", n=2)
+    d = c.run("ping", n=3)
+    assert a.get("conflict") is None and b["conflict"] is True and d["conflict"] is True
+    assert b["id"] == a["id"] == d["id"]
+    burst.wait_run(a["id"])
+    time.sleep(3.5)
+    later = c.run("ping", n=4)
+    assert later.get("conflict") is None and later["id"] != a["id"]
+    burst.wait_run(later["id"])
+    with pytest.raises(ValueError):
+        __import__("cereyan").Unique(on_conflict="debounce")
+    with pytest.raises(ValueError):
+        __import__("cereyan").Unique(on_conflict="throttle")

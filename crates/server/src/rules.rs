@@ -656,7 +656,13 @@ pub fn execute(
             let due = action
                 .delay
                 .filter(|d| *d > 0.0)
-                .map(|d| now_micros() + (d * 1_000_000.0) as i64);
+                .map(|d| now_micros() + (d * 1_000_000.0) as i64)
+                .or_else(|| {
+                    options
+                        .unique
+                        .as_ref()
+                        .and_then(crate::api::runs::debounce_start)
+                });
             let unique = crate::api::runs::unique_check_for(&flow, &params, None);
             let (run_id, _) = match state.store.create_run_full(CreateRun {
                 flow_id: flow.id,
@@ -672,6 +678,19 @@ pub fn execute(
             }) {
                 Ok(created) => created,
                 Err(cereyan_store::StoreError::UniqueConflict { existing }) => {
+                    if let (Some(spec), Ok(Some(holder))) = (
+                        options
+                            .unique
+                            .as_ref()
+                            .filter(|u| u.on_conflict == "debounce"),
+                        state.store.get_run(existing),
+                    ) {
+                        let moved =
+                            crate::api::runs::debounce_holder(state, &holder, &params, spec);
+                        return Ok(
+                            json!({"conflict": true, "run_id": moved.id, "scheduled_time": moved.scheduled_time}),
+                        );
+                    }
                     return Ok(json!({"conflict": true, "run_id": existing}));
                 }
                 Err(e) => return Err(e.to_string()),
