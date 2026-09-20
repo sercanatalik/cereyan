@@ -826,6 +826,18 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | 422 | Missing or unknown scope |
 | 500 | The copy failed; nothing was deleted |
 
+### `GET /api/metrics`
+
+| Status | Body |
+|---|---|
+| 200 | any (text/plain) |
+
+### `GET /api/metrics/history`
+
+| Status | Body |
+|---|---|
+| 200 | [`MetricsHistory`](#metricshistory) (application/json) |
+
 ### `GET /api/projects`
 
 | Status | Body |
@@ -1234,6 +1246,13 @@ Type: string.
 | `items` | [`Log`](#log)[] | yes |  |
 | `next_cursor` | integer or null (int64) | no |  |
 
+### `MetricsHistory`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `interval_secs` | integer (int64) | yes |  |
+| `samples` | [`Sample`](#sample)[] | yes |  |
+
 ### `PrefilterBody`
 
 | Field | Type | Required | Description |
@@ -1497,6 +1516,17 @@ Type: any.
 | `platform` | string or null | no |  |
 | `python` | string | yes | Python interpreter engines run with. |
 | `python_version` | string or null | no |  |
+
+### `Sample`
+
+One point of the dashboard's history.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `at` | integer (int64) | yes | Microseconds since the epoch. |
+| `engines_busy` | integer | yes |  |
+| `queued` | integer | yes |  |
+| `running` | integer (int64) | yes |  |
 
 ### `Schedule`
 

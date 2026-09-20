@@ -5,6 +5,7 @@ import { useState } from "react";
 import { api, type Run, type StateType, unwrap } from "@/api/client";
 import { DateRangeSelect, type RangePreset, rangeStart } from "@/components/date-range";
 import { Histogram } from "@/components/histogram";
+import { QueueSparkline } from "@/components/queue-sparkline";
 import { Page } from "@/components/shell";
 import { StateBadge, StateDot } from "@/components/state-badge";
 import { StateBar, TaskProgress } from "@/components/state-bar";
@@ -187,11 +188,14 @@ function Dashboard() {
               </div>
             ))}
           </div>
-          <div className="flex flex-col items-end gap-0.5">
-            <span className="text-[26px] font-semibold leading-8 tracking-tight tabular-nums">
-              {runs.length}
-            </span>
-            <span className="text-xs text-muted-foreground">runs in range</span>
+          <div className="flex items-start gap-9">
+            <QueueSparkline />
+            <div className="flex flex-col items-end gap-0.5">
+              <span className="text-[26px] font-semibold leading-8 tracking-tight tabular-nums">
+                {runs.length}
+              </span>
+              <span className="text-xs text-muted-foreground">runs in range</span>
+            </div>
           </div>
         </div>
         <StateBar counts={proportion} className="w-full" height={6} title={`${runs.length} runs by state`} />

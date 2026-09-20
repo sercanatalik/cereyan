@@ -204,6 +204,7 @@ fn configuration(state: &AppState) -> Vec<ConfigEntry> {
         false,
     );
     push("server", "mcp_read_only", json!(c.mcp_read_only), false);
+    push("server", "metrics_public", json!(c.metrics_public), false);
     push("defaults", "catchup", json!(c.catchup_default), false);
     push(
         "defaults",

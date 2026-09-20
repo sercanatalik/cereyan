@@ -389,6 +389,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/metrics/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -1403,6 +1435,11 @@ export interface components {
             /** Format: int64 */
             next_cursor?: number | null;
         };
+        MetricsHistory: {
+            /** Format: int64 */
+            interval_secs: number;
+            samples: components["schemas"]["Sample"][];
+        };
         PrefilterBody: {
             skip: string[];
         };
@@ -1715,6 +1752,18 @@ export interface components {
             /** @description Python interpreter engines run with. */
             python: string;
             python_version?: string | null;
+        };
+        /** @description One point of the dashboard's history. */
+        Sample: {
+            /**
+             * Format: int64
+             * @description Microseconds since the epoch.
+             */
+            at: number;
+            engines_busy: number;
+            queued: number;
+            /** Format: int64 */
+            running: number;
         };
         Schedule: {
             cron: string;
@@ -2848,6 +2897,45 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Prometheus text exposition format, version 0.0.4 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": unknown;
+                };
+            };
+        };
+    };
+    history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricsHistory"];
+                };
             };
         };
     };

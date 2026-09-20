@@ -165,3 +165,18 @@ def test_mcp_read_only_sources(tmp_path, monkeypatch):
     monkeypatch.setenv("CEREYAN_MCP_READ_ONLY", "sometimes")
     with pytest.raises(serve_mod.CereyanError, match="CEREYAN_MCP_READ_ONLY"):
         serve_mod._mcp_read_only(bare)
+
+
+def test_metrics_public_sources(tmp_path, monkeypatch):
+    bare = project(tmp_path, "bare")
+    monkeypatch.delenv("CEREYAN_METRICS_PUBLIC", raising=False)
+    assert serve_mod._metrics_public(bare) == (False, src("default"))
+    assert serve_mod._metrics_public(bare, app_metrics_public=True) == (True, src("app", "app.serve(metrics_public=)"))
+    filed = project(tmp_path, "filed", "[server]\nmetrics_public = true\n")
+    assert serve_mod._metrics_public(filed) == (True, src("toml", "[server] metrics_public"))
+    monkeypatch.setenv("CEREYAN_METRICS_PUBLIC", "0")
+    assert serve_mod._metrics_public(filed, True) == (True, src("flag", "--metrics-public"))
+    assert serve_mod._metrics_public(filed) == (False, src("env", "CEREYAN_METRICS_PUBLIC"))
+    monkeypatch.setenv("CEREYAN_METRICS_PUBLIC", "maybe")
+    with pytest.raises(serve_mod.CereyanError, match="CEREYAN_METRICS_PUBLIC"):
+        serve_mod._metrics_public(bare)

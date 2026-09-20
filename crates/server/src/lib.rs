@@ -11,6 +11,7 @@ mod events;
 mod guard;
 mod index;
 pub mod mcp;
+pub mod metrics;
 mod process;
 mod retention;
 pub mod rules;
@@ -149,6 +150,9 @@ pub struct ServeConfig {
     /// Hide and refuse every MCP tool that changes state.
     #[serde(default)]
     pub mcp_read_only: bool,
+    /// Serve `/api/metrics` without a credential, as `/api/health`.
+    #[serde(default)]
+    pub metrics_public: bool,
 }
 
 fn default_auth_scope() -> String {
@@ -418,6 +422,10 @@ impl Server {
                         shutdown_rx.clone(),
                     ));
                     let retention = tokio::spawn(retention::run_loop(
+                        state_inner.clone(),
+                        shutdown_rx.clone(),
+                    ));
+                    let _sampler = tokio::spawn(metrics::sample_loop(
                         state_inner.clone(),
                         shutdown_rx.clone(),
                     ));

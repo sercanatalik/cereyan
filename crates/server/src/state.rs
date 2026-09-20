@@ -40,6 +40,8 @@ pub struct AppState {
     pub rule_dispatcher: RwLock<Option<Arc<dyn crate::rules::RuleDispatcher>>>,
     /// Mutable settings (retention days), persisted to cereyan.toml on change.
     pub mcp: crate::mcp::Sessions,
+    /// The dashboard's last hour of queue depth, sampled every five seconds.
+    pub samples: crate::metrics::Samples,
     pub retain_days: std::sync::atomic::AtomicI64,
     pub retain_runs_days: std::sync::atomic::AtomicI64,
     pub retain_failed_runs_days: std::sync::atomic::AtomicI64,
@@ -97,6 +99,7 @@ impl AppState {
         let state = AppState {
             supervisor: Supervisor::new(&config),
             mcp: crate::mcp::Sessions::default(),
+            samples: crate::metrics::Samples::default(),
             scheduler: Scheduler::new(),
             timer: Timer::new(),
             config,

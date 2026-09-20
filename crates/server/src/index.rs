@@ -33,9 +33,22 @@ struct Inner {
     flow_project: HashMap<i64, String>,
 }
 
-#[derive(Default)]
 pub struct ActiveIndex {
     inner: RwLock<Inner>,
+    /// Seconds from a run's scheduled time to its start.
+    pub start_delay: crate::metrics::Histogram,
+    /// Seconds a run spent in AwaitingResource before moving on.
+    pub resource_wait: crate::metrics::Histogram,
+}
+
+impl Default for ActiveIndex {
+    fn default() -> ActiveIndex {
+        ActiveIndex {
+            inner: RwLock::new(Inner::default()),
+            start_delay: crate::metrics::Histogram::new(crate::metrics::DELAY_BOUNDS),
+            resource_wait: crate::metrics::Histogram::new(crate::metrics::DELAY_BOUNDS),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
@@ -166,6 +179,21 @@ impl ActiveIndex {
 
     /// Apply a state change: move counters and update or drop the active entry.
     pub fn transition(&self, run: &Run, previous: Option<&State>) {
+        let now = cereyan_core::now_micros();
+        if run.state.state_type == StateType::Running
+            && previous.is_some_and(|p| p.state_type != StateType::Running)
+        {
+            if let Some(scheduled) = run.scheduled_time {
+                self.start_delay
+                    .observe((now - scheduled) as f64 / 1_000_000.0);
+            }
+        }
+        if let Some(prev) = previous {
+            if prev.name == "AwaitingResource" && run.state.name != "AwaitingResource" {
+                self.resource_wait
+                    .observe((now - prev.timestamp) as f64 / 1_000_000.0);
+            }
+        }
         let mut inner = self.inner.write().unwrap_or_else(|e| e.into_inner());
         let flow_counts = inner.by_flow.entry(run.flow_id).or_default();
         if let Some(prev) = previous {

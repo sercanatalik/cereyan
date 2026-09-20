@@ -9,6 +9,7 @@ pub mod environment;
 pub mod error;
 pub mod flows;
 pub mod logs;
+pub mod metrics;
 pub mod observability;
 pub mod projects;
 pub mod runs;
@@ -108,6 +109,8 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         logs::run_logs,
         logs::task_run_logs,
         counts::counts,
+        metrics::metrics,
+        metrics::history,
         stream::stream,
         engine::work,
         engine::report,
@@ -226,6 +229,8 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         database::ResetBody,
         database::ResetResult,
         database::BackupResult,
+        metrics::MetricsHistory,
+        crate::metrics::Sample,
         cereyan_store::DeletedCounts,
         cereyan_store::TableCounts,
         vocabulary::Vocabulary,
@@ -328,6 +333,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/database", get(database::get_database))
         .route("/api/database/reset", post(database::reset_database))
         .route("/api/database/backup", post(database::backup_database))
+        .route("/api/metrics", get(metrics::metrics))
+        .route("/api/metrics/history", get(metrics::history))
         .route("/api/vocabulary", get(vocabulary::get_vocabulary))
         .route(
             "/api/events",

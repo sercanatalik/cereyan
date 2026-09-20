@@ -181,7 +181,7 @@ class App:
 
         Host, port, ``token``, ``socket``, ``base_path``, ``enable_auth``,
         ``auth_cookie``, ``auth_scope``, ``login_url``, ``allowed_hosts`` (a
-        list of host names), ``allow_unauthenticated``, and ``mcp_read_only`` given here rank below
+        list of host names), ``allow_unauthenticated``, ``mcp_read_only``, and ``metrics_public`` given here rank below
         the CLI flags and environment and above ``cereyan.toml``.
 
         ``ready`` is called with the running server once it accepts requests.
@@ -193,7 +193,7 @@ class App:
 
         directory = os.path.dirname(os.path.abspath(self.source_file)) if self.source_file else os.getcwd()
         keys = ("token", "socket", "base_path", "enable_auth", "auth_cookie", "auth_scope", "login_url",
-                "allowed_hosts", "allow_unauthenticated", "mcp_read_only")
+                "allowed_hosts", "allow_unauthenticated", "mcp_read_only", "metrics_public")
         app_options = {f"app_{key}": options.pop(key, None) for key in keys}
         return serve(directory, app_host=host, app_port=port, discover=False, **app_options, **options)
 

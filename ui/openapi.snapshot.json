@@ -1351,6 +1351,26 @@
         ],
         "type": "object"
       },
+      "MetricsHistory": {
+        "properties": {
+          "interval_secs": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/Sample"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "interval_secs",
+          "samples"
+        ],
+        "type": "object"
+      },
       "PrefilterBody": {
         "properties": {
           "skip": {
@@ -2356,6 +2376,35 @@
         },
         "required": [
           "python"
+        ],
+        "type": "object"
+      },
+      "Sample": {
+        "description": "One point of the dashboard's history.",
+        "properties": {
+          "at": {
+            "description": "Microseconds since the epoch.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "engines_busy": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "queued": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "running": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "at",
+          "queued",
+          "running",
+          "engines_busy"
         ],
         "type": "object"
       },
@@ -4752,6 +4801,42 @@
           }
         },
         "tags": []
+      }
+    },
+    "/api/metrics": {
+      "get": {
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {}
+            },
+            "description": "Prometheus text exposition format, version 0.0.4"
+          }
+        },
+        "tags": [
+          "metrics"
+        ]
+      }
+    },
+    "/api/metrics/history": {
+      "get": {
+        "operationId": "history",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsHistory"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "metrics"
+        ]
       }
     },
     "/api/projects": {

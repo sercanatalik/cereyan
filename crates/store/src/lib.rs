@@ -47,6 +47,7 @@ pub struct Store {
     _lock: std::fs::File,
     writer_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     commits: Arc<AtomicU64>,
+    commit_stats: Arc<writer::CommitStats>,
 }
 
 impl Store {
@@ -68,9 +69,11 @@ impl Store {
         let (tx, rx) = bounded::<WriteCommand>(16_384);
         let commits = Arc::new(AtomicU64::new(0));
         let counter = commits.clone();
+        let commit_stats = Arc::new(writer::CommitStats::default());
+        let stats = commit_stats.clone();
         let handle = std::thread::Builder::new()
             .name("cereyan-writer".into())
-            .spawn(move || writer::run(write_conn, rx, counter))?;
+            .spawn(move || writer::run(write_conn, rx, counter, stats))?;
 
         Ok(Store {
             home: home.to_path_buf(),
@@ -79,6 +82,7 @@ impl Store {
             _lock: lock,
             writer_thread: Mutex::new(Some(handle)),
             commits,
+            commit_stats,
         })
     }
 
@@ -113,6 +117,16 @@ impl Store {
     /// Number of write transactions committed since open.
     pub fn commit_count(&self) -> u64 {
         self.commits.load(Ordering::Relaxed)
+    }
+
+    /// Commit latency: `(bounds with cumulative counts, sum in seconds, count)`.
+    pub fn commit_stats(&self) -> (Vec<(f64, u64)>, f64, u64) {
+        self.commit_stats.snapshot()
+    }
+
+    /// Writes queued for the writer thread.
+    pub fn write_queue_len(&self) -> usize {
+        self.writer.len()
     }
 
     /// Borrow a read-only connection from the pool.

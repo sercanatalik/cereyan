@@ -500,7 +500,50 @@ impl WriteCommand {
 /// Deferred acknowledgement: the closure is run after the commit.
 type Ack = Box<dyn FnOnce() + Send>;
 
-pub fn run(conn: Connection, rx: Receiver<WriteCommand>, commits: Arc<AtomicU64>) {
+/// Commit latency bounds in seconds, a millisecond to a second.
+pub const COMMIT_BOUNDS: [f64; 8] = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.5, 1.0];
+
+/// Cumulative commit-latency histogram over atomics, read at scrape time.
+#[derive(Default)]
+pub struct CommitStats {
+    buckets: [AtomicU64; 8],
+    sum_micros: AtomicU64,
+    count: AtomicU64,
+}
+
+impl CommitStats {
+    fn observe(&self, elapsed: Duration) {
+        let secs = elapsed.as_secs_f64();
+        for (bound, slot) in COMMIT_BOUNDS.iter().zip(&self.buckets) {
+            if secs <= *bound {
+                slot.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        self.sum_micros
+            .fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
+        self.count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `(bounds with cumulative counts, sum in seconds, count)`.
+    pub fn snapshot(&self) -> (Vec<(f64, u64)>, f64, u64) {
+        (
+            COMMIT_BOUNDS
+                .iter()
+                .zip(&self.buckets)
+                .map(|(b, c)| (*b, c.load(Ordering::Relaxed)))
+                .collect(),
+            self.sum_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0,
+            self.count.load(Ordering::Relaxed),
+        )
+    }
+}
+
+pub fn run(
+    conn: Connection,
+    rx: Receiver<WriteCommand>,
+    commits: Arc<AtomicU64>,
+    stats: Arc<CommitStats>,
+) {
     let mut last_commit = Instant::now() - GROUP_COMMIT_WINDOW;
     let mut last_was_batch = false;
     loop {
@@ -537,7 +580,7 @@ pub fn run(conn: Connection, rx: Receiver<WriteCommand>, commits: Arc<AtomicU64>
             }
             if cmd.outside_transaction() {
                 if in_tx {
-                    commit(&conn, &commits);
+                    commit(&conn, &commits, &stats);
                 }
                 acks.push(execute(&conn, cmd));
                 in_tx = conn.execute_batch("BEGIN IMMEDIATE").is_ok();
@@ -546,7 +589,7 @@ pub fn run(conn: Connection, rx: Receiver<WriteCommand>, commits: Arc<AtomicU64>
             acks.push(execute(&conn, cmd));
         }
         if in_tx {
-            commit(&conn, &commits);
+            commit(&conn, &commits, &stats);
         }
         last_commit = Instant::now();
         for ack in acks {
@@ -559,10 +602,12 @@ pub fn run(conn: Connection, rx: Receiver<WriteCommand>, commits: Arc<AtomicU64>
     let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
 }
 
-fn commit(conn: &Connection, commits: &AtomicU64) {
+fn commit(conn: &Connection, commits: &AtomicU64, stats: &CommitStats) {
+    let started = Instant::now();
     match conn.execute_batch("COMMIT") {
         Ok(()) => {
             commits.fetch_add(1, Ordering::Relaxed);
+            stats.observe(started.elapsed());
         }
         Err(e) => {
             eprintln!("cereyan writer: commit failed: {e}");

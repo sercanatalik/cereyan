@@ -76,8 +76,8 @@ fn bearer_token(req: &Request<Body>) -> Option<String> {
 /// Whether a path needs a credential. With scope `api`: `/mcp` and everything
 /// under `/api/` except `/api/health`, so custom routes outside `/api/` and the
 /// UI stay open. With scope `all`: every path except `/api/health`.
-fn protected(path: &str, all: bool) -> bool {
-    if path == "/api/health" {
+fn protected(path: &str, all: bool, metrics_public: bool) -> bool {
+    if path == "/api/health" || (metrics_public && path == "/api/metrics") {
         return false;
     }
     all || path == "/mcp" || path.starts_with("/api/")
@@ -204,7 +204,11 @@ pub async fn require_token(
         return next.run(req).await;
     }
     if req.extensions().get::<TrustedTransport>().is_some()
-        || !protected(req.uri().path(), state.config.auth_scope == "all")
+        || !protected(
+            req.uri().path(),
+            state.config.auth_scope == "all",
+            state.config.metrics_public,
+        )
     {
         return next.run(req).await;
     }
@@ -343,8 +347,8 @@ mod tests {
             ("/assets/index.js", false, true),
             ("/webhook", false, true),
         ] {
-            assert_eq!(protected(path, false), api, "{path} with api");
-            assert_eq!(protected(path, true), all, "{path} with all");
+            assert_eq!(protected(path, false, false), api, "{path} with api");
+            assert_eq!(protected(path, true, false), all, "{path} with all");
         }
     }
 
@@ -432,5 +436,14 @@ mod tests {
         let (third, created) = load_or_create_token_file(home.path()).unwrap();
         assert!(created);
         assert_ne!(third, first);
+    }
+
+    #[test]
+    fn public_metrics_is_the_only_extra_exemption() {
+        assert!(protected("/api/metrics", false, false));
+        assert!(!protected("/api/metrics", false, true));
+        assert!(!protected("/api/metrics", true, true));
+        assert!(protected("/api/metrics/history", false, true));
+        assert!(protected("/api/runs", false, true));
     }
 }

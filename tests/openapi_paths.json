@@ -23,6 +23,8 @@
   "/api/flows/{id}/schedules",
   "/api/flows/{id}/upcoming",
   "/api/health",
+  "/api/metrics",
+  "/api/metrics/history",
   "/api/projects",
   "/api/projects/{name}",
   "/api/resources/acquire",

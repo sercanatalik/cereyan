@@ -263,6 +263,34 @@ def _mcp_read_only(directory: str, mcp_read_only: bool | None = None,
     return value, _source("toml", "[server] mcp_read_only")
 
 
+def _metrics_public(directory: str, metrics_public: bool | None = None,
+                           app_metrics_public: bool | None = None) -> tuple[bool, dict]:
+    if metrics_public:
+        return True, _source("flag", "--metrics-public")
+    env = os.environ.get("CEREYAN_METRICS_PUBLIC")
+    if env is not None and env.strip():
+        value = env.strip().lower()
+        if value in _TRUE:
+            return True, _source("env", "CEREYAN_METRICS_PUBLIC")
+        if value in _FALSE:
+            return False, _source("env", "CEREYAN_METRICS_PUBLIC")
+        raise CereyanError(f"invalid CEREYAN_METRICS_PUBLIC {env!r}: expected true, false, 1, 0, yes, or no")
+    if app_metrics_public is not None:
+        if not isinstance(app_metrics_public, bool):
+            raise CereyanError(
+                f"invalid app.serve(metrics_public={app_metrics_public!r}): expected True or False"
+            )
+        return app_metrics_public, _source("app", "app.serve(metrics_public=)")
+    value = server_settings(directory).get("metrics_public")
+    if value is None:
+        return False, _source("default")
+    if not isinstance(value, bool):
+        raise CereyanError(
+            f"invalid [server] metrics_public {value!r} in cereyan.toml: expected true or false"
+        )
+    return value, _source("toml", "[server] metrics_public")
+
+
 def resolve_allow_unauthenticated(directory: str, allow_unauthenticated: bool | None = None,
                                   app_allow_unauthenticated: bool | None = None) -> bool:
     """Flag, environment, app.serve(), cereyan.toml. False unless one of them opts out of the generated token."""
@@ -453,7 +481,8 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
           allowed_hosts: list[str] | None = None,
           app_allowed_hosts: list[str] | tuple[str, ...] | None = None,
           allow_unauthenticated: bool | None = None, app_allow_unauthenticated: bool | None = None,
-          mcp_read_only: bool | None = None, app_mcp_read_only: bool | None = None) -> int:
+          mcp_read_only: bool | None = None, app_mcp_read_only: bool | None = None,
+          metrics_public: bool | None = None, app_metrics_public: bool | None = None) -> int:
     """Serve ``directory``. ``host``, ``port``, ``token``, ``socket``, ``base_path``,
     ``enable_auth``, ``auth_cookie``, ``auth_scope``, ``login_url``,
     ``allowed_hosts``, ``allow_unauthenticated``, and ``mcp_read_only`` are the CLI flags; the
@@ -478,6 +507,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         directory, allow_unauthenticated, app_allow_unauthenticated
     )
     resolved_mcp_read_only, sources["server.mcp_read_only"] = _mcp_read_only(directory, mcp_read_only, app_mcp_read_only)
+    resolved_metrics_public, sources["server.metrics_public"] = _metrics_public(directory, metrics_public, app_metrics_public)
     if resolved_auth_scope == "all" and not resolved_enable_auth:
         raise CereyanError(
             "auth_scope 'all' requires enable_auth: without an authenticator the UI could not load its token prompt"
@@ -594,6 +624,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "allowed_hosts": resolved_allowed_hosts,
         "allow_unauthenticated": resolved_allow_unauthenticated,
         "mcp_read_only": resolved_mcp_read_only,
+        "metrics_public": resolved_metrics_public,
         "open_browser": bool(should_open),
         "sources": sources,
         "python_version": platform.python_version(),
