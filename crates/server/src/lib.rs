@@ -23,7 +23,7 @@ mod ui;
 mod validate;
 
 pub use auth::{AuthenticatedUser, Authenticator};
-pub use custom::{DispatchRequest, DispatchResponse, RouteDispatcher, RouteSpec};
+pub use custom::{check_conflicts, DispatchRequest, DispatchResponse, RouteDispatcher, RouteSpec};
 pub use rules::RuleDispatcher;
 pub use state::AppState;
 

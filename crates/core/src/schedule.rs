@@ -79,6 +79,8 @@ pub enum ScheduleError {
     Interval,
     #[error("invalid rrule: {0}")]
     RRule(String),
+    #[error("{0}")]
+    Invalid(String),
 }
 
 fn resolve_tz(name: Option<&str>) -> Result<Tz, ScheduleError> {
@@ -252,6 +254,26 @@ impl Schedule {
                     .map(|d| d.with_timezone(&Utc)))
             }
         }
+    }
+
+    /// The next `count` fires strictly after `after`, in microseconds UTC, after
+    /// validating the schedule. What `cereyan check` previews.
+    pub fn next_fires(&self, after: Micros, count: usize) -> Result<Vec<Micros>, ScheduleError> {
+        self.validate()?;
+        let mut out = Vec::with_capacity(count);
+        let mut cursor = DateTime::<Utc>::from_timestamp_micros(after).ok_or_else(|| {
+            ScheduleError::Invalid(format!("reference time {after} is out of range"))
+        })?;
+        while out.len() < count {
+            match self.next_after(cursor)? {
+                Some(next) => {
+                    out.push(next.timestamp_micros());
+                    cursor = next;
+                }
+                None => break,
+            }
+        }
+        Ok(out)
     }
 
     /// Fires strictly after `start` and at or before `end`, capped.

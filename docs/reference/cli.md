@@ -5,7 +5,7 @@
 The `cereyan` command. Every subcommand accepts the global options first, for example `cereyan --home /tmp/h run pipeline.py:etl`.
 
 ```text
-cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,backfill,mcp,runs} ...
+cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,check,backfill,mcp,runs} ...
 ```
 
 ## Global options
@@ -57,6 +57,22 @@ cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--en
 | `--login-url` `LOGIN_URL` | sign-in page linked from 401 responses and the UI (also CEREYAN_LOGIN_URL or [server] login_url). |
 | `--allowed-host` `HOST` | also answer to this host name and accept browser pages from it; repeat for more (also CEREYAN_ALLOWED_HOSTS, comma-separated, or [server] allowed_hosts). |
 | `--allow-unauthenticated` | serve without a token when bound beyond loopback instead of generating one into <home>/token (also CEREYAN_ALLOW_UNAUTHENTICATED or [server] allow_unauthenticated). |
+
+## `cereyan check`
+
+```text
+cereyan check [-h] [--json] [--strict] [--now NOW] [dir]
+```
+
+| Argument | Meaning |
+|---|---|
+| `dir` (optional) | directory to check (default: current directory). |
+
+| Option | Meaning |
+|---|---|
+| `--json` | print the report as one JSON object. |
+| `--strict` | treat warnings as errors. |
+| `--now` `NOW` | reference instant for schedule previews, ISO 8601 (default: now; naive means UTC). |
 
 ## `cereyan backfill`
 

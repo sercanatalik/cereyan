@@ -655,6 +655,27 @@ fn is_terminal(state_type: &str) -> PyResult<bool> {
         .ok_or_else(|| PyValueError::new_err(format!("unknown state type {state_type:?}")))
 }
 
+/// The next `count` fires of a flow schedule (its JSON as `schedules.normalize`
+/// produces it) strictly after `after_micros`, validating it first. `ValueError`
+/// carries the core's message for a schedule it rejects.
+#[pyfunction]
+fn schedule_fires(spec_json: &str, after_micros: i64, count: usize) -> PyResult<Vec<i64>> {
+    let schedule: cereyan_core::Schedule =
+        serde_json::from_str(spec_json).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    schedule
+        .next_fires(after_micros, count)
+        .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+/// Raise `ValueError` when custom routes conflict with the built-in API or with
+/// each other; the same check `cereyan serve` runs before it binds.
+#[pyfunction]
+fn check_routes(specs_json: &str) -> PyResult<()> {
+    let specs: Vec<cereyan_server::RouteSpec> =
+        serde_json::from_str(specs_json).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    cereyan_server::check_conflicts(&specs).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Store>()?;
@@ -672,6 +693,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(decrypt_secret, m)?)?;
     m.add_function(wrap_pyfunction!(render_rule_action, m)?)?;
     m.add_function(wrap_pyfunction!(rule_matches, m)?)?;
+    m.add_function(wrap_pyfunction!(schedule_fires, m)?)?;
+    m.add_function(wrap_pyfunction!(check_routes, m)?)?;
     m.add("StoreLocked", m.py().get_type::<StoreLocked>())?;
     m.add(
         "TransitionRejected",

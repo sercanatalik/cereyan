@@ -82,6 +82,25 @@ assert alerts == ["nightly-1"]
 assert app.rules[0].spec()["when"]["events"] == ["run.failed"]
 ```
 
+## Check the directory before serving
+
+`cereyan check <dir>` imports the directory exactly as `cereyan serve` would, with top-level runs suppressed, and reports what would stop it from serving cleanly: modules that fail to import (which is where a duplicate flow name, an event name outside the catalogue, an annotation that cannot be coerced, or a malformed `after=` fails), an `after=` naming a flow that does not exist, a schedule the core rejects, a resource a flow declares that `[resources]` does not list, and custom routes that collide with the built-in API. It never opens the store or contacts a server, and it previews the next three fires of every valid schedule.
+
+```bash
+cereyan check pipelines/
+cereyan check pipelines/ --json --strict      # for CI: warnings fail too
+cereyan check pipelines/ --now 2026-09-20T00:00:00Z   # fixed reference time for the preview
+```
+
+It exits 0 when there are no errors, 1 when there are (or, with `--strict`, warnings), and 3 when the directory could not be checked at all; see [Exit codes](../reference/exit-codes.md). In a workflow, run it after installing the pipeline's dependencies:
+
+```yaml
+- run: pip install cereyan -r requirements.txt
+- run: cereyan check pipelines/ --json --strict
+```
+
+The same report is available from Python as `cereyan.check.check_directory(path, now=...)`, which returns the object `--json` prints.
+
 ## Test against a server
 
 For schedules, backfills, dependencies, rules, routes, and pauses, start a server on a temporary home in a session fixture and drive it through the client. The pattern used by cereyan's own suite and its documentation tests is in `tests/server_helpers.py`: start `cereyan serve <dir> --port 0 --no-open` with `CEREYAN_HOME` set, wait for `server.json` and `/api/health`, and stop it with SIGTERM.

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **`cereyan check [dir]` imports a directory as `serve` would and reports what would stop it serving cleanly**, without opening the store: import failures, unknown `after=` upstreams, schedules the core rejects (with the next three fires of every valid one), resources missing from `[resources]`, and custom routes that collide with the built-in API. `--json` prints one object for CI, `--strict` makes warnings fail, and `--now` fixes the preview's reference time. The same report is `cereyan.check.check_directory(path)`. [Test a pipeline › Check the directory before serving](https://sercanatalik.github.io/cereyan/guides/test-a-pipeline/#check-the-directory-before-serving)
+
 ## 2.1.0 (2026-09-19)
 
 ### Upgrading from 2.0

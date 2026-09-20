@@ -1,4 +1,4 @@
-"""The ``cereyan`` command: ``run`` and ``runs ls`` in phase 0."""
+"""The ``cereyan`` command: ``run``, ``serve``, ``check``, ``backfill``, ``mcp``, and ``runs ls``."""
 
 from __future__ import annotations
 
@@ -53,6 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--allowed-host", action="append", dest="allowed_hosts", metavar="HOST", help="also answer to this host name and accept browser pages from it; repeat for more (also CEREYAN_ALLOWED_HOSTS, comma-separated, or [server] allowed_hosts)")
     serve.add_argument("--allow-unauthenticated", action="store_true", default=None, help="serve without a token when bound beyond loopback instead of generating one into <home>/token (also CEREYAN_ALLOW_UNAUTHENTICATED or [server] allow_unauthenticated)")
     serve.set_defaults(func=cmd_serve)
+
+    check = sub.add_parser("check", help="import a directory as serve would and report problems, without touching the store")
+    check.add_argument("dir", nargs="?", help="directory to check (default: current directory)")
+    check.add_argument("--json", action="store_true", help="print the report as one JSON object")
+    check.add_argument("--strict", action="store_true", help="treat warnings as errors")
+    check.add_argument("--now", help="reference instant for schedule previews, ISO 8601 (default: now; naive means UTC)")
+    check.set_defaults(func=cmd_check)
 
     backfill = sub.add_parser("backfill", help="create runs over a date range (requires a running server)")
     backfill.add_argument("flow", help="flow name, optionally project/flow")
@@ -184,6 +191,24 @@ def cmd_serve(args) -> int:
     except CereyanError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_SCHEDULING
+
+
+def cmd_check(args) -> int:
+    from .check import check_directory, render
+
+    try:
+        report = check_directory(args.dir or os.getcwd(), now=args.now)
+    except CereyanError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_SCHEDULING
+    failed = report["errors"] > 0 or (args.strict and report["warnings"] > 0)
+    if args.strict:
+        report["ok"] = not failed
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(render(report))
+    return EXIT_FAILED if failed else EXIT_OK
 
 
 def cmd_run(args) -> int:

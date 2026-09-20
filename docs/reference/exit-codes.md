@@ -4,10 +4,10 @@
 
 | Code | Meaning |
 |---|---|
-| 0 | Success. For `cereyan run`, the run completed. |
-| 1 | `cereyan run` only: the run failed. |
+| 0 | Success. For `cereyan run`, the run completed; for `cereyan check`, no errors were found. |
+| 1 | `cereyan run`: the run failed. `cereyan check`: errors were found, or warnings under `--strict`. |
 | 2 | `cereyan run` only: nothing ran, because the store was locked and no server took the run. |
-| 3 | An error before or outside the run: the flow could not be loaded, a parameter did not coerce, a server was needed but unreachable or required a token, or a backfill argument was invalid. |
+| 3 | An error before or outside the run: the flow could not be loaded, a parameter did not coerce, a server was needed but unreachable or required a token, a backfill argument was invalid, or `cereyan check` was given a directory it could not check. |
 
 The full command reference, generated from the parser, is on the [CLI](cli.md) page.
 
