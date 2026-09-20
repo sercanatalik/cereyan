@@ -21,7 +21,8 @@ assert etl(date(2026, 9, 6)) == 6   # recorded as a run in ~/.cereyan/db.sqlite
 - **One process to serve.** `cereyan serve dir/` hosts the API, the UI, the scheduler, a warm pool of engine processes, and a built-in MCP server for agents.
 - **Data-pipeline semantics.** Targets make reruns idempotent, backfills cover date ranges, resources are named semaphores, flows chain and fan in by key, and rules react to events or to their absence.
 
-![The dashboard: counts by state, a Needs attention list, Running now with task progress, and the live event feed](images/dashboard.png)
+![The dashboard: counts by state, a Needs attention list, Running now with task progress, and the live event feed](images/dashboard.png#only-light)
+![The dashboard: counts by state, a Needs attention list, Running now with task progress, and the live event feed](images/dashboard-dark.png#only-dark)
 
 ## Where to go
 

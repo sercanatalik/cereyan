@@ -54,7 +54,8 @@ cereyan serve .          # imports every module under the directory, opens http:
 
 One process now hosts the HTTP API, the web UI, the scheduler, and a warm pool of engine processes that execute runs. The dashboard shows runs and logs live. Scripts and `cereyan run` keep working while the server is up: they hand their run to the server and stream its logs back.
 
-![Run detail with the task list, timeline, and live logs](../images/run-detail.png)
+![Run detail with the task list, timeline, and live logs](../images/run-detail.png#only-light)
+![Run detail with the task list, timeline, and live logs](../images/run-detail-dark.png#only-dark)
 
 ## 4. Schedule, retry, and write idempotent outputs
 

@@ -1,0 +1,49 @@
+/* The app's palette on the docs: ink as the only brand colour, warm neutrals in
+   both schemes, Geist for text and code (set in mkdocs.yml). Values track
+   ui/src/index.css. */
+
+:root {
+  --md-primary-fg-color: #1f1c19;
+  --md-primary-fg-color--light: #3a3531;
+  --md-primary-fg-color--dark: #141210;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+  --md-accent-fg-color: #2a2622;
+  --md-accent-fg-color--transparent: rgba(42, 38, 34, 0.1);
+  --md-accent-bg-color: #ffffff;
+  --md-accent-bg-color--light: rgba(255, 255, 255, 0.7);
+}
+
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: #faf9f5;
+  --md-default-fg-color: #2a2622;
+  --md-code-bg-color: #f3f0ea;
+  --md-typeset-a-color: #2a2622;
+  --md-footer-bg-color: #1f1c19;
+  --md-footer-bg-color--dark: #141210;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 40;
+  --md-default-bg-color: #1a1815;
+  --md-default-bg-color--light: rgba(26, 24, 21, 0.7);
+  --md-default-bg-color--lighter: rgba(26, 24, 21, 0.5);
+  --md-default-bg-color--lightest: rgba(26, 24, 21, 0.12);
+  --md-default-fg-color: #ece8e1;
+  --md-code-bg-color: #23201c;
+  --md-typeset-a-color: #ece8e1;
+  --md-accent-fg-color: #ece8e1;
+  --md-accent-fg-color--transparent: rgba(236, 232, 225, 0.1);
+  --md-footer-bg-color: #141210;
+  --md-footer-bg-color--dark: #0f0e0c;
+}
+
+/* The header's wordmark, in step with the app's top bar. */
+.md-header__topic:first-child {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.md-header__button.md-logo img {
+  height: 1.4rem;
+  width: 1.4rem;
+}
