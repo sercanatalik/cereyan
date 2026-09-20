@@ -52,6 +52,7 @@ title = "Data Platform"   # optional: shown in the top bar and the browser tab
 | `login_url` | string | unset | Sign-in page linked from 401 responses and the UI: an `http` or `https` URL, or a path starting with `/`. |
 | `allowed_hosts` | array of strings | `[]` | Host names the server answers to and accepts browser pages from, beside IP addresses, `localhost`, and `host`. A request whose `Host` names another host, or whose `Origin` is neither the server's own nor a listed host, answers 403. Entries are host names or IP addresses, without a scheme or port. |
 | `allow_unauthenticated` | boolean | `false` | Serve without a token when bound beyond loopback instead of generating one. The server warns at start, reports `exposed: true`, and the UI shows a banner. No effect with a token or `enable_auth`, or on loopback. |
+| `mcp_read_only` | boolean | `false` | List and allow only MCP tools that change nothing; every other tool call answers an error. The REST API and the UI are unaffected. |
 | `max_engines` | integer | CPU count | Size of the warm engine pool. |
 | `engine_max_runs` | integer | `100` | Runs an engine executes before it is recycled. |
 | `cancel_grace_secs` | integer | `10` | Seconds between SIGTERM and SIGKILL when cancelling a run. |
@@ -101,6 +102,7 @@ The Settings page's Environment tab (`GET /api/settings/environment`) lists ever
 | `auth_cookie`, `auth_scope`, `login_url` | `--auth-cookie`/`--auth-scope`/`--login-url`, `CEREYAN_AUTH_COOKIE`/`CEREYAN_AUTH_SCOPE`/`CEREYAN_LOGIN_URL`, the same-named `app.serve()` arguments, `[server]` |
 | `allowed_hosts` | `--allowed-host` (repeatable), `CEREYAN_ALLOWED_HOSTS` (comma-separated), `app.serve(allowed_hosts=)`, `[server] allowed_hosts`, empty; the first that sets it wins whole |
 | `allow_unauthenticated` | `--allow-unauthenticated`, `CEREYAN_ALLOW_UNAUTHENTICATED`, `app.serve(allow_unauthenticated=)`, `[server] allow_unauthenticated`, `false` |
+| `mcp_read_only` | `--mcp-read-only`, `CEREYAN_MCP_READ_ONLY`, `app.serve(mcp_read_only=)`, `[server] mcp_read_only`, `false` |
 | `crash_retries` | the flow decorator, `[defaults]`, `--crash-retries`, `5` |
 
 ## Environment variables
@@ -116,6 +118,7 @@ The Settings page's Environment tab (`GET /api/settings/environment`) lists ever
 | `CEREYAN_AUTH_COOKIE`, `CEREYAN_AUTH_SCOPE`, `CEREYAN_LOGIN_URL` | The authenticator's cookie, the paths checked, and the sign-in page; as the `[server]` keys. |
 | `CEREYAN_ALLOWED_HOSTS` | Comma-separated host names the server answers to; as `[server] allowed_hosts`. |
 | `CEREYAN_ALLOW_UNAUTHENTICATED` | `true`, `false`, `1`, `0`, `yes`, or `no`: serve without a token beyond loopback; as `[server] allow_unauthenticated`. |
+| `CEREYAN_MCP_READ_ONLY` | `true`, `false`, `1`, `0`, `yes`, or `no`: hide and refuse MCP tools that change state; as `[server] mcp_read_only`. |
 | `CEREYAN_NO_BROWSER` | Do not open the UI on `serve`. |
 
 Set by the server for its engine children, not for users: `CEREYAN_ENGINE_ID`. An engine child finds the server through the `url` in `server.json`, base path included; `CEREYAN_SERVER` overrides that URL for an engine started by hand. Two knobs exist for the test suite and benchmarks only: `CEREYAN_RETENTION_INTERVAL` (seconds between retention passes, default hourly) and `CEREYAN_FAST_CRASH_RERUN`.

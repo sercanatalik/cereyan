@@ -203,6 +203,7 @@ fn configuration(state: &AppState) -> Vec<ConfigEntry> {
         json!(c.allow_unauthenticated),
         false,
     );
+    push("server", "mcp_read_only", json!(c.mcp_read_only), false);
     push("defaults", "catchup", json!(c.catchup_default), false);
     push(
         "defaults",

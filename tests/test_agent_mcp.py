@@ -26,7 +26,7 @@ app = App("agent")
 def step(day: date):
     return str(day)
 
-@app.flow
+@app.flow(mcp_tool=True)
 def etl(day: date = date(2026, 9, 6), n: int = 1):
     step(day)
     artifacts.create_markdown(f"ran for {day}", key="etl-note")
@@ -153,10 +153,23 @@ def _response_keys(srv):
     keys["list_rules"] = {"default": _keys(call(srv, "list_rules"))}
     keys["explain_failure"] = {"default": _keys(call(srv, "explain_failure", run_id=failed["id"]))}
 
+    created_bf = call(srv, "backfill", flow="etl", parameter="day", start="2026-02-01", end="2026-02-02", dry_run=False)
     keys["backfill"] = {
         "dry run": _keys(call(srv, "backfill", flow="etl", parameter="day", start="2026-01-01", end="2026-01-03")),
-        "dry_run false": _keys(call(srv, "backfill", flow="etl", parameter="day", start="2026-02-01", end="2026-02-02", dry_run=False)),
+        "dry_run false": _keys(created_bf),
     }
+    status = created_bf["data"]["backfill"]
+    bf_id = status.get("backfill", status)["id"]
+    keys["list_backfills"] = {"default": _keys(call(srv, "list_backfills", flow="etl"))}
+    keys["get_backfill"] = {"default": _keys(call(srv, "get_backfill", backfill_id=bf_id))}
+    keys["cancel_backfill"] = {"default": _keys(call(srv, "cancel_backfill", backfill_id=bf_id))}
+    keys["get_flow_source"] = {"default": _keys(call(srv, "get_flow_source", flow="etl"))}
+    keys["server_health"] = {"default": _keys(call(srv, "server_health"))}
+    keys["list_resources"] = {"default": _keys(call(srv, "list_resources"))}
+    keys["flow_dependencies"] = {"default": _keys(call(srv, "flow_dependencies", flow="etl"))}
+    keys["check_flows"] = {"default": _keys(call(srv, "check_flows"))}
+    keys["rerun_run"] = {"default": _keys(call(srv, "rerun_run", run_id=started["data"]["run"]["id"]))}
+    keys["flow__agent__etl"] = {"default": _keys(call(srv, "flow__agent__etl", day="2026-09-03"))}
 
     paused = call(srv, "run_flow", flow="ask")["data"]["run"]
     srv.wait_run(paused["id"], until=lambda r: r["state"]["type"] == "Paused")
@@ -179,6 +192,8 @@ def _response_keys(srv):
     keys["delete_schedule"] = {"default": _keys(call(srv, "delete_schedule", schedule_id=made_id))}
 
     keys["set_variable"] = {"default": _keys(call(srv, "set_variable", name="snapshot", value="v"))}
+    call(srv, "set_variable", name="snapshot_secret", value="hidden", secret=True)
+    keys["list_variables"] = {"default": _keys(call(srv, "list_variables"))}
     return {name: keys[name] for name in sorted(keys)}
 
 
@@ -374,3 +389,106 @@ def test_messages_must_be_json(agent):
     # Case and parameters in the media type do not matter.
     status, body = post("Application/JSON; charset=utf-8", {"jsonrpc": "2.0", "id": 2, "method": "ping"})
     assert (status, body["result"]) == (200, {})
+
+
+def tool_map(srv):
+    return {t["name"]: t for t in rpc(srv, "tools/list")[1]["result"]["tools"]}
+
+
+def test_annotations_and_flow_tools(agent):
+    rpc(agent, "initialize", {"clientInfo": {"name": "annot"}})
+    tools = tool_map(agent)
+    assert tools["get_run"]["annotations"] == {"readOnlyHint": True, "destructiveHint": False}
+    assert tools["run_flow"]["annotations"] == {"readOnlyHint": False, "destructiveHint": False}
+    assert tools["cancel_run"]["annotations"]["destructiveHint"] is True
+    assert tools["set_variable"]["annotations"]["destructiveHint"] is True
+    assert all("annotations" in t for t in tools.values())
+    # etl opted in; boom did not.
+    flow_tool = tools["flow__agent__etl"]
+    assert "day" in flow_tool["inputSchema"]["properties"] and flow_tool["annotations"]["readOnlyHint"] is False
+    assert "flow__agent__boom" not in tools
+    started = call(agent, "flow__agent__etl", day="2026-09-02")
+    assert started["isError"] is False and started["data"]["run"]["parameters"]["day"] == "2026-09-02"
+    assert agent.wait_run(started["data"]["run"]["id"])["state"]["type"] == "Completed"
+    missing = call(agent, "flow__agent__boom")
+    assert missing["code"] == -32602
+
+
+def test_new_read_tools_and_rerun(agent, tmp_path):
+    rpc(agent, "initialize", {"clientInfo": {"name": "reader"}})
+    source = call(agent, "get_flow_source", flow="etl")["data"]
+    assert "def etl(" in source["source"] and source["truncated"] is False
+    assert source["path"].endswith("pipeline.py") and source["module"] == "pipeline"
+
+    call(agent, "set_variable", name="plain", value={"a": 1})
+    call(agent, "set_variable", name="hidden", value="s3cret", secret=True)
+    rows = {v["name"]: v for v in call(agent, "list_variables")["data"]["variables"]}
+    assert rows["plain"]["value"] == {"a": 1} and rows["plain"]["secret"] is False
+    assert rows["hidden"]["secret"] is True and "value" not in rows["hidden"]
+    assert "s3cret" not in json.dumps(rows)
+
+    health = call(agent, "server_health")["data"]
+    assert {"engines", "queued", "resources", "schedules", "auth", "exposed", "read_only", "served_dir"} <= set(health)
+    assert health["auth"] is True and health["read_only"] is False and health["schedules"] >= 1
+    assert "resources" in call(agent, "list_resources")["data"]
+    deps = call(agent, "flow_dependencies", flow="etl")["data"]
+    assert deps == {"flow": "etl", "project": "agent", "upstreams": [], "batch_key": None, "triggers": []}
+
+    original = call(agent, "run_flow", flow="etl", parameters={"day": "2026-09-04", "n": 3})["data"]["run"]
+    agent.wait_run(original["id"])
+    again = call(agent, "rerun_run", run_id=original["id"])["data"]
+    assert again["rerun_of"] == original["id"] and again["run"]["id"] != original["id"]
+    assert again["run"]["parameters"] == {"day": "2026-09-04", "n": 3}
+    assert again["run"]["created_by"] == "mcp:reader"
+
+    report = call(agent, "check_flows")["data"]
+    assert report["ok"] is True and report["errors"] == 0 and "findings" in report
+    assert {f["name"] for f in report["flows"]} >= {"etl", "boom", "ask", "nightly"}
+    assert call(agent, "rerun_run", run_id=999999)["isError"] is True
+
+
+def test_prompts(agent):
+    names = [p["name"] for p in rpc(agent, "prompts/list")[1]["result"]["prompts"]]
+    assert names == ["diagnose_run", "health_check", "plan_backfill"]
+    text = rpc(agent, "prompts/get", {"name": "health_check"})[1]["result"]["messages"][0]["content"]["text"]
+    assert "server_health" in text and "list_runs" in text and "list_schedules" in text
+    plan = rpc(agent, "prompts/get", {"name": "plan_backfill", "arguments": {"flow": "etl", "parameter": "day", "start": "2026-01-01", "end": "2026-01-31"}})
+    text = plan[1]["result"]["messages"][0]["content"]["text"]
+    assert "etl" in text and "2026-01-31" in text and "dry_run" in text
+    assert rpc(agent, "prompts/get", {"name": "nope"})[1]["error"]["code"] == -32602
+
+
+def test_read_only_mode(isolated_home, tmp_path):
+    from cereyan import engine
+
+    engine.close_store()
+    d = tmp_path / "ro"
+    d.mkdir()
+    (d / "pipeline.py").write_text(PIPELINE)
+    with pytest.raises(RuntimeError, match="CEREYAN_MCP_READ_ONLY"):
+        ServerProcess(str(isolated_home), str(d), env={"CEREYAN_TOKEN": TOKEN, "CEREYAN_MCP_READ_ONLY": "maybe"})
+    srv = ServerProcess(str(isolated_home), str(d), env={"CEREYAN_TOKEN": TOKEN, "CEREYAN_MCP_READ_ONLY": "yes"})
+    from cereyan.client import Client
+
+    srv.client = Client(srv.info["url"], token=TOKEN)
+    srv.session = None
+    srv.counter = 0
+    try:
+        status, body = rpc(srv, "initialize", {"clientInfo": {"name": "ro"}})
+        assert status == 200 and "read-only" in body["result"]["instructions"]
+        tools = tool_map(srv)
+        assert all(t["annotations"]["readOnlyHint"] for t in tools.values())
+        assert "list_runs" in tools and "server_health" in tools
+        assert not {"run_flow", "cancel_run", "set_variable", "rerun_run"} & set(tools)
+        assert not any(name.startswith("flow__") for name in tools)
+        refused = call(srv, "run_flow", flow="etl")
+        assert refused["isError"] is True and "read-only" in refused["data"]
+        refused = call(srv, "flow__agent__etl", day="2026-09-02")
+        assert refused["isError"] is True and "read-only" in refused["data"]
+        assert call(srv, "list_runs")["isError"] is False
+        assert call(srv, "server_health")["data"]["read_only"] is True
+        assert call(srv, "no_such_tool")["code"] == -32602
+        entries = {(e["table"], e["key"]): e for e in srv.client._request("GET", "/api/settings/environment")["configuration"]}
+        assert (entries["server", "mcp_read_only"]["value"], entries["server", "mcp_read_only"]["source"]) == (True, "env")
+    finally:
+        srv.stop()

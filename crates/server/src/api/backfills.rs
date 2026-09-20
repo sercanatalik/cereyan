@@ -430,6 +430,12 @@ pub async fn cancel_backfill(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<BackfillStatus>> {
+    Ok(Json(cancel_backfill_inner(&state, id).await?))
+}
+
+/// Cancel a backfill: mark it, cancel its queued runs in bulk, and ask its
+/// running ones to stop. Shared by the REST handler and the MCP tool.
+pub async fn cancel_backfill_inner(state: &Arc<AppState>, id: i64) -> ApiResult<BackfillStatus> {
     state
         .store
         .get_backfill(id)?
@@ -514,5 +520,5 @@ pub async fn cancel_backfill(
     })
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(Json(status_of(&state, id)?))
+    status_of(state, id)
 }

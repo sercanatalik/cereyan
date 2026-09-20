@@ -150,3 +150,18 @@ def test_allow_unauthenticated_sources(tmp_path, monkeypatch):
     broken = project(tmp_path, "broken", "[server]\nallow_unauthenticated = 'yes'\n")
     with pytest.raises(serve_mod.CereyanError, match=r"\[server\] allow_unauthenticated"):
         serve_mod._allow_unauthenticated(broken)
+
+
+def test_mcp_read_only_sources(tmp_path, monkeypatch):
+    bare = project(tmp_path, "bare")
+    monkeypatch.delenv("CEREYAN_MCP_READ_ONLY", raising=False)
+    assert serve_mod._mcp_read_only(bare) == (False, src("default"))
+    assert serve_mod._mcp_read_only(bare, app_mcp_read_only=True) == (True, src("app", "app.serve(mcp_read_only=)"))
+    filed = project(tmp_path, "filed", "[server]\nmcp_read_only = true\n")
+    assert serve_mod._mcp_read_only(filed) == (True, src("toml", "[server] mcp_read_only"))
+    monkeypatch.setenv("CEREYAN_MCP_READ_ONLY", "0")
+    assert serve_mod._mcp_read_only(filed, True) == (True, src("flag", "--mcp-read-only"))
+    assert serve_mod._mcp_read_only(filed) == (False, src("env", "CEREYAN_MCP_READ_ONLY"))
+    monkeypatch.setenv("CEREYAN_MCP_READ_ONLY", "sometimes")
+    with pytest.raises(serve_mod.CereyanError, match="CEREYAN_MCP_READ_ONLY"):
+        serve_mod._mcp_read_only(bare)

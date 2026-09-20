@@ -81,6 +81,7 @@ class Flow:
         on_failure: Iterable[Callable] = (),
         on_crashed: Iterable[Callable] = (),
         on_cancellation: Iterable[Callable] = (),
+        mcp_tool: bool = False,
     ) -> None:
         if not callable(fn):
             raise TypeError("@flow must decorate a callable")
@@ -120,6 +121,7 @@ class Flow:
         self.on_failure = list(on_failure)
         self.on_crashed = list(on_crashed)
         self.on_cancellation = list(on_cancellation)
+        self.mcp_tool = bool(mcp_tool)
         functools.update_wrapper(self, fn)
         self.fn = fn
         self.name = name or fn.__name__
@@ -185,6 +187,7 @@ class Flow:
             "schedules": self.schedules,
             "has_bulk_complete": self.bulk_complete is not None,
             "has_crash_hooks": bool(self.on_crashed),
+            "mcp_tool": self.mcp_tool,
         }
 
     # -- parameters -------------------------------------------------------
@@ -304,6 +307,8 @@ def flow(
         on_failure (Iterable[Callable]): Hooks called after a run fails.
         on_crashed (Iterable[Callable]): Hooks called after a run crashes.
         on_cancellation (Iterable[Callable]): Hooks called after a run is cancelled.
+        mcp_tool (bool): Publish the flow as an MCP tool named ``flow__<project>__<name>`` whose
+            arguments are its parameters, so an agent can start it directly.
 
     Returns:
         Flow: The flow wrapping ``fn``; call it like the original function.

@@ -185,7 +185,11 @@ pub async fn handle_post(
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {}, "resources": {}, "prompts": {}},
             "serverInfo": {"name": "cereyan", "version": state.config.version},
-            "instructions": "cereyan runs Python pipelines on this machine. Use list_flows to see what can run, run_flow to start work, get_run and run_logs to follow it, and explain_failure when a run fails. Flows run on demand: a flow needs no schedule, and run_flow is how work usually starts. For work that should recur, list_schedules shows what is scheduled and the create, edit, delete, pause and resume schedule tools manage it. Writes take effect immediately.",
+            "instructions": if state.config.mcp_read_only {
+                "cereyan runs Python pipelines on this machine. This server's MCP endpoint is read-only: only tools that change nothing are listed, and any other tool call is refused. Use list_flows to see what is registered, list_runs, get_run and run_logs to follow work, explain_failure when a run fails, and server_health for the engines and queue."
+            } else {
+                "cereyan runs Python pipelines on this machine. Use list_flows to see what can run, run_flow to start work, get_run and run_logs to follow it, and explain_failure when a run fails. Flows run on demand: a flow needs no schedule, and run_flow is how work usually starts. For work that should recur, list_schedules shows what is scheduled and the create, edit, delete, pause and resume schedule tools manage it. Writes take effect immediately."
+            },
         });
         let mut resp = Json(rpc_result(id, result)).into_response();
         if let Ok(v) = header::HeaderValue::from_str(&sid) {
@@ -196,7 +200,7 @@ pub async fn handle_post(
     let client = state.mcp.client(session.as_deref());
     let reply = match method.as_str() {
         "ping" => rpc_result(id, json!({})),
-        "tools/list" => rpc_result(id, json!({"tools": tool_list()})),
+        "tools/list" => rpc_result(id, json!({"tools": visible_tools(&state)})),
         "tools/call" => {
             let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
             let args = params
@@ -205,7 +209,19 @@ pub async fn handle_post(
                 .cloned()
                 .unwrap_or_default();
             let user = user.as_ref().map(|Extension(u)| u);
-            match call_tool(&state, &client, user, name, &args).await {
+            let refused = state.config.mcp_read_only
+                && (tool_list()
+                    .iter()
+                    .any(|t| t["name"] == name && !is_read_only(t))
+                    || name.starts_with("flow__"));
+            let outcome = if refused {
+                Err(ToolError::Failed(format!(
+                    "this server's MCP endpoint is read-only (mcp_read_only): {name} changes state and is not available"
+                )))
+            } else {
+                call_tool(&state, &client, user, name, &args).await
+            };
+            match outcome {
                 Ok(v) => rpc_result(
                     id,
                     json!({"content": [{"type": "text", "text": pretty(&v)}], "isError": false}),
@@ -237,34 +253,68 @@ pub async fn handle_post(
         }
         "prompts/list" => rpc_result(
             id,
-            json!({"prompts": [{
-                "name": "diagnose_run",
-                "description": "Explain why a run failed and what to do about it",
-                "arguments": [{"name": "run_id", "description": "The run id", "required": true}]
-            }]}),
+            json!({"prompts": [
+                {
+                    "name": "diagnose_run",
+                    "description": "Explain why a run failed and what to do about it",
+                    "arguments": [{"name": "run_id", "description": "The run id", "required": true}]
+                },
+                {
+                    "name": "health_check",
+                    "description": "Report what needs attention on this server: engines, queue, failed runs, and schedules",
+                    "arguments": []
+                },
+                {
+                    "name": "plan_backfill",
+                    "description": "Plan a backfill as a dry run, review the range and count, then create the runs",
+                    "arguments": [
+                        {"name": "flow", "description": "Flow name, or project/flow", "required": true},
+                        {"name": "parameter", "description": "The date or datetime parameter", "required": true},
+                        {"name": "start", "description": "First value, YYYY-MM-DD or RFC 3339", "required": true},
+                        {"name": "end", "description": "Last value, inclusive", "required": true}
+                    ]
+                }
+            ]}),
         ),
         "prompts/get" => {
             let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-            if name != "diagnose_run" {
-                rpc_error(id, -32602, format!("unknown prompt {name:?}"))
-            } else {
-                let run_id = params
+            let arg = |key: &str| -> String {
+                params
                     .get("arguments")
-                    .and_then(|a| a.get("run_id"))
+                    .and_then(|a| a.get(key))
                     .map(|v| {
                         v.as_str()
                             .map(|s| s.to_string())
                             .unwrap_or_else(|| v.to_string())
                     })
-                    .unwrap_or_default();
-                let text = format!(
-                    "Run {run_id} of a cereyan pipeline needs a diagnosis. Call the explain_failure tool with run_id {run_id}, read the failed task runs, the error log lines, and the events, then summarise the root cause in two sentences and suggest one concrete next step (rerun with run_flow, fix the code, or adjust a schedule)."
-                );
-                rpc_result(
-                    id,
-                    json!({"description": "Diagnose a failed run", "messages": [{"role": "user", "content": {"type": "text", "text": text}}]}),
-                )
-            }
+                    .unwrap_or_default()
+            };
+            let (description, text) = match name {
+                "diagnose_run" => {
+                    let run_id = arg("run_id");
+                    ("Diagnose a failed run", format!(
+                        "Run {run_id} of a cereyan pipeline needs a diagnosis. Call the explain_failure tool with run_id {run_id}, read the failed task runs, the error log lines, and the events, then summarise the root cause in two sentences and suggest one concrete next step (rerun with run_flow, fix the code, or adjust a schedule)."
+                    ))
+                }
+                "health_check" => (
+                    "Check the server's health",
+                    "Check this cereyan server. Call server_health for the engines, queue, and resources; call list_runs with state_type Failed and again with state_type Crashed for recent problems; call list_schedules and note any schedule that is paused or whose next fire is missing. Report in a few lines what needs attention, most urgent first, and say when nothing does.".to_string(),
+                ),
+                "plan_backfill" => {
+                    let (flow, parameter, start, end) = (arg("flow"), arg("parameter"), arg("start"), arg("end"));
+                    ("Plan a backfill", format!(
+                        "Plan a backfill of flow {flow} over parameter {parameter} from {start} to {end}. First call the backfill tool with those arguments and dry_run left at its default, which creates nothing, and review the number of runs and the first and last values it reports. If the range and count look right, call backfill again with dry_run false to create the runs, then report the backfill id so progress can be followed with get_backfill. If the count is surprising, stop and ask."
+                    ))
+                }
+                _ => {
+                    let reply = rpc_error(id, -32602, format!("unknown prompt {name:?}"));
+                    return Json(reply).into_response();
+                }
+            };
+            rpc_result(
+                id,
+                json!({"description": description, "messages": [{"role": "user", "content": {"type": "text", "text": text}}]}),
+            )
         }
         other => rpc_error(id, -32601, format!("method {other:?} is not supported")),
     };
@@ -292,23 +342,117 @@ impl From<cereyan_store::StoreError> for ToolError {
     }
 }
 
-fn tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+fn tool_with(
+    name: &str,
+    description: &str,
+    properties: Value,
+    required: &[&str],
+    read_only: bool,
+    destructive: bool,
+) -> Value {
     json!({
         "name": name,
         "description": description,
-        "inputSchema": {"type": "object", "properties": properties, "required": required, "additionalProperties": false}
+        "inputSchema": {"type": "object", "properties": properties, "required": required, "additionalProperties": false},
+        "annotations": {"readOnlyHint": read_only, "destructiveHint": destructive}
     })
+}
+
+/// A tool that changes nothing.
+fn read_tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+    tool_with(name, description, properties, required, true, false)
+}
+
+/// A tool that adds state: starts, creates, resumes, pauses.
+fn write_tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+    tool_with(name, description, properties, required, false, false)
+}
+
+/// A tool that cancels, deletes, or overwrites.
+fn destructive_tool(name: &str, description: &str, properties: Value, required: &[&str]) -> Value {
+    tool_with(name, description, properties, required, false, true)
+}
+
+fn is_read_only(descriptor: &Value) -> bool {
+    descriptor["annotations"]["readOnlyHint"]
+        .as_bool()
+        .unwrap_or(false)
+}
+
+fn tool_name_part(text: &str) -> String {
+    text.chars()
+        .map(|c| if c == '/' || c == '-' { '_' } else { c })
+        .collect()
+}
+
+/// The `flow__<project>__<name>` tools: one per live flow registered with
+/// `mcp_tool=True`. Two flows that map to one name keep the first.
+pub fn flow_tools(state: &AppState) -> Vec<(String, cereyan_core::Flow)> {
+    let mut out: Vec<(String, cereyan_core::Flow)> = Vec::new();
+    for flow in state.store.list_flows(None).unwrap_or_default() {
+        let published = flow
+            .options
+            .get("mcp_tool")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !published || !state.is_live(flow.id) {
+            continue;
+        }
+        let name = format!(
+            "flow__{}__{}",
+            tool_name_part(&flow.project),
+            tool_name_part(&flow.name)
+        );
+        if out.iter().any(|(n, _)| n == &name) {
+            continue;
+        }
+        out.push((name, flow));
+    }
+    out
+}
+
+fn flow_tool_descriptor(name: &str, flow: &cereyan_core::Flow) -> Value {
+    let mut schema = flow.parameter_schema.clone();
+    if schema.get("type").is_none() {
+        schema = json!({"type": "object", "properties": {}});
+    }
+    let about = flow
+        .description
+        .as_deref()
+        .map(|d| format!(": {d}"))
+        .unwrap_or_default();
+    json!({
+        "name": name,
+        "description": format!("Start a run of flow {}/{}{}. Arguments are the flow's parameters. Returns the run; follow it with get_run.", flow.project, flow.name, about),
+        "inputSchema": schema,
+        "annotations": {"readOnlyHint": false, "destructiveHint": false}
+    })
+}
+
+/// Every tool this server lists: the built-ins, then the flow tools, minus
+/// everything that changes state when the server is read-only.
+pub fn visible_tools(state: &AppState) -> Vec<Value> {
+    let mut tools = tool_list();
+    tools.extend(
+        flow_tools(state)
+            .iter()
+            .map(|(name, flow)| flow_tool_descriptor(name, flow)),
+    );
+    if state.config.mcp_read_only {
+        tools.retain(is_read_only);
+    }
+    tools
 }
 
 pub fn tool_list() -> Vec<Value> {
     let flow_prop = json!({"type": "string", "description": "Flow name, or project/flow when the name exists in several projects"});
     vec![
-        tool("list_flows", "List the registered flows with their project, parameters schema, tags, and any registration error. Read-only.",
+        read_tool("list_flows", "List the registered flows with their project, parameters schema, tags, and any registration error. Read-only.",
             json!({
                 "project": {"type": "string", "description": "Only flows of this project"},
                 "group": {"type": "string", "description": "Only flows of this group: the one a flow declared, else its project"}
             }), &[]),
-        tool("list_runs", "List runs, newest first, with optional filters. Read-only.",
+        read_tool("list_runs", "List runs, newest first, with optional filters. Read-only.",
             json!({
                 "flow": {"type": "string"}, "project": {"type": "string"},
                 "group": {"type": "string", "description": "Only runs of flows in this group: the one a flow declared, else its project"},
@@ -317,29 +461,29 @@ pub fn tool_list() -> Vec<Value> {
                 "name": {"type": "string", "description": "Exact run name"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20}
             }), &[]),
-        tool("get_run", "One run with its state, parameters, timing, and task runs. Read-only.",
+        read_tool("get_run", "One run with its state, parameters, timing, and task runs. Read-only.",
             json!({"run_id": {"type": "integer"}}), &["run_id"]),
-        tool("run_logs", "Log lines of a run, oldest first. Filter by minimum level (10 debug, 20 info, 30 warning, 40 error) or a search string. Read-only.",
+        read_tool("run_logs", "Log lines of a run, oldest first. Filter by minimum level (10 debug, 20 info, 30 warning, 40 error) or a search string. Read-only.",
             json!({"run_id": {"type": "integer"}, "min_level": {"type": "integer"}, "search": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 200}}), &["run_id"]),
-        tool("list_events", "Recent events (run and task transitions, schedule changes, rule firings, custom events), newest first. Read-only.",
+        read_tool("list_events", "Recent events (run and task transitions, schedule changes, rule firings, custom events), newest first. Read-only.",
             json!({"name": {"type": "string", "description": "Exact name or a prefix ending in * such as run.*"}, "run_id": {"type": "integer"}, "flow_id": {"type": "integer"}, "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}}), &[]),
-        tool("list_artifacts", "Artifacts across runs, newest first, with their run, flow, and project. Read-only.",
+        read_tool("list_artifacts", "Artifacts across runs, newest first, with their run, flow, and project. Read-only.",
             json!({"kind": {"type": "string"}, "key": {"type": "string"}, "flow": {"type": "string"}, "project": {"type": "string"}, "run_id": {"type": "integer"}, "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}), &[]),
-        tool("list_rules", "The rules (reactive and proactive) with their match, actions, guards, and fire counts. Read-only.",
+        read_tool("list_rules", "The rules (reactive and proactive) with their match, actions, guards, and fire counts. Read-only.",
             json!({}), &[]),
-        tool("list_schedules", "The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, and whether it was declared in the flow's code, created in the interface, or created by an agent. Read-only.",
+        read_tool("list_schedules", "The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, and whether it was declared in the flow's code, created in the interface, or created by an agent. Read-only.",
             json!({"flow": flow_prop, "project": {"type": "string", "description": "Only schedules of this project"}}), &[]),
-        tool("explain_failure", "Everything needed to diagnose a run in one call: the run, its failed or crashed task runs, the last warning-or-above log lines, and the run's events. Read-only.",
+        read_tool("explain_failure", "Everything needed to diagnose a run in one call: the run, its failed or crashed task runs, the last warning-or-above log lines, and the run's events. Read-only.",
             json!({"run_id": {"type": "integer"}}), &["run_id"]),
-        tool("run_flow", "Start a run of a flow now. Creates the run immediately and returns without waiting; follow it with get_run. Parameters are validated against the flow's schema.",
+        write_tool("run_flow", "Start a run of a flow now. Creates the run immediately and returns without waiting; follow it with get_run. Parameters are validated against the flow's schema.",
             json!({"flow": flow_prop, "parameters": {"type": "object", "description": "Flow parameters as JSON"}, "name": {"type": "string", "description": "Optional run name"}, "tags": {"type": "array", "items": {"type": "string"}}}), &["flow"]),
-        tool("cancel_run", "Cancel a run. A queued run is cancelled at once; a running run is asked to stop and killed after the grace period.",
+        destructive_tool("cancel_run", "Cancel a run. A queued run is cancelled at once; a running run is asked to stop and killed after the grace period.",
             json!({"run_id": {"type": "integer"}}), &["run_id"]),
-        tool("resume_run", "Answer a Paused run's wait_for_input question and schedule its next attempt. The answer can be any JSON.",
+        write_tool("resume_run", "Answer a Paused run's wait_for_input question and schedule its next attempt. The answer can be any JSON.",
             json!({"run_id": {"type": "integer"}, "input": {"description": "The answer, any JSON"}}), &["run_id", "input"]),
-        tool("backfill", "Create one run per value of a date or datetime parameter between start and end. Defaults to a dry run that only reports how many runs would be created; pass dry_run false to create them. Can create thousands of runs.",
+        write_tool("backfill", "Create one run per value of a date or datetime parameter between start and end. Defaults to a dry run that only reports how many runs would be created; pass dry_run false to create them. Can create thousands of runs.",
             json!({"flow": flow_prop, "parameter": {"type": "string"}, "start": {"type": "string", "description": "YYYY-MM-DD or RFC 3339"}, "end": {"type": "string"}, "interval": {"type": "string", "description": "Seconds or a duration such as 1d or 12h (default 1d)"}, "concurrency": {"type": "integer", "default": 1}, "extra_parameters": {"type": "object"}, "reverse": {"type": "boolean"}, "dry_run": {"type": "boolean", "default": true}}), &["flow", "parameter", "start", "end"]),
-        tool("create_schedule", "Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Returns the schedule and the next few times it will fire.",
+        write_tool("create_schedule", "Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Returns the schedule and the next few times it will fire.",
             json!({
                 "flow": flow_prop, "project": {"type": "string"},
                 "kind": {"type": "string", "enum": ["cron", "interval", "rrule"], "description": "Which kind of schedule"},
@@ -352,7 +496,7 @@ pub fn tool_list() -> Vec<Value> {
                 "catchup": {"type": "string", "enum": ["skip", "latest", "all"], "default": "skip"},
                 "catchup_max": {"type": "integer", "default": 100}
             }), &["flow", "kind"]),
-        tool("edit_schedule", "Retime an existing schedule. Editing one that was declared in the flow's code lasts until the server restarts, when the declaration in the Python source applies again, and the result says so. Returns the schedule and the next few times it will fire.",
+        write_tool("edit_schedule", "Retime an existing schedule. Editing one that was declared in the flow's code lasts until the server restarts, when the declaration in the Python source applies again, and the result says so. Returns the schedule and the next few times it will fire.",
             json!({
                 "schedule_id": {"type": "integer"},
                 "cron": {"type": "string"}, "interval": {"type": "number"}, "anchor": {"type": "integer"},
@@ -360,14 +504,34 @@ pub fn tool_list() -> Vec<Value> {
                 "catchup": {"type": "string", "enum": ["skip", "latest", "all"]},
                 "catchup_max": {"type": "integer"}
             }), &["schedule_id"]),
-        tool("delete_schedule", "Remove a schedule that was created in the interface or by an agent. A schedule declared in the flow's code cannot be removed this way, because the next restart recreates it from the declaration; pause_schedule stops that one durably.",
+        destructive_tool("delete_schedule", "Remove a schedule that was created in the interface or by an agent. A schedule declared in the flow's code cannot be removed this way, because the next restart recreates it from the declaration; pause_schedule stops that one durably.",
             json!({"schedule_id": {"type": "integer"}}), &["schedule_id"]),
-        tool("pause_schedule", "Pause a schedule so it stops creating runs until resumed.",
+        write_tool("pause_schedule", "Pause a schedule so it stops creating runs until resumed.",
             json!({"schedule_id": {"type": "integer"}}), &["schedule_id"]),
-        tool("resume_schedule", "Resume a paused schedule.",
+        write_tool("resume_schedule", "Resume a paused schedule.",
             json!({"schedule_id": {"type": "integer"}}), &["schedule_id"]),
-        tool("set_variable", "Create or overwrite a variable. Secrets are encrypted at rest and never returned in plain text.",
+        destructive_tool("set_variable", "Create or overwrite a variable. Secrets are encrypted at rest and never returned in plain text.",
             json!({"name": {"type": "string"}, "value": {"description": "Any JSON"}, "tags": {"type": "array", "items": {"type": "string"}}, "secret": {"type": "boolean", "default": false}}), &["name", "value"]),
+        read_tool("list_backfills", "Backfills, newest first, each with its counts of runs by state. Read-only.",
+            json!({"flow": flow_prop, "project": {"type": "string"}}), &[]),
+        read_tool("get_backfill", "One backfill with its counts of runs by state. Read-only.",
+            json!({"backfill_id": {"type": "integer"}}), &["backfill_id"]),
+        destructive_tool("cancel_backfill", "Cancel a backfill: its queued runs are cancelled at once and its running runs are asked to stop.",
+            json!({"backfill_id": {"type": "integer"}}), &["backfill_id"]),
+        read_tool("get_flow_source", "The Python source of the module that registered a flow, read from the flow's own source directory and cut at 64 KB. Read-only.",
+            json!({"flow": flow_prop, "project": {"type": "string"}}), &["flow"]),
+        read_tool("server_health", "The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, and whether a token is required or the server is exposed. Read-only.",
+            json!({}), &[]),
+        read_tool("list_variables", "Every variable's name, tags, and timestamps; the value only when it is not a secret. Read-only.",
+            json!({}), &[]),
+        read_tool("list_resources", "Resource totals from [resources] and what is in use. Read-only.",
+            json!({}), &[]),
+        read_tool("flow_dependencies", "What a flow runs after (its upstreams and batch key) and which flows run after it. Read-only.",
+            json!({"flow": flow_prop, "project": {"type": "string"}}), &["flow"]),
+        read_tool("check_flows", "Run `cereyan check --json` on the served directory in a child process and return its report: import failures, unknown upstreams, invalid schedules with previews, unlisted resources, and route conflicts. Takes a few seconds. Read-only.",
+            json!({}), &[]),
+        write_tool("rerun_run", "Start a new run of the same flow with the original run's parameters and tags. Returns the new run; follow it with get_run. Rerunning from a failed task is not yet supported.",
+            json!({"run_id": {"type": "integer"}}), &["run_id"]),
     ]
 }
 
@@ -440,7 +604,143 @@ async fn call_tool(
     name: &str,
     args: &Map<String, Value>,
 ) -> Result<Value, ToolError> {
+    if name.starts_with("flow__") {
+        let Some((_, flow)) = flow_tools(state).into_iter().find(|(n, _)| n == name) else {
+            return Err(ToolError::Unknown(name.to_string()));
+        };
+        let run = runs::create_run_inner(
+            state,
+            &flow,
+            args.clone(),
+            None,
+            Vec::new(),
+            &crate::auth::run_creator(user, &format!("mcp:{client}")),
+        )
+        .await?;
+        return Ok(json!({"run": run, "note": "created; follow it with get_run"}));
+    }
     match name {
+        "list_backfills" => {
+            let flow_id = match arg_str(args, "flow") {
+                Some(n) => Some(resolve_flow(state, &n, arg_str(args, "project").as_deref())?.id),
+                None => None,
+            };
+            let mut items = Vec::new();
+            for b in state.store.list_backfills(flow_id)? {
+                items.push(
+                    serde_json::to_value(backfills::status_of(state, b.id)?).unwrap_or(Value::Null),
+                );
+            }
+            Ok(json!({"backfills": items}))
+        }
+        "get_backfill" => {
+            let id = arg_i64(args, "backfill_id")?;
+            Ok(json!({"backfill": backfills::status_of(state, id)?}))
+        }
+        "cancel_backfill" => {
+            let id = arg_i64(args, "backfill_id")?;
+            let status = backfills::cancel_backfill_inner(state, id).await?;
+            Ok(
+                json!({"backfill": status, "note": "cancelled; queued runs are cancelled and running ones asked to stop"}),
+            )
+        }
+        "get_flow_source" => {
+            let name = arg_str(args, "flow")
+                .ok_or_else(|| ToolError::Failed("flow is required".into()))?;
+            let flow = resolve_flow(state, &name, arg_str(args, "project").as_deref())?;
+            flow_source(&flow)
+        }
+        "server_health" => Ok(json!({
+            "version": state.config.version,
+            "engines": state.supervisor.engines_snapshot(),
+            "queued": state.supervisor.queue_len(),
+            "resources": state.supervisor.resources_snapshot(),
+            "schedules": state.store.list_schedules(None)?.len(),
+            "auth": state.config.token.is_some(),
+            "exposed": state.exposed(),
+            "read_only": state.config.mcp_read_only,
+            "served_dir": state.config.served_dir.as_ref().map(|p| p.display().to_string()),
+            "as_of": now_micros(),
+        })),
+        "list_variables" => {
+            let items: Vec<Value> = state
+                .store
+                .list_variables()?
+                .into_iter()
+                .map(|v| {
+                    let mut row = json!({
+                        "name": v.name, "tags": v.tags, "secret": v.secret,
+                        "created_at": v.created_at, "updated_at": v.updated_at,
+                    });
+                    if !v.secret {
+                        row["value"] = v.value;
+                    }
+                    row
+                })
+                .collect();
+            Ok(json!({"variables": items}))
+        }
+        "list_resources" => Ok(json!({"resources": state.supervisor.resources_snapshot()})),
+        "flow_dependencies" => {
+            let name = arg_str(args, "flow")
+                .ok_or_else(|| ToolError::Failed("flow is required".into()))?;
+            let flow = resolve_flow(state, &name, arg_str(args, "project").as_deref())?;
+            let options = cereyan_core::FlowOptions::from_map(&flow.options);
+            let triggers: Vec<String> = state
+                .store
+                .list_flows(None)?
+                .iter()
+                .filter(|f| f.project == flow.project && f.id != flow.id)
+                .filter(|f| {
+                    cereyan_core::FlowOptions::from_map(&f.options)
+                        .after
+                        .map(|a| a.depends_on(&flow.name))
+                        .unwrap_or(false)
+                })
+                .map(|f| f.name.clone())
+                .collect();
+            Ok(json!({
+                "flow": flow.name, "project": flow.project,
+                "upstreams": options.after.as_ref().map(|a| a.upstreams()).unwrap_or_default(),
+                "batch_key": options.after.as_ref().and_then(|a| a.key.clone()),
+                "triggers": triggers,
+            }))
+        }
+        "check_flows" => {
+            let Some(dir) = state.config.served_dir.clone() else {
+                return Err(ToolError::Failed(
+                    "this server was started from a script without a served directory, so there is no directory to check".into(),
+                ));
+            };
+            let python = state.config.python.clone();
+            let home = state.config.home.clone();
+            tokio::task::spawn_blocking(move || run_check(&python, &dir, &home))
+                .await
+                .map_err(|e| ToolError::Failed(e.to_string()))?
+        }
+        "rerun_run" => {
+            let id = arg_i64(args, "run_id")?;
+            let original = state
+                .store
+                .get_run(id)?
+                .ok_or_else(|| ToolError::Failed(format!("run {id} not found")))?;
+            let flow = state
+                .store
+                .get_flow(original.flow_id)?
+                .ok_or_else(|| ToolError::Failed(format!("flow {} not found", original.flow_id)))?;
+            let run = runs::create_run_inner(
+                state,
+                &flow,
+                original.parameters.clone(),
+                None,
+                original.tags.clone(),
+                &crate::auth::run_creator(user, &format!("mcp:{client}")),
+            )
+            .await?;
+            Ok(
+                json!({"run": run, "rerun_of": id, "note": "created with the original run's parameters; follow it with get_run"}),
+            )
+        }
         "list_flows" => {
             let project = arg_str(args, "project");
             let group = arg_str(args, "group");
@@ -774,6 +1074,103 @@ async fn call_tool(
             Ok(json!({"variable": row}))
         }
         other => Err(ToolError::Unknown(other.to_string())),
+    }
+}
+
+const SOURCE_CAP: usize = 64 * 1024;
+const CHECK_TIMEOUT: Duration = Duration::from_secs(60);
+const CHECK_OUTPUT_CAP: u64 = 1024 * 1024;
+
+/// The module file that registered `flow`, read only from under the flow's
+/// own source directory and cut at `SOURCE_CAP`. Nothing here comes from the
+/// request: the directory and module were recorded at registration.
+fn flow_source(flow: &cereyan_core::Flow) -> Result<Value, ToolError> {
+    let base = std::fs::canonicalize(&flow.source_dir)
+        .map_err(|e| ToolError::Failed(format!("source directory {}: {e}", flow.source_dir)))?;
+    let mut path = base.clone();
+    for part in flow.module.split('.') {
+        path.push(part);
+    }
+    path.set_extension("py");
+    let path = std::fs::canonicalize(&path)
+        .map_err(|e| ToolError::Failed(format!("{}: {e}", path.display())))?;
+    if !path.starts_with(&base) {
+        return Err(ToolError::Failed(
+            "the flow's module is outside its source directory".into(),
+        ));
+    }
+    let bytes =
+        std::fs::read(&path).map_err(|e| ToolError::Failed(format!("{}: {e}", path.display())))?;
+    let truncated = bytes.len() > SOURCE_CAP;
+    let text = String::from_utf8_lossy(&bytes[..bytes.len().min(SOURCE_CAP)]).to_string();
+    Ok(json!({
+        "flow": flow.name, "project": flow.project, "module": flow.module,
+        "path": path.display().to_string(), "bytes": bytes.len(), "truncated": truncated,
+        "source": text,
+    }))
+}
+
+/// `python -m cereyan check --json <dir>` in a child process, bounded in time
+/// and output. Exit 1 still carries a report (findings); exit 3 is a failure
+/// to check at all and its stderr becomes the error.
+fn run_check(
+    python: &str,
+    dir: &std::path::Path,
+    home: &std::path::Path,
+) -> Result<Value, ToolError> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(python)
+        .args(["-m", "cereyan", "check", "--json"])
+        .arg(dir)
+        .env("CEREYAN_HOME", home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| ToolError::Failed(format!("could not start {python}: {e}")))?;
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let out_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = (&mut stdout).take(CHECK_OUTPUT_CAP).read_to_end(&mut buf);
+        let mut sink = [0u8; 8192];
+        while matches!(stdout.read(&mut sink), Ok(n) if n > 0) {}
+        buf
+    });
+    let err_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = (&mut stderr).take(64 * 1024).read_to_end(&mut buf);
+        let mut sink = [0u8; 8192];
+        while matches!(stderr.read(&mut sink), Ok(n) if n > 0) {}
+        buf
+    });
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() > CHECK_TIMEOUT => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(ToolError::Failed(format!(
+                    "cereyan check did not finish within {} s",
+                    CHECK_TIMEOUT.as_secs()
+                )));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(e) => return Err(ToolError::Failed(e.to_string())),
+        }
+    };
+    let out = out_reader.join().unwrap_or_default();
+    let err = String::from_utf8_lossy(&err_reader.join().unwrap_or_default()).to_string();
+    match serde_json::from_slice::<Value>(&out) {
+        Ok(report) => Ok(report),
+        Err(_) => Err(ToolError::Failed(format!(
+            "cereyan check exited with {} and produced no report: {}",
+            status.code().unwrap_or(-1),
+            err.trim()
+        ))),
     }
 }
 

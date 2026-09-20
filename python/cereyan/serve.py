@@ -235,6 +235,34 @@ def _allow_unauthenticated(directory: str, allow_unauthenticated: bool | None = 
     return value, _source("toml", "[server] allow_unauthenticated")
 
 
+def _mcp_read_only(directory: str, mcp_read_only: bool | None = None,
+                           app_mcp_read_only: bool | None = None) -> tuple[bool, dict]:
+    if mcp_read_only:
+        return True, _source("flag", "--mcp-read-only")
+    env = os.environ.get("CEREYAN_MCP_READ_ONLY")
+    if env is not None and env.strip():
+        value = env.strip().lower()
+        if value in _TRUE:
+            return True, _source("env", "CEREYAN_MCP_READ_ONLY")
+        if value in _FALSE:
+            return False, _source("env", "CEREYAN_MCP_READ_ONLY")
+        raise CereyanError(f"invalid CEREYAN_MCP_READ_ONLY {env!r}: expected true, false, 1, 0, yes, or no")
+    if app_mcp_read_only is not None:
+        if not isinstance(app_mcp_read_only, bool):
+            raise CereyanError(
+                f"invalid app.serve(mcp_read_only={app_mcp_read_only!r}): expected True or False"
+            )
+        return app_mcp_read_only, _source("app", "app.serve(mcp_read_only=)")
+    value = server_settings(directory).get("mcp_read_only")
+    if value is None:
+        return False, _source("default")
+    if not isinstance(value, bool):
+        raise CereyanError(
+            f"invalid [server] mcp_read_only {value!r} in cereyan.toml: expected true or false"
+        )
+    return value, _source("toml", "[server] mcp_read_only")
+
+
 def resolve_allow_unauthenticated(directory: str, allow_unauthenticated: bool | None = None,
                                   app_allow_unauthenticated: bool | None = None) -> bool:
     """Flag, environment, app.serve(), cereyan.toml. False unless one of them opts out of the generated token."""
@@ -421,10 +449,11 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
           login_url: str | None = None, app_login_url: str | None = None,
           allowed_hosts: list[str] | None = None,
           app_allowed_hosts: list[str] | tuple[str, ...] | None = None,
-          allow_unauthenticated: bool | None = None, app_allow_unauthenticated: bool | None = None) -> int:
+          allow_unauthenticated: bool | None = None, app_allow_unauthenticated: bool | None = None,
+          mcp_read_only: bool | None = None, app_mcp_read_only: bool | None = None) -> int:
     """Serve ``directory``. ``host``, ``port``, ``token``, ``socket``, ``base_path``,
     ``enable_auth``, ``auth_cookie``, ``auth_scope``, ``login_url``,
-    ``allowed_hosts``, and ``allow_unauthenticated`` are the CLI flags; the
+    ``allowed_hosts``, ``allow_unauthenticated``, and ``mcp_read_only`` are the CLI flags; the
     ``app_*`` values come from ``app.serve()`` and rank below the environment."""
     directory = os.path.abspath(directory or os.getcwd())
     if not os.path.isdir(directory):
@@ -445,6 +474,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     resolved_allow_unauthenticated, sources["server.allow_unauthenticated"] = _allow_unauthenticated(
         directory, allow_unauthenticated, app_allow_unauthenticated
     )
+    resolved_mcp_read_only, sources["server.mcp_read_only"] = _mcp_read_only(directory, mcp_read_only, app_mcp_read_only)
     if resolved_auth_scope == "all" and not resolved_enable_auth:
         raise CereyanError(
             "auth_scope 'all' requires enable_auth: without an authenticator the UI could not load its token prompt"
@@ -555,6 +585,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "login_url": resolved_login_url,
         "allowed_hosts": resolved_allowed_hosts,
         "allow_unauthenticated": resolved_allow_unauthenticated,
+        "mcp_read_only": resolved_mcp_read_only,
         "open_browser": bool(should_open),
         "sources": sources,
         "python_version": platform.python_version(),

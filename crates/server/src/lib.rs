@@ -131,6 +131,9 @@ pub struct ServeConfig {
     /// holds it, `<home>/token`. Never set from configuration.
     #[serde(default)]
     pub token_file: Option<PathBuf>,
+    /// Hide and refuse every MCP tool that changes state.
+    #[serde(default)]
+    pub mcp_read_only: bool,
 }
 
 fn default_auth_scope() -> String {

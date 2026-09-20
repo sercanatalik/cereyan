@@ -52,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--login-url", help="sign-in page linked from 401 responses and the UI (also CEREYAN_LOGIN_URL or [server] login_url)")
     serve.add_argument("--allowed-host", action="append", dest="allowed_hosts", metavar="HOST", help="also answer to this host name and accept browser pages from it; repeat for more (also CEREYAN_ALLOWED_HOSTS, comma-separated, or [server] allowed_hosts)")
     serve.add_argument("--allow-unauthenticated", action="store_true", default=None, help="serve without a token when bound beyond loopback instead of generating one into <home>/token (also CEREYAN_ALLOW_UNAUTHENTICATED or [server] allow_unauthenticated)")
+    serve.add_argument("--mcp-read-only", action="store_true", default=None, help="list and allow only MCP tools that change nothing (also CEREYAN_MCP_READ_ONLY or [server] mcp_read_only)")
     serve.set_defaults(func=cmd_serve)
 
     check = sub.add_parser("check", help="import a directory as serve would and report problems, without touching the store")
@@ -187,6 +188,7 @@ def cmd_serve(args) -> int:
             login_url=args.login_url,
             allowed_hosts=args.allowed_hosts,
             allow_unauthenticated=args.allow_unauthenticated,
+            mcp_read_only=args.mcp_read_only,
         )
     except CereyanError as exc:
         print(f"error: {exc}", file=sys.stderr)

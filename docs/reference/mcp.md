@@ -23,7 +23,7 @@ Runs created through MCP record `created_by = mcp:<client name>` from the `initi
 
 Every tool description states its effect so a model can decide before calling. A tool returns one text content block holding the JSON whose top-level keys are listed as its response; a failure returns `isError: true` and a message instead. Rule creation is not exposed, and a schedule declared in a flow's code cannot be deleted through MCP: the next restart recreates it from the declaration, so pausing it is what lasts.
 
-### Read-only tools (9)
+### Read-only tools (17)
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -36,8 +36,16 @@ Every tool description states its effect so a model can decide before calling. A
 | `list_rules` | none | The rules (reactive and proactive) with their match, actions, guards, and fire counts. Response keys: `rules` |
 | `list_schedules` | `flow` (string) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) — Only schedules of this project | The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, and whether it was declared in the flow's code, created in the interface, or created by an agent. Response keys: `schedules` |
 | `explain_failure` | `run_id` (integer, required) | Everything needed to diagnose a run in one call: the run, its failed or crashed task runs, the last warning-or-above log lines, and the run's events. Response keys: `error_logs`, `events`, `failed_task_runs`, `run`, `verdict` |
+| `list_backfills` | `flow` (string) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) | Backfills, newest first, each with its counts of runs by state. Response keys: `backfills` |
+| `get_backfill` | `backfill_id` (integer, required) | One backfill with its counts of runs by state. Response keys: `backfill` |
+| `get_flow_source` | `flow` (string, required) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) | The Python source of the module that registered a flow, read from the flow's own source directory and cut at 64 KB. Response keys: `bytes`, `flow`, `module`, `path`, `project`, `source`, `truncated` |
+| `server_health` | none | The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, and whether a token is required or the server is exposed. Response keys: `as_of`, `auth`, `engines`, `exposed`, `queued`, `read_only`, `resources`, `schedules`, `served_dir`, `version` |
+| `list_variables` | none | Every variable's name, tags, and timestamps; the value only when it is not a secret. Response keys: `variables` |
+| `list_resources` | none | Resource totals from [resources] and what is in use. Response keys: `resources` |
+| `flow_dependencies` | `flow` (string, required) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) | What a flow runs after (its upstreams and batch key) and which flows run after it. Response keys: `batch_key`, `flow`, `project`, `triggers`, `upstreams` |
+| `check_flows` | none | Run `cereyan check --json` on the served directory in a child process and return its report: import failures, unknown upstreams, invalid schedules with previews, unlisted resources, and route conflicts. Takes a few seconds. Response keys: `directory`, `errors`, `findings`, `flows`, `modules`, `now`, `ok`, `routes`, `rules`, `warnings` |
 
-### Tools that change state (10)
+### Tools that change state (13)
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -51,6 +59,9 @@ Every tool description states its effect so a model can decide before calling. A
 | `pause_schedule` | `schedule_id` (integer, required) | Pause a schedule so it stops creating runs until resumed. Response keys: `schedule` |
 | `resume_schedule` | `schedule_id` (integer, required) | Resume a paused schedule. Response keys: `schedule` |
 | `set_variable` | `name` (string, required)<br>`secret` (boolean, default `false`)<br>`tags` (array of string)<br>`value` (any JSON, required) — Any JSON | Create or overwrite a variable. Secrets are encrypted at rest and never returned in plain text. Response keys: `variable` |
+| `cancel_backfill` | `backfill_id` (integer, required) | Cancel a backfill: its queued runs are cancelled at once and its running runs are asked to stop. Response keys: `backfill`, `note` |
+| `rerun_run` | `run_id` (integer, required) | Start a new run of the same flow with the original run's parameters and tags. Returns the new run; follow it with get_run. Rerunning from a failed task is not yet supported. Response keys: `note`, `rerun_of`, `run` |
+| `flow__agent__etl` | `day` (string, default `"2026-09-06"`)<br>`n` (integer, default `1`) | Start a run of flow agent/etl. Arguments are the flow's parameters. Returns the run; follow it with get_run. Response keys: `note`, `run` |
 
 ### Fields of the lists a tool returns
 
@@ -58,15 +69,20 @@ Recorded from real responses, so a model knows what it gets without a second cal
 
 | Tool | Key | Item fields |
 |---|---|---|
+| `check_flows` | `findings` | `flow`, `kind`, `level`, `message` |
+| `check_flows` | `flows` | `findings`, `name`, `project`, `schedules` |
 | `explain_failure` | `error_logs` | `id`, `level`, `logger`, `message`, `run_id`, `task_run_id`, `timestamp` |
 | `explain_failure` | `events` | `external_id`, `flow_id`, `id`, `name`, `occurred`, `payload`, `related`, `resource`, `run_id`, `seq` |
 | `get_run` | `task_runs` | `crash_count`, `created_at`, `dynamic_key`, `end_time`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `id`, `name`, `parents`, `pass`, `project`, `run_id`, `run_name`, `start_time`, `state`, `task_key`, `total_run_time` |
 | `list_artifacts` | `artifacts` | `created_at`, `data`, `external_id`, `flow_name`, `id`, `key`, `kind`, `project`, `run_id`, `run_name`, `task_run_id`, `updated_at` |
+| `list_backfills` | `backfills` | `cancelled`, `concurrency`, `counts`, `created_at`, `end_value`, `external_id`, `extra_parameters`, `flow_id`, `id`, `interval_secs`, `parameter`, `start_value`, `tag`, `total` |
 | `list_events` | `events` | `external_id`, `flow_id`, `id`, `name`, `occurred`, `payload`, `related`, `resource`, `run_id`, `seq` |
 | `list_flows` | `flows` | `description`, `error`, `id`, `live`, `name`, `options`, `parameter_schema`, `project`, `tags` |
 | `list_runs` | `runs` | `attempt`, `backfill_id`, `crash_count`, `created_at`, `created_by`, `end_time`, `engine_id`, `engine_pid`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `group`, `id`, `name`, `parameters`, `parent_run_id`, `priority`, `project`, `report_seq`, `schedule_id`, `scheduled_time`, `start_time`, `state`, `tags`, `task_counts`, `total_run_time` |
 | `list_schedules` | `schedules` | `active`, `catchup`, `catchup_max`, `flow`, `id`, `next_fire`, `paused_reason`, `paused_until`, `project`, `schedule`, `source` |
+| `list_variables` | `variables` | `created_at`, `name`, `secret`, `tags`, `updated_at`, `value` |
 | `run_logs` | `logs` | `id`, `level`, `logger`, `message`, `run_id`, `task_run_id`, `timestamp` |
+| `server_health` | `engines` | `adopted`, `current_run`, `exit_requested`, `id`, `isolated`, `module`, `nice`, `pid`, `runs_done`, `source_dir`, `uptime_secs` |
 
 ## Resources
 
@@ -82,6 +98,8 @@ Recorded from real responses, so a model knows what it gets without a second cal
 | Prompt | Arguments | Purpose |
 |---|---|---|
 | `diagnose_run` | `run_id` (The run id, required) | Explain why a run failed and what to do about it |
+| `health_check` | none | Report what needs attention on this server: engines, queue, failed runs, and schedules |
+| `plan_backfill` | `flow` (Flow name, or project/flow, required)<br>`parameter` (The date or datetime parameter, required)<br>`start` (First value, YYYY-MM-DD or RFC 3339, required)<br>`end` (Last value, inclusive, required) | Plan a backfill as a dry run, review the range and count, then create the runs |
 
 `diagnose_run` renders one message:
 

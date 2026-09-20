@@ -49,11 +49,13 @@ assert {"list_flows", "run_flow", "explain_failure", "resume_run"} <= tools
 
 ## What the agent can do
 
-The tool set is curated: nine read-only tools (`list_flows`, `list_runs`, `get_run`, `run_logs`, `list_events`, `list_artifacts`, `list_rules`, `list_schedules`, `explain_failure`) and ten that change state (`run_flow`, `cancel_run`, `resume_run`, `backfill`, `create_schedule`, `edit_schedule`, `delete_schedule`, `pause_schedule`, `resume_schedule`, `set_variable`). Every description states its effect, `backfill` dry-runs unless told otherwise, and rule creation is not exposed. The full list with each argument's type, default, and range, and the keys every tool returns, is on the [MCP reference](../reference/mcp.md) page.
+The tool set is curated: seventeen read-only tools (`list_flows`, `list_runs`, `get_run`, `run_logs`, `list_events`, `list_artifacts`, `list_rules`, `list_schedules`, `explain_failure`, `list_backfills`, `get_backfill`, `get_flow_source`, `server_health`, `list_variables`, `list_resources`, `flow_dependencies`, `check_flows`) and twelve that change state (`run_flow`, `rerun_run`, `cancel_run`, `resume_run`, `backfill`, `cancel_backfill`, `create_schedule`, `edit_schedule`, `delete_schedule`, `pause_schedule`, `resume_schedule`, `set_variable`). Every description states its effect, every tool carries the MCP `readOnlyHint` and `destructiveHint` annotations so a client can gate approval on them, `backfill` dry-runs unless told otherwise, `list_variables` never returns a secret's value, `get_flow_source` reads only from the flow's own source directory, `check_flows` runs [`cereyan check`](test-a-pipeline.md#check-the-directory-before-serving) on the served directory in a child process, and rule creation is not exposed. The full list with each argument's type, default, and range, and the keys every tool returns, is on the [MCP reference](../reference/mcp.md) page.
+
+A flow can publish itself as a tool: `@flow(mcp_tool=True)` lists it as `flow__<project>__<name>` with the flow's parameters as the tool's arguments, so an agent starts it without knowing `run_flow`. Nothing else changes; the run is the same run.
 
 Schedules are the one place where an agent has less room than the flow page: editing a schedule that was declared in code detaches it from that declaration for good and the result says so, and deleting such a schedule is refused, because the declaration would recreate it at the next restart. See [Schedules](../concepts/schedules.md).
 
-Two resource templates, `cereyan://runs/{id}/logs` and `cereyan://runs/{id}/artifacts`, expose a run's logs and artifacts as JSON — they are listed by `resources/templates/list`, not `resources/list` — and the `diagnose_run` prompt tells the model to call `explain_failure` and summarise the cause.
+Two resource templates, `cereyan://runs/{id}/logs` and `cereyan://runs/{id}/artifacts`, expose a run's logs and artifacts as JSON — they are listed by `resources/templates/list`, not `resources/list`. Three prompts steer common tasks: `diagnose_run` tells the model to call `explain_failure` and summarise the cause, `health_check` walks `server_health`, the failed and crashed runs, and the schedules, and `plan_backfill` dry-runs a backfill and creates it only after reviewing the count.
 
 ## Know what the agent did
 
@@ -62,6 +64,15 @@ Runs created through MCP record `created_by = mcp:<client name>` from the `initi
 ## Authentication and safety
 
 MCP uses the API token or the Unix socket; there is no second permission model. Anyone holding the token, or a local user on the socket, can do through MCP what the API allows, including starting work. Give an agent the socket rather than the token when it runs on the same machine, and see [Secure the server](secure-the-server.md).
+
+To hand an agent a server it can only look at, start the server read-only:
+
+```toml
+[server]
+mcp_read_only = true
+```
+
+Or `--mcp-read-only`, `CEREYAN_MCP_READ_ONLY`, or `app.serve(mcp_read_only=True)`. `tools/list` then returns only the tools whose `readOnlyHint` is true (flow tools included in what is hidden), any other tool call answers an error naming read-only mode, and the `initialize` instructions say so. The REST API and the UI are unaffected; to offer both an agent that reads and one that acts, run a second server on the same home and another port.
 
 ## Let the agent answer questions
 

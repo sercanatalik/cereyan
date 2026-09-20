@@ -33,6 +33,37 @@
       ],
       "description": "Explain why a run failed and what to do about it",
       "name": "diagnose_run"
+    },
+    {
+      "arguments": [],
+      "description": "Report what needs attention on this server: engines, queue, failed runs, and schedules",
+      "name": "health_check"
+    },
+    {
+      "arguments": [
+        {
+          "description": "Flow name, or project/flow",
+          "name": "flow",
+          "required": true
+        },
+        {
+          "description": "The date or datetime parameter",
+          "name": "parameter",
+          "required": true
+        },
+        {
+          "description": "First value, YYYY-MM-DD or RFC 3339",
+          "name": "start",
+          "required": true
+        },
+        {
+          "description": "Last value, inclusive",
+          "name": "end",
+          "required": true
+        }
+      ],
+      "description": "Plan a backfill as a dry run, review the range and count, then create the runs",
+      "name": "plan_backfill"
     }
   ],
   "resource_templates": [
@@ -71,10 +102,48 @@
         ]
       }
     },
+    "cancel_backfill": {
+      "default": {
+        "keys": [
+          "backfill",
+          "note"
+        ]
+      }
+    },
     "cancel_run": {
       "default": {
         "keys": [
           "run"
+        ]
+      }
+    },
+    "check_flows": {
+      "default": {
+        "items": {
+          "findings": [
+            "flow",
+            "kind",
+            "level",
+            "message"
+          ],
+          "flows": [
+            "findings",
+            "name",
+            "project",
+            "schedules"
+          ]
+        },
+        "keys": [
+          "directory",
+          "errors",
+          "findings",
+          "flows",
+          "modules",
+          "now",
+          "ok",
+          "routes",
+          "rules",
+          "warnings"
         ]
       }
     },
@@ -136,6 +205,45 @@
         ]
       }
     },
+    "flow__agent__etl": {
+      "default": {
+        "keys": [
+          "note",
+          "run"
+        ]
+      }
+    },
+    "flow_dependencies": {
+      "default": {
+        "keys": [
+          "batch_key",
+          "flow",
+          "project",
+          "triggers",
+          "upstreams"
+        ]
+      }
+    },
+    "get_backfill": {
+      "default": {
+        "keys": [
+          "backfill"
+        ]
+      }
+    },
+    "get_flow_source": {
+      "default": {
+        "keys": [
+          "bytes",
+          "flow",
+          "module",
+          "path",
+          "project",
+          "source",
+          "truncated"
+        ]
+      }
+    },
     "get_run": {
       "default": {
         "items": {
@@ -191,6 +299,31 @@
         ]
       }
     },
+    "list_backfills": {
+      "default": {
+        "items": {
+          "backfills": [
+            "cancelled",
+            "concurrency",
+            "counts",
+            "created_at",
+            "end_value",
+            "external_id",
+            "extra_parameters",
+            "flow_id",
+            "id",
+            "interval_secs",
+            "parameter",
+            "start_value",
+            "tag",
+            "total"
+          ]
+        },
+        "keys": [
+          "backfills"
+        ]
+      }
+    },
     "list_events": {
       "default": {
         "items": {
@@ -230,6 +363,13 @@
         },
         "keys": [
           "flows"
+        ]
+      }
+    },
+    "list_resources": {
+      "default": {
+        "keys": [
+          "resources"
         ]
       }
     },
@@ -301,10 +441,36 @@
         ]
       }
     },
+    "list_variables": {
+      "default": {
+        "items": {
+          "variables": [
+            "created_at",
+            "name",
+            "secret",
+            "tags",
+            "updated_at",
+            "value"
+          ]
+        },
+        "keys": [
+          "variables"
+        ]
+      }
+    },
     "pause_schedule": {
       "default": {
         "keys": [
           "schedule"
+        ]
+      }
+    },
+    "rerun_run": {
+      "default": {
+        "keys": [
+          "note",
+          "rerun_of",
+          "run"
         ]
       }
     },
@@ -349,6 +515,37 @@
         ]
       }
     },
+    "server_health": {
+      "default": {
+        "items": {
+          "engines": [
+            "adopted",
+            "current_run",
+            "exit_requested",
+            "id",
+            "isolated",
+            "module",
+            "nice",
+            "pid",
+            "runs_done",
+            "source_dir",
+            "uptime_secs"
+          ]
+        },
+        "keys": [
+          "as_of",
+          "auth",
+          "engines",
+          "exposed",
+          "queued",
+          "read_only",
+          "resources",
+          "schedules",
+          "served_dir",
+          "version"
+        ]
+      }
+    },
     "set_variable": {
       "default": {
         "keys": [
@@ -359,6 +556,10 @@
   },
   "tools": [
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
       "description": "List the registered flows with their project, parameters schema, tags, and any registration error. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
@@ -378,6 +579,10 @@
       "name": "list_flows"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
       "description": "List runs, newest first, with optional filters. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
@@ -417,6 +622,10 @@
       "name": "list_runs"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
       "description": "One run with its state, parameters, timing, and task runs. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
@@ -433,6 +642,10 @@
       "name": "get_run"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
       "description": "Log lines of a run, oldest first. Filter by minimum level (10 debug, 20 info, 30 warning, 40 error) or a search string. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
@@ -461,6 +674,10 @@
       "name": "run_logs"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
       "description": "Recent events (run and task transitions, schedule changes, rule firings, custom events), newest first. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
@@ -488,6 +705,10 @@
       "name": "list_events"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
       "description": "Artifacts across runs, newest first, with their run, flow, and project. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
@@ -520,6 +741,10 @@
       "name": "list_artifacts"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
       "description": "The rules (reactive and proactive) with their match, actions, guards, and fire counts. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
@@ -530,6 +755,10 @@
       "name": "list_rules"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
       "description": "The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, and whether it was declared in the flow's code, created in the interface, or created by an agent. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
@@ -549,6 +778,10 @@
       "name": "list_schedules"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
       "description": "Everything needed to diagnose a run in one call: the run, its failed or crashed task runs, the last warning-or-above log lines, and the run's events. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
@@ -565,6 +798,10 @@
       "name": "explain_failure"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
       "description": "Start a run of a flow now. Creates the run immediately and returns without waiting; follow it with get_run. Parameters are validated against the flow's schema.",
       "inputSchema": {
         "additionalProperties": false,
@@ -596,6 +833,10 @@
       "name": "run_flow"
     },
     {
+      "annotations": {
+        "destructiveHint": true,
+        "readOnlyHint": false
+      },
       "description": "Cancel a run. A queued run is cancelled at once; a running run is asked to stop and killed after the grace period.",
       "inputSchema": {
         "additionalProperties": false,
@@ -612,6 +853,10 @@
       "name": "cancel_run"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
       "description": "Answer a Paused run's wait_for_input question and schedule its next attempt. The answer can be any JSON.",
       "inputSchema": {
         "additionalProperties": false,
@@ -632,6 +877,10 @@
       "name": "resume_run"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
       "description": "Create one run per value of a date or datetime parameter between start and end. Defaults to a dry run that only reports how many runs would be created; pass dry_run false to create them. Can create thousands of runs.",
       "inputSchema": {
         "additionalProperties": false,
@@ -680,6 +929,10 @@
       "name": "backfill"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
       "description": "Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Returns the schedule and the next few times it will fire.",
       "inputSchema": {
         "additionalProperties": false,
@@ -747,6 +1000,10 @@
       "name": "create_schedule"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
       "description": "Retime an existing schedule. Editing one that was declared in the flow's code lasts until the server restarts, when the declaration in the Python source applies again, and the result says so. Returns the schedule and the next few times it will fire.",
       "inputSchema": {
         "additionalProperties": false,
@@ -792,6 +1049,10 @@
       "name": "edit_schedule"
     },
     {
+      "annotations": {
+        "destructiveHint": true,
+        "readOnlyHint": false
+      },
       "description": "Remove a schedule that was created in the interface or by an agent. A schedule declared in the flow's code cannot be removed this way, because the next restart recreates it from the declaration; pause_schedule stops that one durably.",
       "inputSchema": {
         "additionalProperties": false,
@@ -808,6 +1069,10 @@
       "name": "delete_schedule"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
       "description": "Pause a schedule so it stops creating runs until resumed.",
       "inputSchema": {
         "additionalProperties": false,
@@ -824,6 +1089,10 @@
       "name": "pause_schedule"
     },
     {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
       "description": "Resume a paused schedule.",
       "inputSchema": {
         "additionalProperties": false,
@@ -840,6 +1109,10 @@
       "name": "resume_schedule"
     },
     {
+      "annotations": {
+        "destructiveHint": true,
+        "readOnlyHint": false
+      },
       "description": "Create or overwrite a variable. Secrets are encrypted at rest and never returned in plain text.",
       "inputSchema": {
         "additionalProperties": false,
@@ -868,6 +1141,214 @@
         "type": "object"
       },
       "name": "set_variable"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Backfills, newest first, each with its counts of runs by state. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "description": "Flow name, or project/flow when the name exists in several projects",
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_backfills"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "One backfill with its counts of runs by state. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "backfill_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "backfill_id"
+        ],
+        "type": "object"
+      },
+      "name": "get_backfill"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Cancel a backfill: its queued runs are cancelled at once and its running runs are asked to stop.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "backfill_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "backfill_id"
+        ],
+        "type": "object"
+      },
+      "name": "cancel_backfill"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The Python source of the module that registered a flow, read from the flow's own source directory and cut at 64 KB. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "description": "Flow name, or project/flow when the name exists in several projects",
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "flow"
+        ],
+        "type": "object"
+      },
+      "name": "get_flow_source"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, and whether a token is required or the server is exposed. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "server_health"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Every variable's name, tags, and timestamps; the value only when it is not a secret. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_variables"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Resource totals from [resources] and what is in use. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_resources"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "What a flow runs after (its upstreams and batch key) and which flows run after it. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "description": "Flow name, or project/flow when the name exists in several projects",
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "flow"
+        ],
+        "type": "object"
+      },
+      "name": "flow_dependencies"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Run `cereyan check --json` on the served directory in a child process and return its report: import failures, unknown upstreams, invalid schedules with previews, unlisted resources, and route conflicts. Takes a few seconds. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "check_flows"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Start a new run of the same flow with the original run's parameters and tags. Returns the new run; follow it with get_run. Rerunning from a failed task is not yet supported.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "name": "rerun_run"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Start a run of flow agent/etl. Arguments are the flow's parameters. Returns the run; follow it with get_run.",
+      "inputSchema": {
+        "properties": {
+          "day": {
+            "default": "2026-09-06",
+            "format": "date",
+            "type": "string"
+          },
+          "n": {
+            "default": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "flow__agent__etl"
     }
   ]
 }

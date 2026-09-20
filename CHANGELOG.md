@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Ten more MCP tools, every tool annotated, and a read-only mode.** `list_backfills`, `get_backfill`, `cancel_backfill`, `get_flow_source`, `server_health`, `list_variables` (secret values never returned), `list_resources`, `flow_dependencies`, `check_flows` (runs `cereyan check` on the served directory), and `rerun_run`. Every tool carries `readOnlyHint` and `destructiveHint`. `[server] mcp_read_only` (`--mcp-read-only`, `CEREYAN_MCP_READ_ONLY`, `app.serve(mcp_read_only=True)`) lists and allows only tools that change nothing. `@flow(mcp_tool=True)` publishes a flow as a `flow__<project>__<name>` tool with its parameters as arguments. Prompts `health_check` and `plan_backfill` join `diagnose_run`. [Use cereyan with an AI agent](https://sercanatalik.github.io/cereyan/guides/agents/)
 - **`cereyan check [dir]` imports a directory as `serve` would and reports what would stop it serving cleanly**, without opening the store: import failures, unknown `after=` upstreams, schedules the core rejects (with the next three fires of every valid one), resources missing from `[resources]`, and custom routes that collide with the built-in API. `--json` prints one object for CI, `--strict` makes warnings fail, and `--now` fixes the preview's reference time. The same report is `cereyan.check.check_directory(path)`. [Test a pipeline › Check the directory before serving](https://sercanatalik.github.io/cereyan/guides/test-a-pipeline/#check-the-directory-before-serving)
 
 ## 2.1.0 (2026-09-19)

@@ -33,7 +33,7 @@ cereyan run [-h] [--param NAME=VALUE] [--quiet] target
 ## `cereyan serve`
 
 ```text
-cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--engine-max-runs ENGINE_MAX_RUNS] [--no-open] [--crash-retries CRASH_RETRIES] [--token TOKEN] [--socket SOCKET] [--base-path BASE_PATH] [--enable-auth] [--auth-cookie AUTH_COOKIE] [--auth-scope AUTH_SCOPE] [--login-url LOGIN_URL] [--allowed-host HOST] [--allow-unauthenticated] [dir]
+cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--engine-max-runs ENGINE_MAX_RUNS] [--no-open] [--crash-retries CRASH_RETRIES] [--token TOKEN] [--socket SOCKET] [--base-path BASE_PATH] [--enable-auth] [--auth-cookie AUTH_COOKIE] [--auth-scope AUTH_SCOPE] [--login-url LOGIN_URL] [--allowed-host HOST] [--allow-unauthenticated] [--mcp-read-only] [dir]
 ```
 
 | Argument | Meaning |
@@ -57,6 +57,7 @@ cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--en
 | `--login-url` `LOGIN_URL` | sign-in page linked from 401 responses and the UI (also CEREYAN_LOGIN_URL or [server] login_url). |
 | `--allowed-host` `HOST` | also answer to this host name and accept browser pages from it; repeat for more (also CEREYAN_ALLOWED_HOSTS, comma-separated, or [server] allowed_hosts). |
 | `--allow-unauthenticated` | serve without a token when bound beyond loopback instead of generating one into <home>/token (also CEREYAN_ALLOW_UNAUTHENTICATED or [server] allow_unauthenticated). |
+| `--mcp-read-only` | list and allow only MCP tools that change nothing (also CEREYAN_MCP_READ_ONLY or [server] mcp_read_only). |
 
 ## `cereyan check`
 
