@@ -42,6 +42,18 @@ def _parse_after(after, batch_key):
     return {"flow": names[0], "flows": names, "key": batch_key, "parameters": parameters}
 
 
+def _seconds(value, name: str) -> float | None:
+    """A positive number of seconds from a number or a timedelta, or None."""
+    if value is None:
+        return None
+    from datetime import timedelta
+
+    seconds = value.total_seconds() if isinstance(value, timedelta) else float(value)
+    if seconds <= 0:
+        raise ValueError(f"{name} must be a positive number of seconds or a timedelta")
+    return seconds
+
+
 class Unique:
     """At most one run of the flow per key at a time: ``@flow(unique=Unique(...))``.
 
@@ -140,6 +152,11 @@ class Flow:
         checkpoint: bool | None = None,
         checkpoint_max_bytes: int = 50_000_000,
         unique: "Unique | None" = None,
+        fresh_within: "float | timedelta | None" = None,
+        expect_by: str | None = None,
+        expect_by_tz: str | None = None,
+        expected_duration: "float | timedelta | None" = None,
+        overdue_factor: float | None = None,
     ) -> None:
         if not callable(fn):
             raise TypeError("@flow must decorate a callable")
@@ -166,6 +183,21 @@ class Flow:
         if unique is not None and not isinstance(unique, Unique):
             raise TypeError("unique must be a cereyan.Unique")
         self.unique = unique
+        self.fresh_within = _seconds(fresh_within, "fresh_within")
+        self.expect_by = expect_by
+        self.expect_by_tz = expect_by_tz
+        if expect_by is not None:
+            import json as _json
+            import time as _time
+
+            from . import _core
+
+            spec = {"kind": "cron", "cron": str(expect_by), "timezone": expect_by_tz}
+            _core.schedule_fires(_json.dumps(spec), int(_time.time() * 1_000_000), 1)
+        self.expected_duration = _seconds(expected_duration, "expected_duration")
+        if overdue_factor is not None and float(overdue_factor) <= 0:
+            raise ValueError("overdue_factor must be a positive number")
+        self.overdue_factor = float(overdue_factor) if overdue_factor is not None else None
         self.priority = int(priority)
         if max_concurrent is not None and int(max_concurrent) < 1:
             raise ValueError("max_concurrent must be at least 1")
@@ -260,6 +292,11 @@ class Flow:
             "checkpoint": self.checkpoint,
             "checkpoint_max_bytes": self.checkpoint_max_bytes,
             "unique": self.unique.spec() if self.unique else None,
+            "fresh_within": self.fresh_within,
+            "expect_by": self.expect_by,
+            "expect_by_tz": self.expect_by_tz,
+            "expected_duration": self.expected_duration,
+            "overdue_factor": self.overdue_factor,
         }
 
     # -- parameters -------------------------------------------------------
@@ -373,6 +410,16 @@ def flow(
         unique (Unique | None): At most one run per key at a time; see `Unique`. A
             second submission answers with the run that holds the key (or, with
             ``on_conflict="replace"``, cancels it), wherever the run is created.
+        fresh_within (float | timedelta | None): The flow's health is FAIL when its
+            last Completed run is older than this, WARN past three quarters of it.
+        expect_by (str | None): A cron by which a run must have completed
+            (``"0 9 * * *"``, in ``expect_by_tz``); health is FAIL when the latest
+            deadline passed without a completed run since the previous one.
+        expect_by_tz (str | None): IANA timezone for ``expect_by``.
+        expected_duration (float | timedelta | None): A Running run longer than this
+            makes the flow WARN and records ``run.overdue`` once.
+        overdue_factor (float | None): As ``expected_duration``, against this many
+            times the median duration of the last 20 Completed runs.
         resources (dict[str, float] | None): Named resources and the amount each run holds, for example
             ``{"db": 1}``; a run waits as AwaitingResource until they are free.
         after (str | tuple | list[str] | None): Upstream dependency: a flow name, ``(name, {param: template})`` to map

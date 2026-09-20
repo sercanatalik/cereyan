@@ -1284,6 +1284,42 @@
         ],
         "type": "object"
       },
+      "FlowHealth": {
+        "properties": {
+          "deadline": {
+            "description": "The `expect_by` deadline in force, microseconds.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "last_completed_at": {
+            "description": "When the last Completed run ended, microseconds.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reasons": {
+            "description": "Why, one sentence per finding; empty for a passing flow.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "`PASS`, `WARN`, or `FAIL`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reasons"
+        ],
+        "type": "object"
+      },
       "FlowOptions": {
         "description": "Flow-level options declared in Python and stored as JSON on the flow row.",
         "properties": {
@@ -1329,6 +1365,39 @@
               "null"
             ]
           },
+          "expect_by": {
+            "default": null,
+            "description": "Cron by which a run must have completed, in `expect_by_tz`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expect_by_tz": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expected_duration": {
+            "default": null,
+            "description": "Seconds a run is expected to take; longer is overdue.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "fresh_within": {
+            "default": null,
+            "description": "Seconds a Completed run may be old before the flow is stale.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "has_bulk_complete": {
             "default": false,
             "type": "boolean"
@@ -1357,6 +1426,15 @@
             "default": "",
             "description": "`enqueue`, `skip`, or `cancel_new`.",
             "type": "string"
+          },
+          "overdue_factor": {
+            "default": null,
+            "description": "Overdue past this many times the median of the last 20 Completed runs.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "priority": {
             "default": 0,
@@ -1422,6 +1500,17 @@
                 "type": [
                   "string",
                   "null"
+                ]
+              },
+              "health": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/FlowHealth",
+                    "description": "PASS, WARN or FAIL against the flow's freshness and deadline options; none without them."
+                  }
                 ]
               },
               "recent_runs": {

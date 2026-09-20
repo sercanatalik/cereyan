@@ -38,6 +38,7 @@ pub enum EventName {
     RunCrashed,
     RunCancelled,
     RunLate,
+    RunOverdue,
     RunRetrying,
     RunSkipped,
     RunPaused,
@@ -72,7 +73,7 @@ pub enum EventName {
 }
 
 impl EventName {
-    pub const ALL: [EventName; 39] = [
+    pub const ALL: [EventName; 40] = [
         EventName::RunScheduled,
         EventName::RunPending,
         EventName::RunRunning,
@@ -81,6 +82,7 @@ impl EventName {
         EventName::RunCrashed,
         EventName::RunCancelled,
         EventName::RunLate,
+        EventName::RunOverdue,
         EventName::RunRetrying,
         EventName::RunSkipped,
         EventName::RunPaused,
@@ -124,6 +126,7 @@ impl EventName {
             EventName::RunCrashed => "run.crashed",
             EventName::RunCancelled => "run.cancelled",
             EventName::RunLate => "run.late",
+            EventName::RunOverdue => "run.overdue",
             EventName::RunRetrying => "run.retrying",
             EventName::RunSkipped => "run.skipped",
             EventName::RunPaused => "run.paused",
@@ -170,6 +173,7 @@ impl EventName {
             | EventName::RunCrashed
             | EventName::RunCancelled
             | EventName::RunLate
+            | EventName::RunOverdue
             | EventName::RunRetrying
             | EventName::RunSkipped
             | EventName::RunPaused
@@ -215,6 +219,7 @@ impl EventName {
             EventName::RunCrashed => "The engine died while the run was executing",
             EventName::RunCancelled => "The run was cancelled",
             EventName::RunLate => "The scheduled time passed 15 seconds ago and the run has not started",
+            EventName::RunOverdue => "A Running run outlasted its flow's expected duration or overdue factor; recorded once per run",
             EventName::RunRetrying => "A retry attempt started",
             EventName::RunSkipped => "The run ended Skipped: `on_overlap=\"skip\"`, a backfill value already done, a catch-up drop, a fire a person skipped (`reason` `user`), or an upstream run skipped that way (`reason` `upstream`)",
             EventName::RunPaused => "The run is waiting on `wait_for_input`",
@@ -264,6 +269,7 @@ impl EventName {
                 "scheduled_time",
                 "name",
             ],
+            EventName::RunOverdue => &["expected_seconds", "elapsed_seconds", "basis"],
             EventName::RunScheduled
             | EventName::RunPending
             | EventName::RunRunning
@@ -518,6 +524,7 @@ mod tests {
             "run.crashed",
             "run.cancelled",
             "run.late",
+            "run.overdue",
             "run.retrying",
             "run.skipped",
             "run.paused",

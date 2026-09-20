@@ -10,6 +10,7 @@ mod custom;
 mod dispatch;
 mod events;
 mod guard;
+pub mod health;
 mod index;
 pub mod mcp;
 pub mod metrics;
@@ -441,6 +442,8 @@ impl Server {
                         state_inner.clone(),
                         shutdown_rx.clone(),
                     ));
+                    let _health =
+                        tokio::spawn(health::sweep_loop(state_inner.clone(), shutdown_rx.clone()));
                     let mut rx = shutdown_rx.clone();
                     // Unix only: `bind_unix_socket` refuses on other platforms, so
                     // `socket_listener` is always None there and this serve path would

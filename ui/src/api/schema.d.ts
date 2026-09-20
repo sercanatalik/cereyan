@@ -1541,6 +1541,22 @@ export interface components {
             source_dir: string;
             tags?: string[];
         };
+        FlowHealth: {
+            /**
+             * Format: int64
+             * @description The `expect_by` deadline in force, microseconds.
+             */
+            deadline?: number | null;
+            /**
+             * Format: int64
+             * @description When the last Completed run ended, microseconds.
+             */
+            last_completed_at?: number | null;
+            /** @description Why, one sentence per finding; empty for a passing flow. */
+            reasons: string[];
+            /** @description `PASS`, `WARN`, or `FAIL`. */
+            status: string;
+        };
         /** @description Flow-level options declared in Python and stored as JSON on the flow row. */
         FlowOptions: {
             /** @default null */
@@ -1559,6 +1575,25 @@ export interface components {
                 number,
                 number
             ] | null;
+            /**
+             * @description Cron by which a run must have completed, in `expect_by_tz`.
+             * @default null
+             */
+            expect_by: string | null;
+            /** @default null */
+            expect_by_tz: string | null;
+            /**
+             * Format: double
+             * @description Seconds a run is expected to take; longer is overdue.
+             * @default null
+             */
+            expected_duration: number | null;
+            /**
+             * Format: double
+             * @description Seconds a Completed run may be old before the flow is stale.
+             * @default null
+             */
+            fresh_within: number | null;
             /** @default false */
             has_bulk_complete: boolean;
             /** @default false */
@@ -1577,6 +1612,12 @@ export interface components {
              * @default
              */
             on_overlap: string;
+            /**
+             * Format: double
+             * @description Overdue past this many times the median of the last 20 Completed runs.
+             * @default null
+             */
+            overdue_factor: number | null;
             /**
              * Format: int64
              * @default 0
@@ -1607,6 +1648,7 @@ export interface components {
         FlowSummary: components["schemas"]["Flow"] & {
             /** @description The batch key of a keyed fan-in. */
             batch_key?: string | null;
+            health?: null | components["schemas"]["FlowHealth"];
             /**
              * @description Newest first: (run id, state type, state name, duration in microseconds
              *     or null while the run has none) of the last ten runs.

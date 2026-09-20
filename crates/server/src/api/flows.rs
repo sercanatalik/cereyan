@@ -36,6 +36,8 @@ pub struct FlowSummary {
     #[serde(default)]
     pub batch_key: Option<String>,
     pub schedules: Vec<cereyan_core::ScheduleRow>,
+    /// PASS, WARN or FAIL against the flow's freshness and deadline options; none without them.
+    pub health: Option<crate::health::FlowHealth>,
 }
 
 fn summarize(
@@ -57,7 +59,9 @@ fn summarize(
         .map(|f| f.name.clone())
         .collect();
     let schedules = state.scheduler.for_flow(flow.id);
+    let health = crate::health::flow_health(state, &flow);
     Ok(FlowSummary {
+        health,
         triggered_by: options.after.as_ref().map(|a| a.flow.clone()),
         upstreams: options
             .after

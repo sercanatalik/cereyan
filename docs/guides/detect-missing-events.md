@@ -36,6 +36,21 @@ assert spec["at"] == {"cron": "0 9 * * *", "tz": "Europe/Istanbul"}
 
 At each tick of `at` the rule fires unless a matching event occurred in the look-back window: `within` seconds when given, otherwise the time since the previous tick. Ticks missed while the server was down are skipped with a log line. Clock-armed rules need a running server. A rule does not fire until it has been watching for a whole window: until then its look-back would reach past its own creation, where nothing had happened yet, and the first tick after you save a rule would page you about it.
 
+## Freshness and deadlines in one line
+
+The common cases need no rule at all. Three flow options derive a health of PASS, WARN or FAIL from the runs the server already records, shown in the Health column of the Flows page and in every flow summary of the API:
+
+```python
+from datetime import timedelta
+from cereyan import flow
+
+@flow(fresh_within=timedelta(hours=26), expect_by="0 9 * * *", expect_by_tz="Europe/Istanbul", expected_duration=600)
+def nightly_load() -> None:
+    ...
+```
+
+`fresh_within` fails the flow when its last completed run is older than the window and warns past three quarters of it. `expect_by` names a cron by which a run must have completed: the flow fails when the latest deadline passed with no completed run since the previous one, and warns while a run is still active at the deadline. `expected_duration` (or `overdue_factor=2.0`, against the median of the last 20 completed runs) warns while a run has outlasted its expectation and records `run.overdue` once for that run, so `@app.rule(on="run.overdue")` pages exactly as a rule on `run.failed` would. None of this is a state machine of its own: the health is computed from runs when asked.
+
 ## What the rule sees
 
 A lapse is recorded as an `expectation.lapsed` event with resource `rule/<id>`, the related run and flow, and a payload carrying `rule`, `flow`, `project`, `run`, `run_name`, `expected`, `deadline`, and `armed_at`. The rule's actions execute against that event, so templates can say:

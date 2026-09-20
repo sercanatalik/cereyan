@@ -252,6 +252,15 @@ pub struct FlowOptions {
     pub start_deadline: Option<f64>,
     /// At most one run per key at a time; see `UniqueSpec`.
     pub unique: Option<UniqueSpec>,
+    /// Seconds a Completed run may be old before the flow is stale.
+    pub fresh_within: Option<f64>,
+    /// Cron by which a run must have completed, in `expect_by_tz`.
+    pub expect_by: Option<String>,
+    pub expect_by_tz: Option<String>,
+    /// Seconds a run is expected to take; longer is overdue.
+    pub expected_duration: Option<f64>,
+    /// Overdue past this many times the median of the last 20 Completed runs.
+    pub overdue_factor: Option<f64>,
 }
 
 /// `@flow(unique=Unique(...))`: which runs count as the same run.

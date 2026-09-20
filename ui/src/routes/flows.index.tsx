@@ -321,6 +321,7 @@ function FlowsPage() {
                   <Th className="w-52">Schedule</Th>
                   <Th className="w-28">Recent runs</Th>
                   <Th className="w-36">Last run</Th>
+                  <Th className="w-20">Health</Th>
                   <Th className="w-52">Starts after</Th>
                   <Th className="w-36">Tags</Th>
                   <Th className="w-32" />
@@ -432,7 +433,7 @@ function FlowsPage() {
   );
 }
 
-const COLUMNS = 7;
+const COLUMNS = 8;
 const FACET = "h-7 rounded-full pr-2 pl-2.5 text-xs";
 
 /** A group's summary strip: its size, soonest fire, last-run states and dependencies. */
@@ -548,6 +549,24 @@ function GroupRows({
               ) : (
                 <span className="text-muted-foreground">-</span>
               )}
+            </Td>
+            <Td>
+              {f.health ? (
+                <span
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[11px] font-medium",
+                    f.health.status === "FAIL"
+                      ? "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300"
+                      : f.health.status === "WARN"
+                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                        : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300",
+                  )}
+                  title={f.health.reasons.join("\n") || "Within its freshness and deadline expectations"}
+                  data-testid="flow-health"
+                >
+                  {f.health.status}
+                </span>
+              ) : null}
             </Td>
             <Td>
               <span className="flex items-center gap-1 text-xs" data-testid="starts-after">

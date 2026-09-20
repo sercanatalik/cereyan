@@ -20,6 +20,7 @@ Resource `run`; related `flow` and the run's tags. Offline the payload is `state
 | `run.crashed` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by`, `failures_in_a_row` | The engine died while the run was executing |
 | `run.cancelled` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run was cancelled |
 | `run.late` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by`, `scheduled_time`, `name` | The scheduled time passed 15 seconds ago and the run has not started |
+| `run.overdue` | `expected_seconds`, `elapsed_seconds`, `basis` | A Running run outlasted its flow's expected duration or overdue factor; recorded once per run |
 | `run.retrying` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | A retry attempt started |
 | `run.skipped` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by`, `reason` | The run ended Skipped: `on_overlap="skip"`, a backfill value already done, a catch-up drop, a fire a person skipped (`reason` `user`), or an upstream run skipped that way (`reason` `upstream`) |
 | `run.paused` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run is waiting on `wait_for_input` |

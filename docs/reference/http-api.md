@@ -1345,6 +1345,15 @@ A registered flow. Identity is `(project, name)`.
 | `source_dir` | string | yes |  |
 | `tags` | array of string | no |  |
 
+### `FlowHealth`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `deadline` | integer or null (int64) | no | The `expect_by` deadline in force, microseconds. |
+| `last_completed_at` | integer or null (int64) | no | When the last Completed run ended, microseconds. |
+| `reasons` | array of string | yes | Why, one sentence per finding; empty for a passing flow. |
+| `status` | string | yes | `PASS`, `WARN`, or `FAIL`. |
+
 ### `FlowOptions`
 
 Flow-level options declared in Python and stored as JSON on the flow row.
@@ -1354,12 +1363,17 @@ Flow-level options declared in Python and stored as JSON on the flow row.
 | `after` | null or [`AfterSpec`](#afterspec) | no |  |
 | `crash_retries` | integer or null (int64) | no |  |
 | `disable_after` | array or null | no | (count, window_seconds, persist_seconds) |
+| `expect_by` | string or null | no | Cron by which a run must have completed, in `expect_by_tz`. |
+| `expect_by_tz` | string or null | no |  |
+| `expected_duration` | number or null (double) | no | Seconds a run is expected to take; longer is overdue. |
+| `fresh_within` | number or null (double) | no | Seconds a Completed run may be old before the flow is stale. |
 | `has_bulk_complete` | boolean | no |  |
 | `has_crash_hooks` | boolean | no |  |
 | `isolated` | boolean | no |  |
 | `log_prints` | boolean | no |  |
 | `max_concurrent` | integer or null (int64) | no |  |
 | `on_overlap` | string | no | `enqueue`, `skip`, or `cancel_new`. |
+| `overdue_factor` | number or null (double) | no | Overdue past this many times the median of the last 20 Completed runs. |
 | `priority` | integer (int64) | no |  |
 | `resources` | object | no |  |
 | `retries` | integer (int64) | no |  |

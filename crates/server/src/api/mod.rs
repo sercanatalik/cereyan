@@ -187,6 +187,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         pause::SchedulerStatus,
         pause::PauseBody,
         runs::RunConflict,
+        crate::health::FlowHealth,
         runs::StateValue,
         runs::StateBody,
         cereyan_store::TaskStateRow,
