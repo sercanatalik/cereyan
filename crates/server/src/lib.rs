@@ -95,6 +95,9 @@ pub struct ServeConfig {
     /// Scheduled copies to keep (default 7).
     #[serde(default = "default_backup_keep")]
     pub backup_keep: i64,
+    /// Days to keep task checkpoints after a run ends (default 7); 0 keeps them.
+    #[serde(default = "default_retain_checkpoints")]
+    pub retain_checkpoints_days: i64,
     /// Default catch-up policy name reported in settings.
     #[serde(default = "default_catchup")]
     pub catchup_default: String,
@@ -201,6 +204,9 @@ fn default_keep_last_runs() -> i64 {
     10
 }
 fn default_backup_keep() -> i64 {
+    7
+}
+fn default_retain_checkpoints() -> i64 {
     7
 }
 fn default_catchup() -> String {
@@ -354,6 +360,7 @@ impl Server {
             ("keep_last_runs_per_flow", &state.keep_last_runs_per_flow),
             ("backup_every", &state.backup_every),
             ("backup_keep", &state.backup_keep),
+            ("retain_checkpoints_days", &state.retain_checkpoints_days),
         ] {
             if let Ok(Some(v)) = state.store.kv_get(&format!("settings.{key}")) {
                 if let Ok(d) = v.parse::<i64>() {

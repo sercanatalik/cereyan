@@ -23,6 +23,8 @@ const MICROS_PER_HOUR: i64 = 3_600 * 1_000_000;
 /// What one pass did.
 #[derive(Debug, Default)]
 pub struct Outcome {
+    /// Checkpoint files removed.
+    pub checkpoints: usize,
     pub logs: usize,
     pub events: usize,
     pub runs: usize,
@@ -55,8 +57,41 @@ pub fn run_once(state: &AppState) -> Outcome {
         }
     }
     out.runs = expire_runs(state);
+    out.checkpoints = expire_checkpoints(state);
     out.backup = backup_if_due(state);
     out
+}
+
+/// Remove checkpoint files older than `retain_checkpoints_days` and forget the
+/// references of terminal runs that ended before then; returns the files removed.
+pub fn expire_checkpoints(state: &AppState) -> usize {
+    let days = state.retain_checkpoints_days.load(Ordering::Relaxed);
+    if days <= 0 {
+        return 0;
+    }
+    let before = now_micros() - days * MICROS_PER_DAY;
+    let _ = state.store.clear_checkpoints_before(before);
+    let cutoff = std::time::UNIX_EPOCH + Duration::from_micros(before.max(0) as u64);
+    let dir = state.config.home.join("storage");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if !name.to_string_lossy().starts_with("ckpt-") {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|m| m < cutoff)
+            .unwrap_or(false);
+        if old && std::fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// Delete expired terminal runs under the run retention settings; returns the count.

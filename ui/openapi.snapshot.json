@@ -418,6 +418,40 @@
         ],
         "type": "string"
       },
+      "Checkpoint": {
+        "description": "A completed task run's stored result, keyed for replay.",
+        "properties": {
+          "dynamic_key": {
+            "type": "string"
+          },
+          "input_hash": {
+            "type": "string"
+          },
+          "pass": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "result_ref": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "task_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "dynamic_key",
+          "task_key",
+          "input_hash",
+          "result_ref",
+          "run_id",
+          "pass"
+        ],
+        "type": "object"
+      },
       "CompareSummary": {
         "properties": {
           "artifacts_changed": {
@@ -3382,6 +3416,11 @@
           "resources": {
             "type": "object"
           },
+          "retain_checkpoints_days": {
+            "description": "Days task checkpoints are kept after a run ends; 0 keeps them.",
+            "format": "int64",
+            "type": "integer"
+          },
           "retain_days": {
             "format": "int64",
             "type": "integer"
@@ -3454,6 +3493,7 @@
           "keep_last_runs_per_flow",
           "backup_every",
           "backup_keep",
+          "retain_checkpoints_days",
           "backups",
           "email_configured",
           "secret_key_present",
@@ -3504,6 +3544,13 @@
             },
             "type": [
               "object",
+              "null"
+            ]
+          },
+          "retain_checkpoints_days": {
+            "format": "int64",
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -3795,6 +3842,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "input_hash": {
+            "description": "Hash of the bound arguments, compared on replay.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "name": {
             "type": "string"
           },
@@ -3812,6 +3866,13 @@
           },
           "project": {
             "type": "string"
+          },
+          "result_ref": {
+            "description": "ResultStore key of the checkpointed result, when the task was checkpointed.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "run_id": {
             "format": "int64",
@@ -4168,6 +4229,13 @@
         "properties": {
           "cancel_requested": {
             "type": "boolean"
+          },
+          "checkpoints": {
+            "description": "Checkpoints a new attempt may replay: the run's earlier passes and, for a\ncrash rerun, the chain of crashed runs before it.",
+            "items": {
+              "$ref": "#/components/schemas/Checkpoint"
+            },
+            "type": "array"
           },
           "external_id": {
             "type": "string"

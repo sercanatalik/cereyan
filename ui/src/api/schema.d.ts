@@ -1220,6 +1220,17 @@ export interface components {
         };
         /** @enum {string} */
         CatchupPolicy: "skip" | "latest" | "all";
+        /** @description A completed task run's stored result, keyed for replay. */
+        Checkpoint: {
+            dynamic_key: string;
+            input_hash: string;
+            /** Format: int64 */
+            pass: number;
+            result_ref: string;
+            /** Format: int64 */
+            run_id: number;
+            task_key: string;
+        };
         CompareSummary: {
             artifacts_changed: number;
             attributes_changed: number;
@@ -2213,6 +2224,11 @@ export interface components {
             /** Format: int32 */
             port: number;
             resources: Record<string, never>;
+            /**
+             * Format: int64
+             * @description Days task checkpoints are kept after a run ends; 0 keeps them.
+             */
+            retain_checkpoints_days: number;
             /** Format: int64 */
             retain_days: number;
             /**
@@ -2248,6 +2264,8 @@ export interface components {
             resources?: {
                 [key: string]: number;
             } | null;
+            /** Format: int64 */
+            retain_checkpoints_days?: number | null;
             /** Format: int64 */
             retain_days?: number | null;
             /** Format: int64 */
@@ -2338,6 +2356,8 @@ export interface components {
             flow_name?: string;
             /** Format: int64 */
             id: number;
+            /** @description Hash of the bound arguments, compared on replay. */
+            input_hash?: string | null;
             name: string;
             /** @description External ids of task runs this one waited on (futures and wait_for). */
             parents?: components["schemas"]["Id"][];
@@ -2349,6 +2369,8 @@ export interface components {
              */
             pass?: number;
             project?: string;
+            /** @description ResultStore key of the checkpointed result, when the task was checkpointed. */
+            result_ref?: string | null;
             /** Format: int64 */
             run_id: number;
             run_name?: string;
@@ -2445,6 +2467,11 @@ export interface components {
         /** @description Work handed to an engine. */
         WorkItem: {
             cancel_requested: boolean;
+            /**
+             * @description Checkpoints a new attempt may replay: the run's earlier passes and, for a
+             *     crash rerun, the chain of crashed runs before it.
+             */
+            checkpoints?: components["schemas"]["Checkpoint"][];
             external_id: string;
             flow: string;
             /** @description `run`, `hooks`, or `bulk_complete`. */

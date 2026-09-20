@@ -43,7 +43,7 @@ KNOWN_KEYS = {
                "socket", "enable_auth", "auth_cookie", "auth_scope", "login_url", "allowed_hosts",
                "allow_unauthenticated", "mcp_read_only", "metrics_public", "public_url"},
     "defaults": {"catchup", "crash_retries", "retain_days", "retain_runs_days", "retain_failed_runs_days",
-                 "keep_last_runs_per_flow", "backup_every", "backup_keep"},
+                 "keep_last_runs_per_flow", "backup_every", "backup_keep", "retain_checkpoints_days"},
     "email": {"host", "port", "tls", "username", "password", "from"},
     "ui": {"title"},
 }

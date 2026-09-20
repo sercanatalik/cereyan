@@ -139,6 +139,12 @@ pub struct TaskRun {
     /// External ids of task runs this one waited on (futures and wait_for).
     #[serde(default)]
     pub parents: Vec<Id>,
+    /// ResultStore key of the checkpointed result, when the task was checkpointed.
+    #[serde(default)]
+    pub result_ref: Option<String>,
+    /// Hash of the bound arguments, compared on replay.
+    #[serde(default)]
+    pub input_hash: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

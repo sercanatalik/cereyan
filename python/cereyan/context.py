@@ -25,6 +25,13 @@ class RunContext:
     #: after a resume or an in-process retry. Task runs carry it, so the same
     #: call keeps its dynamic key across executions.
     pass_: int = 0
+    #: Checkpoints this attempt may replay, by dynamic key: ``task_key``,
+    #: ``input_hash`` and ``result_ref`` of the latest completed task run of an
+    #: earlier pass or, for a crash rerun, of the crashed runs before it.
+    checkpoints: dict[str, dict] = field(default_factory=dict)
+    #: Whether the next task call may return a checkpoint. The first task that
+    #: has none, or whose inputs differ, turns it off for the rest of the attempt.
+    replaying: bool = False
     #: The thread executing the flow body, captured where the context is made.
     #: `wait_for_input` pauses by raising out of the body, which only works on
     #: this thread; from a task on a worker thread it would surface as a task
@@ -72,6 +79,15 @@ class RunContext:
             self._counters.clear()
             self._input_index = 0
             return self.pass_
+
+    def stop_replaying(self) -> None:
+        with self._lock:
+            self.replaying = False
+
+    def record_checkpoint(self, dynamic_key: str, task_key: str, input_hash: str, result_ref: str) -> None:
+        """Remember a checkpoint this attempt wrote, so an in-process retry can replay it."""
+        with self._lock:
+            self.checkpoints[dynamic_key] = {"task_key": task_key, "input_hash": input_hash, "result_ref": result_ref}
 
 
 @dataclass

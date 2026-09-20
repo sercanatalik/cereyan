@@ -214,6 +214,10 @@ pub struct WorkItem {
     /// reports it with every task run it creates.
     #[serde(default)]
     pub pass: i64,
+    /// Checkpoints a new attempt may replay: the run's earlier passes and, for a
+    /// crash rerun, the chain of crashed runs before it.
+    #[serde(default)]
+    pub checkpoints: Vec<cereyan_store::Checkpoint>,
     /// The last report sequence the store recorded for this run. A fresh engine
     /// process buffers from zero, and the store skips any event at or below the
     /// run's sequence as a redelivery, so an engine picking up a run someone

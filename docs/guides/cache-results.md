@@ -75,6 +75,6 @@ Entries are files under `<home>/storage/`, keyed by a hash of the task key plus 
 
 ## Replay after a pause
 
-Tasks with `cache=INPUTS` are what make [pausing for approval](human-approval.md) cheap: the resumed attempt replays the flow from the top and the cached tasks return at once.
+A resumed attempt replays the flow from the top, and every task the earlier attempt completed returns its [checkpoint](../concepts/runs-and-states.md#checkpoints) without a cache policy. `cache=INPUTS` still matters when the same inputs recur across runs, or when a task's result is too large to checkpoint.
 
 Related: [Targets, caching and results](../concepts/targets-caching-results.md).

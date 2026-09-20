@@ -71,17 +71,19 @@ pub enum StateName {
     Retrying,
     TimedOut,
     Cached,
+    Replayed,
     Skipped,
 }
 
 impl StateName {
-    pub const ALL: [StateName; 7] = [
+    pub const ALL: [StateName; 8] = [
         StateName::Late,
         StateName::AwaitingRetry,
         StateName::AwaitingResource,
         StateName::Retrying,
         StateName::TimedOut,
         StateName::Cached,
+        StateName::Replayed,
         StateName::Skipped,
     ];
 
@@ -92,7 +94,7 @@ impl StateName {
             }
             StateName::Retrying => StateType::Running,
             StateName::TimedOut => StateType::Failed,
-            StateName::Cached | StateName::Skipped => StateType::Completed,
+            StateName::Cached | StateName::Replayed | StateName::Skipped => StateType::Completed,
         }
     }
 
@@ -104,6 +106,7 @@ impl StateName {
             StateName::Retrying => "Retrying",
             StateName::TimedOut => "TimedOut",
             StateName::Cached => "Cached",
+            StateName::Replayed => "Replayed",
             StateName::Skipped => "Skipped",
         }
     }

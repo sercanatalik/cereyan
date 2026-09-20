@@ -48,6 +48,7 @@ pub struct AppState {
     pub keep_last_runs_per_flow: std::sync::atomic::AtomicI64,
     pub backup_every: std::sync::atomic::AtomicI64,
     pub backup_keep: std::sync::atomic::AtomicI64,
+    pub retain_checkpoints_days: std::sync::atomic::AtomicI64,
     pub crash_retries_default: std::sync::atomic::AtomicI64,
     /// UI title in effect: `[ui] title` from cereyan.toml, or `cereyan`.
     pub title: RwLock<String>,
@@ -91,6 +92,7 @@ impl AppState {
             config.keep_last_runs_per_flow,
             config.backup_every,
             config.backup_keep,
+            config.retain_checkpoints_days,
         );
         let crash_retries_default = config.crash_retries_default;
         let sources = config.sources.clone();
@@ -124,6 +126,7 @@ impl AppState {
             keep_last_runs_per_flow: std::sync::atomic::AtomicI64::new(retention.2),
             backup_every: std::sync::atomic::AtomicI64::new(retention.3),
             backup_keep: std::sync::atomic::AtomicI64::new(retention.4),
+            retain_checkpoints_days: std::sync::atomic::AtomicI64::new(retention.5),
             crash_retries_default: std::sync::atomic::AtomicI64::new(crash_retries_default),
             title: RwLock::new(title),
             sources: RwLock::new(sources),

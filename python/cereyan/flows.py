@@ -83,6 +83,8 @@ class Flow:
         on_cancellation: Iterable[Callable] = (),
         mcp_tool: bool = False,
         start_deadline: float | None = None,
+        checkpoint: bool | None = None,
+        checkpoint_max_bytes: int = 50_000_000,
     ) -> None:
         if not callable(fn):
             raise TypeError("@flow must decorate a callable")
@@ -102,6 +104,10 @@ class Flow:
         self.retry_when = retry_when
         self.timeout_seconds = timeout_seconds
         self.crash_retries = crash_retries
+        if checkpoint is not None and not isinstance(checkpoint, bool):
+            raise ValueError("checkpoint must be None, True, or False")
+        self.checkpoint = checkpoint
+        self.checkpoint_max_bytes = int(checkpoint_max_bytes)
         self.priority = int(priority)
         if max_concurrent is not None and int(max_concurrent) < 1:
             raise ValueError("max_concurrent must be at least 1")
@@ -193,6 +199,8 @@ class Flow:
             "has_crash_hooks": bool(self.on_crashed),
             "mcp_tool": self.mcp_tool,
             "start_deadline": self.start_deadline,
+            "checkpoint": self.checkpoint,
+            "checkpoint_max_bytes": self.checkpoint_max_bytes,
         }
 
     # -- parameters -------------------------------------------------------
@@ -297,6 +305,12 @@ def flow(
             run is already waiting, in which case end Skipped).
         start_deadline (float | None): Seconds a run may wait to start before it is
             skipped with reason ``missed_start_deadline``; a schedule's own value wins.
+        checkpoint (bool | None): Whether completed tasks' results are checkpointed and
+            replayed by a later attempt. ``None`` (the default) replays crash reruns and
+            resumes after ``wait_for_input``; ``True`` also replays in-process retries;
+            ``False`` never checkpoints. Replay stops at the first task whose inputs differ.
+        checkpoint_max_bytes (int): Largest encoded result that is checkpointed (default
+            50 MB); a larger or unpicklable result executes again on replay.
         resources (dict[str, float] | None): Named resources and the amount each run holds, for example
             ``{"db": 1}``; a run waits as AwaitingResource until they are free.
         after (str | tuple | list[str] | None): Upstream dependency: a flow name, ``(name, {param: template})`` to map

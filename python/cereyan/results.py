@@ -74,6 +74,18 @@ def cache_key(task_key: str, fn, policy: CachePolicy, values: dict[str, Any]) ->
     return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
 
+def encode(value: Any, serializer: str = "pickle") -> bytes:
+    """The bytes `ResultStore.write` would store for ``value``; raises when it cannot be encoded."""
+    if serializer == "json":
+        return json.dumps(_params.to_json_value(value)).encode()
+    return pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def checkpoint_key(run_external_id: str, task_run_external_id: str) -> str:
+    """The storage key of a task run's checkpoint, in the run's own namespace."""
+    return f"ckpt-{run_external_id}-{task_run_external_id}"
+
+
 class ResultStore:
     """Persisted task results under ``<home>/storage``.
 
@@ -104,6 +116,17 @@ class ResultStore:
                 fh.write(json.dumps(_params.to_json_value(value)).encode())
             else:
                 fh.write(pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL))
+        os.replace(tmp, path)
+        return path
+
+    def write_encoded(self, key: str, payload: bytes, serializer: str = "pickle") -> str:
+        """Persist an already encoded value (see `encode`) under ``key`` atomically."""
+        header = {"python": PYTHON_VERSION, "serializer": serializer, "created_at": time.time(), "expires_at": None}
+        path = self.path(key)
+        tmp = f"{path}.tmp-{os.getpid()}"
+        with open(tmp, "wb") as fh:
+            fh.write(json.dumps(header).encode() + b"\n")
+            fh.write(payload)
         os.replace(tmp, path)
         return path
 

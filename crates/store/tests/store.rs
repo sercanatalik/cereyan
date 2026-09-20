@@ -868,6 +868,8 @@ fn flows_written_before_the_group_column_read_as_their_project() {
              ALTER TABLE schedule DROP COLUMN jitter; \
              ALTER TABLE schedule DROP COLUMN start_deadline; \
              ALTER TABLE run DROP COLUMN attributes; \
+             ALTER TABLE task_run DROP COLUMN result_ref; \
+             ALTER TABLE task_run DROP COLUMN input_hash; \
              PRAGMA user_version = 6;",
         )
         .unwrap();

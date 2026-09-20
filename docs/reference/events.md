@@ -40,6 +40,7 @@ Resource `task_run` (id is the task run's external id, name its dynamic key); re
 | `task_run.cancelled` | `task`, `dynamic_key`, `state`, `message`, `flow`, `project` | The task was cancelled with its run |
 | `task_run.skipped` | `task`, `dynamic_key`, `state`, `message`, `flow`, `project` | The task's `output=` target already existed |
 | `task_run.cached` | `task`, `dynamic_key`, `state`, `message`, `flow`, `project` | The task returned a persisted result |
+| `task_run.replayed` | `task`, `dynamic_key`, `state`, `message`, `flow`, `project` | The task returned the checkpoint an earlier attempt of the run recorded, without executing |
 
 ## Flow events
 

@@ -113,7 +113,7 @@ def execute_work(client: _core.Client, work: dict, module) -> None:
         execute_job(client, work, module)
         return
     run_id = int(work["run_id"])
-    backend = ReporterBackend(client, run_id, int(work.get("report_seq") or 0))
+    backend = ReporterBackend(client, run_id, int(work.get("report_seq") or 0), work.get("checkpoints") or [])
     flow = _find_flow(work["project"], work["flow"])
     try:
         if flow is None:

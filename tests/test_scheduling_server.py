@@ -386,6 +386,12 @@ def test_crash_chain_and_limit(sched):
     for r in runs:
         tasks = c._request("GET", f"/api/runs/{r['id']}/tasks")
         assert all(t["pass"] == 0 for t in tasks), f"run {r['id']} recorded a later pass"
+    # The first run's completed task left a checkpoint; every rerun replays it.
+    first_tasks = c._request("GET", f"/api/runs/{runs[0]['id']}/tasks")
+    assert first_tasks[0]["dynamic_key"] == "step-0" and first_tasks[0]["result_ref"].startswith("ckpt-")
+    for r in runs[1:]:
+        tasks = c._request("GET", f"/api/runs/{r['id']}/tasks")
+        assert [t["state"]["name"] for t in tasks] == ["Replayed"], tasks
 
     once = start(sched, "crash_once")
     done = sched.wait_run(once["id"], timeout=30)

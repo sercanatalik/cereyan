@@ -50,12 +50,12 @@ With `persist_result=True` a task's return value is stored under `<home>/storage
 
 A hit ends the task run `Cached` with the stored result and records `task_run.cached`. `cache_expires=timedelta(...)` makes entries stale after that long, and a result written by a different Python minor version counts as a miss. Caching requires `persist_result=True`; the decorator rejects the combination otherwise.
 
-## Replay after a pause
+## Replay after a pause or a crash
 
-A run resumed after `wait_for_input` starts a new attempt from the top of the flow. Tasks marked `cache=INPUTS` return their stored results on the replay, so work done before the question is not repeated. See [Pause a run for approval](../guides/human-approval.md).
+A run resumed after `wait_for_input`, and a crash rerun, start a new attempt from the top of the flow. Every task completed in the earlier attempt left a [checkpoint](runs-and-states.md#checkpoints), so the replay returns those results as `Replayed` task runs without executing them, up to the first task whose arguments changed. Tasks marked `cache=INPUTS` also return their cached results, across runs as well as within one. See [Pause a run for approval](../guides/human-approval.md).
 
 ## Where results live
 
-`storage/` is inside the runtime home, is never cleaned by retention, and is safe to delete: a missing entry is a cache miss. Results are not the way to pass data between flows; write a target and read it downstream.
+`storage/` is inside the runtime home and is safe to delete: a missing entry is a cache miss or a checkpoint that will not replay. Cache entries are never cleaned by retention; checkpoint files (`ckpt-*`) are removed `retain_checkpoints_days` after their run ends. Results are not the way to pass data between flows; write a target and read it downstream.
 
 Related: [Make reruns idempotent with targets](../guides/idempotent-reruns.md), [Cache task results](../guides/cache-results.md), [Backfills](backfills.md).

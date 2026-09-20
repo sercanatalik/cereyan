@@ -41,6 +41,8 @@ pub struct Settings {
     pub backup_every: i64,
     /// Scheduled copies kept.
     pub backup_keep: i64,
+    /// Days task checkpoints are kept after a run ends; 0 keeps them.
+    pub retain_checkpoints_days: i64,
     /// Microseconds since the epoch of the last backup, scheduled or on demand.
     pub last_backup_at: Option<i64>,
     pub last_backup_path: Option<String>,
@@ -71,6 +73,8 @@ pub struct SettingsPatch {
     pub backup_every: Option<i64>,
     #[serde(default)]
     pub backup_keep: Option<i64>,
+    #[serde(default)]
+    pub retain_checkpoints_days: Option<i64>,
     #[serde(default)]
     pub crash_retries: Option<i64>,
     /// UI title; an empty string removes `[ui] title` and restores `cereyan`.
@@ -179,6 +183,9 @@ pub async fn get_settings(State(state): State<Arc<AppState>>) -> Json<Settings> 
             .backup_every
             .load(std::sync::atomic::Ordering::Relaxed),
         backup_keep: state.backup_keep.load(std::sync::atomic::Ordering::Relaxed),
+        retain_checkpoints_days: state
+            .retain_checkpoints_days
+            .load(std::sync::atomic::Ordering::Relaxed),
         last_backup_at: state
             .store
             .kv_get("backup.last_at")
@@ -304,6 +311,11 @@ pub async fn patch_settings(
         ),
         ("backup_every", body.backup_every, &state.backup_every),
         ("backup_keep", body.backup_keep, &state.backup_keep),
+        (
+            "retain_checkpoints_days",
+            body.retain_checkpoints_days,
+            &state.retain_checkpoints_days,
+        ),
     ] {
         let Some(v) = value else { continue };
         if v < 0 {
@@ -343,6 +355,7 @@ pub async fn patch_settings(
             ("keep_last_runs_per_flow", body.keep_last_runs_per_flow),
             ("backup_every", body.backup_every),
             ("backup_keep", body.backup_keep),
+            ("retain_checkpoints_days", body.retain_checkpoints_days),
             ("crash_retries", body.crash_retries),
         ],
         body.title.as_deref().map(str::trim),

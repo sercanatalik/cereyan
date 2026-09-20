@@ -26,6 +26,7 @@ export function GeneralTab() {
   const [keepLast, setKeepLast] = useState("");
   const [backupEvery, setBackupEvery] = useState("");
   const [backupKeep, setBackupKeep] = useState("");
+  const [retainCheckpoints, setRetainCheckpoints] = useState("");
   const [crash, setCrash] = useState("");
   const [title, setTitle] = useState("");
   const [pauseReason, setPauseReason] = useState("");
@@ -70,6 +71,7 @@ export function GeneralTab() {
     setKeepLast(String(s.keep_last_runs_per_flow));
     setBackupEvery(String(s.backup_every));
     setBackupKeep(String(s.backup_keep));
+    setRetainCheckpoints(String(s.retain_checkpoints_days ?? 7));
     setCrash(String(s.crash_retries_default));
   }, [settings.data]);
   const save = useMutation({
@@ -86,6 +88,7 @@ export function GeneralTab() {
             keep_last_runs_per_flow: Number(keepLast),
             backup_every: Number(backupEvery),
             backup_keep: Number(backupKeep),
+            retain_checkpoints_days: Number(retainCheckpoints),
             crash_retries: Number(crash),
           },
         }),
@@ -237,6 +240,15 @@ export function GeneralTab() {
               className="mt-1 w-32"
               value={backupKeep}
               onChange={(e) => setBackupKeep(e.target.value)}
+            />
+          </label>
+          <label className="block text-xs text-muted-foreground" htmlFor="retain-checkpoints">
+            Keep task checkpoints (days; 0 keeps them)
+            <Input
+              id="retain-checkpoints"
+              className="mt-1 w-32"
+              value={retainCheckpoints}
+              onChange={(e) => setRetainCheckpoints(e.target.value)}
             />
           </label>
           <label className="block text-xs text-muted-foreground" htmlFor="crash">

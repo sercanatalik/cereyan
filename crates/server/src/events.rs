@@ -88,6 +88,7 @@ pub fn task_run_event_name(t: &TaskRun) -> Option<EventName> {
     Some(match (t.state.state_type, t.state.name.as_str()) {
         (_, "Skipped") => EventName::TaskRunSkipped,
         (_, "Cached") => EventName::TaskRunCached,
+        (_, "Replayed") => EventName::TaskRunReplayed,
         (StateType::Running, _) => EventName::TaskRunRunning,
         (StateType::Completed, _) => EventName::TaskRunCompleted,
         (StateType::Failed, _) => EventName::TaskRunFailed,

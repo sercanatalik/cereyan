@@ -39,6 +39,17 @@ def approve(n: int = 2):
     decision = wait_for_input("Approve the load?", schema={"type": "object", "properties": {"approve": {"type": "boolean"}}})
     return apply_decision(value, decision)
 
+@task
+def prepare_plain(n: int):
+    note(f"plain:{n}")
+    return n * 3
+
+@app.flow
+def approve_plain(n: int = 2):
+    value = prepare_plain(n)
+    decision = wait_for_input("Approve?")
+    return apply_decision(value, {"approve": bool(decision)})
+
 @task(resources={"db": 1})
 def hold():
     note("hold")
@@ -283,3 +294,20 @@ def test_offline_terminal_and_non_tty(monkeypatch):
     with pytest.raises(CereyanError) as err:
         ask()
     assert "Name?" in str(err.value)
+
+
+def test_resume_replays_an_uncached_task_from_its_checkpoint(hitl):
+    run = start(hitl, "approve_plain", n=5)
+    paused(hitl, run["id"])
+    assert lines(hitl) == ["plain:5"]
+    hitl.client.resume(run["id"], True)
+    final = hitl.wait_run(run["id"])
+    assert final["state"]["type"] == "Completed"
+    # prepare_plain has no cache policy; its checkpoint carried it across the pause.
+    assert lines(hitl) == ["plain:5", "apply:15:True"]
+    tasks = hitl.client._request("GET", f"/api/runs/{run['id']}/tasks")
+    first = next(t for t in tasks if t["pass"] == 0 and t["dynamic_key"] == "prepare_plain-0")
+    second = next(t for t in tasks if t["pass"] == 1 and t["dynamic_key"] == "prepare_plain-0")
+    assert first["result_ref"] and first["input_hash"] and first["state"]["name"] == "Completed"
+    assert second["state"]["name"] == "Replayed" and second["result_ref"] is None
+    assert hitl.client._request("GET", f"/api/events?run_id={run['id']}&name=task_run.replayed")["items"]

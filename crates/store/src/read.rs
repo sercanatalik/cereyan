@@ -82,6 +82,18 @@ pub struct EventsPage {
     pub next_cursor: Option<i64>,
 }
 
+/// A completed task run's stored result, keyed for replay.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Checkpoint {
+    pub dynamic_key: String,
+    pub task_key: String,
+    pub input_hash: String,
+    pub result_ref: String,
+    pub run_id: i64,
+    pub pass: i64,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::IntoParams))]
 pub struct ListRunsFilter {
@@ -660,6 +672,48 @@ impl Store {
     }
 
     /// Recent runs of a flow, newest first, limited (for the flows page dots).
+    /// The checkpoint map a new attempt of `run_id` replays from: for every
+    /// dynamic key, the latest completed task run with a stored result, over
+    /// the run's own passes and the chain of crashed runs it reruns.
+    pub fn checkpoints(&self, run_id: i64) -> Result<Vec<Checkpoint>> {
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "WITH RECURSIVE chain(id) AS (
+                    SELECT ?1
+                    UNION ALL
+                    SELECT r.parent_run_id FROM run r JOIN chain ON r.id = chain.id
+                    WHERE r.parent_run_id IS NOT NULL AND r.created_by LIKE 'crash:%'
+                 )
+                 SELECT t.dynamic_key, t.task_key, t.input_hash, t.result_ref, t.run_id, t.pass
+                 FROM task_run t
+                 WHERE t.run_id IN (SELECT id FROM chain) AND t.state_type = 'Completed'
+                   AND t.result_ref IS NOT NULL AND t.input_hash IS NOT NULL
+                 ORDER BY t.run_id, t.pass, t.id",
+            )?;
+            let rows = stmt
+                .query_map(rusqlite::params![run_id], |r| {
+                    Ok(Checkpoint {
+                        dynamic_key: r.get(0)?,
+                        task_key: r.get(1)?,
+                        input_hash: r.get(2)?,
+                        result_ref: r.get(3)?,
+                        run_id: r.get(4)?,
+                        pass: r.get(5)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            // Later passes and later runs of the chain win: keep the last per key.
+            let mut latest: std::collections::HashMap<String, Checkpoint> =
+                std::collections::HashMap::new();
+            for cp in rows {
+                latest.insert(cp.dynamic_key.clone(), cp);
+            }
+            let mut out: Vec<Checkpoint> = latest.into_values().collect();
+            out.sort_by(|a, b| a.dynamic_key.cmp(&b.dynamic_key));
+            Ok(out)
+        })
+    }
+
     pub fn recent_run_states(&self, flow_id: i64, limit: usize) -> Result<Vec<RecentRun>> {
         self.with_reader(|conn| {
             let mut stmt = conn.prepare_cached(

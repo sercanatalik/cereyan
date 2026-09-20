@@ -97,6 +97,7 @@ async fn build_work_item(state: &Arc<AppState>, run_id: i64) -> ApiResult<Option
             .map(|r| r.cancel_requested)
             .unwrap_or(false),
         pass: state.store.next_pass(run.id)?,
+        checkpoints: state.store.checkpoints(run.id)?,
         report_seq: run.report_seq,
         payload: serde_json::Value::Null,
     }))
@@ -143,6 +144,7 @@ async fn build_job_item(
         cancel_requested: false,
         // A job is not an execution of a run's body, so it records no task runs.
         pass: 0,
+        checkpoints: Vec::new(),
         report_seq: run.as_ref().map(|r| r.report_seq).unwrap_or(0),
         payload,
     }))

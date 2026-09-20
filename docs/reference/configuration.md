@@ -25,6 +25,7 @@ retain_failed_runs_days = 0   # optional: a longer horizon for Failed and Crashe
 keep_last_runs_per_flow = 10  # never delete a flow's newest runs
 backup_every = 0              # optional: hours between scheduled copies; 0 is off
 backup_keep = 7               # scheduled copies kept
+retain_checkpoints_days = 7   # task checkpoints kept after a run ends; 0 keeps them
 
 [resources]
 db = 4
@@ -77,6 +78,7 @@ title = "Data Platform"   # optional: shown in the top bar and the browser tab
 | `keep_last_runs_per_flow` | integer | `10` | Each flow's newest finished runs that retention never deletes, whatever their age. |
 | `backup_every` | integer | `0` | Hours between scheduled copies of the database, written to `<home>/backups/`; `0` is off. |
 | `backup_keep` | integer | `7` | Scheduled and on-demand copies kept; older `db-*.sqlite` files are deleted. Pre-migration copies are never pruned. |
+| `retain_checkpoints_days` | integer | `7` | Days a task's checkpoint (its stored result, replayed by a crash rerun or a resume) is kept after its run ends; `0` keeps them. |
 
 ### `[resources]`
 

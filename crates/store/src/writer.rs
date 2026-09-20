@@ -363,6 +363,11 @@ pub enum WriteCommand {
         value: String,
         reply: Reply<()>,
     },
+    /// Forget the checkpoint references of terminal runs that ended before `before`.
+    ClearCheckpointsBefore {
+        before: i64,
+        reply: Reply<usize>,
+    },
     KvDelete {
         key: String,
         reply: Reply<bool>,
@@ -811,6 +816,15 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
                 .map(|n| n > 0)
                 .map_err(Into::into),
         ),
+        WriteCommand::ClearCheckpointsBefore { before, reply } => ack(reply, {
+            let cleared = conn.execute(
+                "UPDATE task_run SET result_ref = NULL WHERE result_ref IS NOT NULL AND run_id IN (
+                    SELECT id FROM run WHERE end_time IS NOT NULL AND end_time < ?1
+                    AND state_type IN ('Completed', 'Failed', 'Cancelled', 'Crashed'))",
+                params![before],
+            );
+            cleared.map_err(StoreError::from)
+        }),
         WriteCommand::KvSet { key, value, reply } => ack(
             reply,
             conn.execute(
@@ -1144,7 +1158,7 @@ fn create_task_run(conn: &Connection, t: &CreateTaskRun) -> Result<(i64, Id)> {
     Ok((row_id, id))
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Table {
     Run,
     TaskRun,
@@ -1241,6 +1255,25 @@ fn transition(
             id
         ],
     )?;
+    // A Completed task run reporting `checkpoint` in its details is the engine
+    // saying where the result lives; the columns are what replay reads.
+    if table == Table::TaskRun {
+        if let Some(cp) = accepted
+            .details
+            .get("checkpoint")
+            .and_then(|c| c.as_object())
+        {
+            if let (Some(reference), Some(hash)) = (
+                cp.get("result_ref").and_then(|v| v.as_str()),
+                cp.get("input_hash").and_then(|v| v.as_str()),
+            ) {
+                conn.execute(
+                    "UPDATE task_run SET result_ref = ?1, input_hash = ?2 WHERE id = ?3",
+                    params![reference, hash, id],
+                )?;
+            }
+        }
+    }
     let sql = format!(
         "INSERT INTO {} ({}, type, name, message, details, timestamp) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         table.history(),

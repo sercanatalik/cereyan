@@ -26,7 +26,7 @@ def publish(day: date) -> str:
     return release(rows) if decision["approve"] else "held"
 ```
 
-The first call to `wait_for_input` moves the run to `Paused` with the prompt and schema in its state details, records `run.paused`, and ends the attempt. Mark the tasks before the question with `cache=INPUTS` so the resumed attempt does not redo their work.
+The first call to `wait_for_input` moves the run to `Paused` with the prompt and schema in its state details, records `run.paused`, and ends the attempt. The tasks before the question are checkpointed, so the resumed attempt does not redo their work; `cache=INPUTS` is no longer needed for that, though it still helps when the same inputs recur across runs.
 
 ## Answer it
 
@@ -48,7 +48,7 @@ assert done["state"]["type"] == "Completed"
 
 ## What happens on resume
 
-The answer is stored, `run.resumed` is recorded, and a new attempt of the same run is scheduled. It reruns the flow from the top: tasks with `cache=INPUTS` return their cached results as `Cached` task runs, `wait_for_input` returns the answer instead of pausing, and the rest of the flow executes. Any code between the top of the flow and the question that is not in a cached task runs again, so keep side effects inside tasks.
+The answer is stored, `run.resumed` is recorded, and a new attempt of the same run is scheduled. It reruns the flow from the top: tasks completed before the pause return their checkpoints as `Replayed` task runs (and tasks with `cache=INPUTS` their cached results as `Cached` ones), `wait_for_input` returns the answer instead of pausing, and the rest of the flow executes. Any code between the top of the flow and the question that is not in a cached task runs again, so keep side effects inside tasks.
 
 ## While it waits
 

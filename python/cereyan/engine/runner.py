@@ -20,7 +20,7 @@ from .. import masking
 from .. import logging as run_logging
 from ..config import load_project_config
 from ..exceptions import Abort, CereyanError, RunPaused
-from ..results import ResultStore, cache_key
+from ..results import ResultStore, _hash_inputs, cache_key, checkpoint_key, encode
 from ..runners import Future, ThreadRunner, UpstreamFailed, collect_futures, resolve_futures
 from ..schedules import retry_delay_for
 from ..targets import resolve_output
@@ -295,6 +295,12 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
         runner=runner,
         pass_=run.pass_,
     )
+    if flow.checkpoint is not False:
+        try:
+            ctx.checkpoints = dict(backend.checkpoints())
+        except Exception:  # noqa: BLE001 - a missing map only costs a replay
+            ctx.checkpoints = {}
+        ctx.replaying = bool(ctx.checkpoints)
     token = context.set_run(ctx)
     handler = run_logging.install(backend, run.id)
     logger = run_logging.get_run_logger()
@@ -352,6 +358,9 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
                     # The body runs again in this process: a new pass, so its
                     # task runs do not collide with the ones just recorded.
                     ctx.start_pass()
+                    # Replaying a retry is opt-in: a retry usually exists because
+                    # something upstream changed, so the default runs it all again.
+                    ctx.replaying = flow.checkpoint is True and bool(ctx.checkpoints)
                     try:
                         backend.transition_run("Scheduled", "AwaitingRetry", _error_message(exc), {"attempt": attempt, "delay": delay, "retries": flow.retries, **_failure_details(exc)})
                     except RunRejected:
@@ -522,7 +531,7 @@ def _drive_generator(gen, logger):
         return stop.value
 
 
-def _execute_task_body(run: context.RunContext, task, args: tuple, kwargs: dict, external_id: str, logger) -> Any:
+def _execute_task_body(run: context.RunContext, task, args: tuple, kwargs: dict, external_id: str, dynamic_key: str, logger) -> Any:
     """Run one task attempt including output, cache, timeout and generator handling."""
     values = _bind_task_values(task, args, kwargs)
     target = resolve_output(task.output, values)
@@ -530,6 +539,14 @@ def _execute_task_body(run: context.RunContext, task, args: tuple, kwargs: dict,
         logger.info("task %s skipped: output %r exists", task.name, target)
         run.backend.transition_task_run(external_id, "Completed", "Skipped", f"output exists: {target!r}", None)
         return target, True
+
+    checkpointing = run.flow.checkpoint is not False
+    input_hash = _hash_inputs(values) if checkpointing else None
+    if run.replaying:
+        replayed = _replay_checkpoint(run, task, dynamic_key, input_hash, logger)
+        if replayed is not None:
+            run.backend.transition_task_run(external_id, "Completed", "Replayed", replayed[1], None)
+            return replayed[0], True
 
     store = None
     key = None
@@ -554,7 +571,48 @@ def _execute_task_body(run: context.RunContext, task, args: tuple, kwargs: dict,
         result = _drive_generator(result, logger)
     if store is not None and key is not None:
         store.write(key, result, task.serializer, task.cache_expires)
-    return result, False
+    checkpoint = _write_checkpoint(run, task, dynamic_key, external_id, input_hash, result, logger) if checkpointing else None
+    return result, checkpoint
+
+
+def _replay_checkpoint(run: context.RunContext, task, dynamic_key: str, input_hash: str | None, logger):
+    """The stored result for this call when the checkpoint matches, else None; a
+    miss ends replay for the rest of the attempt."""
+    entry = run.checkpoints.get(dynamic_key)
+    if entry is None or entry.get("task_key") != task.key or entry.get("input_hash") != input_hash:
+        run.stop_replaying()
+        if entry is not None:
+            logger.info("task %s diverged from its checkpoint; replay ends here", dynamic_key)
+        return None
+    hit, value = ResultStore(resolved_home()).read(entry["result_ref"])
+    if not hit:
+        run.stop_replaying()
+        logger.info("task %s checkpoint %s is gone; replay ends here", dynamic_key, entry["result_ref"][:24])
+        return None
+    logger.info("task %s replayed from checkpoint", dynamic_key)
+    return value, f"checkpoint {entry['result_ref'][:24]}"
+
+
+def _write_checkpoint(run: context.RunContext, task, dynamic_key: str, external_id: str, input_hash: str | None,
+                      result, logger) -> dict | None:
+    """Persist the task's result as a checkpoint of the run; None when it cannot be."""
+    try:
+        payload = encode(result, task.serializer)
+    except Exception as exc:  # noqa: BLE001 - not every result can be stored
+        logger.debug("task %s not checkpointed: %s", dynamic_key, exc)
+        return None
+    limit = run.flow.checkpoint_max_bytes
+    if limit and len(payload) > limit:
+        logger.debug("task %s not checkpointed: %d bytes exceeds checkpoint_max_bytes", dynamic_key, len(payload))
+        return None
+    key = checkpoint_key(run.external_id, external_id)
+    try:
+        ResultStore(resolved_home()).write_encoded(key, payload, task.serializer)
+    except OSError as exc:
+        logger.debug("task %s not checkpointed: %s", dynamic_key, exc)
+        return None
+    run.record_checkpoint(dynamic_key, task.key, input_hash or "", key)
+    return {"input_hash": input_hash, "result_ref": key}
 
 
 def _run_task_attempts(run: context.RunContext, task, args: tuple, kwargs: dict, external_id: str, dynamic_key: str) -> Any:
@@ -571,10 +629,11 @@ def _run_task_attempts(run: context.RunContext, task, args: tuple, kwargs: dict,
         while True:
             try:
                 with run_logging.capture_prints(task.log_prints):
-                    result, short_circuit = _execute_task_body(run, task, args, kwargs, external_id, logger)
-                if short_circuit:
+                    result, outcome = _execute_task_body(run, task, args, kwargs, external_id, dynamic_key, logger)
+                if outcome is True:
                     return result
-                state = backend.transition_task_run(external_id, "Completed")
+                details = {"checkpoint": outcome} if outcome else None
+                state = backend.transition_task_run(external_id, "Completed", None, None, details)
                 logger.info("task %s completed", dynamic_key)
                 run_hooks(task.on_completion, task, _run_dict(run), state, logger)
                 return result

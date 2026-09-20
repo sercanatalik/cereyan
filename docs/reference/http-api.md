@@ -1057,6 +1057,19 @@ Type: any.
 
 One of: `skip`, `latest`, `all`.
 
+### `Checkpoint`
+
+A completed task run's stored result, keyed for replay.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `dynamic_key` | string | yes |  |
+| `input_hash` | string | yes |  |
+| `pass` | integer (int64) | yes |  |
+| `result_ref` | string | yes |  |
+| `run_id` | integer (int64) | yes |  |
+| `task_key` | string | yes |  |
+
 ### `CompareSummary`
 
 | Field | Type | Required | Description |
@@ -1790,6 +1803,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `pid` | integer (int32) | yes |  |
 | `port` | integer (int32) | yes |  |
 | `resources` | object | yes |  |
+| `retain_checkpoints_days` | integer (int64) | yes | Days task checkpoints are kept after a run ends; 0 keeps them. |
 | `retain_days` | integer (int64) | yes |  |
 | `retain_failed_runs_days` | integer (int64) | yes | Days to keep Failed and Crashed runs; 0 means `retain_runs_days`. |
 | `retain_runs_days` | integer (int64) | yes | Days to keep terminal runs; 0 keeps them. |
@@ -1811,6 +1825,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `crash_retries` | integer or null (int64) | no |  |
 | `keep_last_runs_per_flow` | integer or null (int64) | no |  |
 | `resources` | object or null | no |  |
+| `retain_checkpoints_days` | integer or null (int64) | no |  |
 | `retain_days` | integer or null (int64) | no |  |
 | `retain_failed_runs_days` | integer or null (int64) | no |  |
 | `retain_runs_days` | integer or null (int64) | no |  |
@@ -1893,10 +1908,12 @@ Row counts for the Data tab and the reset dialog.
 | `flow_id` | integer (int64) | no |  |
 | `flow_name` | string | no |  |
 | `id` | integer (int64) | yes |  |
+| `input_hash` | string or null | no | Hash of the bound arguments, compared on replay. |
 | `name` | string | yes |  |
 | `parents` | [`Id`](#id)[] | no | External ids of task runs this one waited on (futures and wait_for). |
 | `pass` | integer (int64) | no | Which execution of the run's body created this task run: 0 for the first, the next for a resume or an in-process flow retry. Dynamic keys restart with each pass, so the pass tells repeated calls apart. |
 | `project` | string | no |  |
+| `result_ref` | string or null | no | ResultStore key of the checkpointed result, when the task was checkpointed. |
 | `run_id` | integer (int64) | yes |  |
 | `run_name` | string | no |  |
 | `start_time` | null or [`i64`](#i64) | no |  |
@@ -2006,6 +2023,7 @@ Work handed to an engine.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `cancel_requested` | boolean | yes |  |
+| `checkpoints` | [`Checkpoint`](#checkpoint)[] | no | Checkpoints a new attempt may replay: the run's earlier passes and, for a crash rerun, the chain of crashed runs before it. |
 | `external_id` | string | yes |  |
 | `flow` | string | yes |  |
 | `kind` | string | no | `run`, `hooks`, or `bulk_complete`. |

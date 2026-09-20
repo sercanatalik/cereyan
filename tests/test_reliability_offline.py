@@ -149,7 +149,8 @@ def test_json_serializer_and_python_version_tag(store):
 
     f()
     storage = os.path.join(engine.resolved_home(), "storage")
-    files = os.listdir(storage)
+    # The persisted result, beside the checkpoint every completed task leaves.
+    files = [n for n in os.listdir(storage) if not n.startswith("ckpt-")]
     assert len(files) == 1
     with open(os.path.join(storage, files[0]), "rb") as fh:
         header = json.loads(fh.readline())
@@ -623,3 +624,114 @@ def test_schedule_declarations_validate():
     assert o["schedules"][0]["cron"] == "0 9 * * *" and o["max_concurrent"] == 1 and o["after"]["flow"] == "upstream"
     with pytest.raises(ValueError):
         flow(after=["a", "b"])(lambda: None)
+
+
+def test_checkpoints_replay_retries_only_when_asked(store, isolated_home):
+    calls = []
+
+    @task
+    def load(n: int):
+        calls.append(("load", n))
+        return n * 2
+
+    @task
+    def check(v: int):
+        calls.append(("check", v))
+        if len([c for c in calls if c[0] == "check"]) == 1:
+            raise RuntimeError("first check fails")
+        return v
+
+    @flow(retries=1, retry_delay=0)
+    def plain(n: int = 2):
+        return check(load(n))
+
+    assert plain() == 4
+    # The default runs the retry from the top: load executes twice.
+    assert calls == [("load", 2), ("check", 4), ("load", 2), ("check", 4)]
+    run, tasks = last_run(store)
+    assert run["state"]["type"] == "Completed"
+    by_pass = {(t["pass"], t["dynamic_key"]): t for t in tasks}
+    assert by_pass[(0, "load-0")]["result_ref"].startswith("ckpt-") and by_pass[(0, "load-0")]["input_hash"]
+    assert by_pass[(1, "load-0")]["state"]["name"] == "Completed"
+    assert os.path.exists(os.path.join(str(isolated_home), "storage", by_pass[(0, "load-0")]["result_ref"]))
+
+    calls.clear()
+
+    @flow(retries=1, retry_delay=0, checkpoint=True)
+    def replaying(n: int = 3):
+        return check(load(n))
+
+    assert replaying() == 6
+    # With checkpoint=True the retry replays load from its checkpoint.
+    assert calls == [("load", 3), ("check", 6), ("check", 6)]
+    run, tasks = last_run(store)
+    replayed = next(t for t in tasks if t["pass"] == 1 and t["dynamic_key"] == "load-0")
+    assert replayed["state"]["name"] == "Replayed" and replayed["state"]["type"] == "Completed"
+    assert replayed["state"]["message"].startswith("checkpoint ckpt-")
+    events = json.loads(store.query_events(json.dumps({"run_id": run["id"], "name": "task_run.replayed"})))["items"]
+    assert len(events) == 1
+
+
+def test_checkpoints_stop_at_divergence_and_respect_limits(store, isolated_home):
+    calls = []
+    seed = []
+
+    @task
+    def first():
+        calls.append("first")
+        return 1
+
+    @task
+    def second(x: int):
+        calls.append(f"second:{x}")
+        return x
+
+    @task
+    def third():
+        calls.append("third")
+        if len(seed) == 0:
+            seed.append(1)
+            raise RuntimeError("once")
+        return "ok"
+
+    @flow(retries=1, retry_delay=0, checkpoint=True)
+    def diverging():
+        a = first()
+        b = second(a + len(seed))  # the retry sees a different argument
+        third()
+        return b
+
+    diverging()
+    # first replays; second diverges and executes; third executes after it.
+    assert calls == ["first", "second:1", "third", "second:2", "third"]
+
+    @task
+    def big():
+        return "x" * 2_000_000
+
+    @flow(checkpoint_max_bytes=1_000)
+    def too_large():
+        return big()
+
+    too_large()
+    _, tasks = last_run(store)
+    assert tasks[0]["result_ref"] is None and tasks[0]["input_hash"] is None
+
+    @task
+    def plain():
+        return 1
+
+    @flow(checkpoint=False)
+    def off():
+        return plain()
+
+    off()
+    _, tasks = last_run(store)
+    assert tasks[0]["result_ref"] is None
+    assert not [n for n in os.listdir(os.path.join(str(isolated_home), "storage")) if n.startswith("ckpt-")][:0]
+
+    from cereyan import states
+
+    assert states.Replayed == "Replayed" and states.Replayed.state_type == "Completed"
+    with pytest.raises(ValueError):
+        flow(checkpoint="yes")(lambda: None)

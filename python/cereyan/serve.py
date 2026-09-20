@@ -452,7 +452,7 @@ def _file_sources(directory: str, settings: dict, toml_defaults: dict) -> dict[s
         "defaults.retain_days": from_file("defaults", "retain_days", "retain_days" in toml_defaults),
         **{f"defaults.{key}": from_file("defaults", key, key in toml_defaults)
            for key in ("retain_runs_days", "retain_failed_runs_days", "keep_last_runs_per_flow",
-                       "backup_every", "backup_keep")},
+                       "backup_every", "backup_keep", "retain_checkpoints_days")},
         "ui.title": from_file("ui", "title", ui_title(directory) is not None),
     }
     for key in resource_totals(directory):
@@ -629,6 +629,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "keep_last_runs_per_flow": int(toml_defaults.get("keep_last_runs_per_flow", 10)),
         "backup_every": int(toml_defaults.get("backup_every", 0)),
         "backup_keep": int(toml_defaults.get("backup_keep", 7)),
+        "retain_checkpoints_days": int(toml_defaults.get("retain_checkpoints_days", 7)),
         "title": ui_title(directory),
         "catchup_default": str(toml_defaults.get("catchup", "skip")),
         "retention_interval_secs": int(os.environ["CEREYAN_RETENTION_INTERVAL"]) if os.environ.get("CEREYAN_RETENTION_INTERVAL") else None,

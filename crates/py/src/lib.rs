@@ -268,6 +268,15 @@ impl Store {
         run.map(|r| json(&r)).transpose()
     }
 
+    /// The checkpoint map a new attempt of `run_id` replays from, as JSON.
+    fn checkpoints(&self, py: Python<'_>, run_id: i64) -> PyResult<String> {
+        let store = self.inner.clone();
+        let rows = py
+            .detach(move || store.checkpoints(run_id))
+            .map_err(to_py)?;
+        json(&rows)
+    }
+
     fn task_runs(&self, py: Python<'_>, run_id: i64) -> PyResult<String> {
         let store = self.inner.clone();
         let rows = py

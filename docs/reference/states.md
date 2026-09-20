@@ -30,6 +30,7 @@ A rule's `states` clause matches either: `states=["Scheduled"]` covers every sch
 | `Retrying` | Running | A retry attempt is executing |
 | `TimedOut` | Failed | `timeout_seconds` elapsed |
 | `Cached` | Completed | A task run returned a persisted result instead of executing |
+| `Replayed` | Completed | A task run returned the checkpoint an earlier attempt of its run recorded, without executing |
 | `Skipped` | Completed | A task run's target existed, a run hit `on_overlap="skip"`, a backfill value was already done, or catch-up dropped the run |
 
 A resumed run re-enters `Scheduled` with the name `Resuming` before its next attempt.

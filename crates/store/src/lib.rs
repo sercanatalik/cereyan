@@ -15,7 +15,7 @@ pub use error::StoreError;
 pub use home::resolve_home;
 pub use manage::{ProjectCounts, ProjectRow, TableCounts, BACKUP_DIR};
 pub use migrations::latest_version as latest_schema_version;
-pub use read::{ArtifactFilter, ArtifactsPage, EventFilter, EventsPage};
+pub use read::{ArtifactFilter, ArtifactsPage, Checkpoint, EventFilter, EventsPage};
 pub use read::{ListRunsFilter, ListTaskRunsFilter, LogFilter, LogsPage, RunsPage, TaskRunsPage};
 pub use writer::{
     ArmExpectation, CreateBackfill, CreateRun, CreateTaskRun, DeletedCounts, FlowRows, NewEvent,
@@ -298,6 +298,12 @@ impl Store {
 
     pub fn set_backfill_cancelled(&self, backfill_id: i64) -> Result<()> {
         self.write(|reply| WriteCommand::SetBackfillCancelled { backfill_id, reply })
+    }
+
+    /// Forget checkpoint references of terminal runs that ended before `before`
+    /// (microseconds); the files are the caller's to remove. Returns the rows cleared.
+    pub fn clear_checkpoints_before(&self, before: i64) -> Result<usize> {
+        self.write(|reply| WriteCommand::ClearCheckpointsBefore { before, reply })
     }
 
     pub fn kv_delete(&self, key: &str) -> Result<bool> {

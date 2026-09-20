@@ -79,7 +79,7 @@ Recorded from real responses, so a model knows what it gets without a second cal
 | `compare_runs` | `tasks` | `delta`, `key`, `left`, `name`, `right`, `state_changed` |
 | `explain_failure` | `error_logs` | `id`, `level`, `logger`, `message`, `run_id`, `task_run_id`, `timestamp` |
 | `explain_failure` | `events` | `external_id`, `flow_id`, `id`, `name`, `occurred`, `payload`, `related`, `resource`, `run_id`, `seq` |
-| `get_run` | `task_runs` | `crash_count`, `created_at`, `dynamic_key`, `end_time`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `id`, `name`, `parents`, `pass`, `project`, `run_id`, `run_name`, `start_time`, `state`, `task_key`, `total_run_time` |
+| `get_run` | `task_runs` | `crash_count`, `created_at`, `dynamic_key`, `end_time`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `id`, `input_hash`, `name`, `parents`, `pass`, `project`, `result_ref`, `run_id`, `run_name`, `start_time`, `state`, `task_key`, `total_run_time` |
 | `list_artifacts` | `artifacts` | `created_at`, `data`, `external_id`, `flow_name`, `id`, `key`, `kind`, `project`, `run_id`, `run_name`, `task_run_id`, `updated_at` |
 | `list_backfills` | `backfills` | `cancelled`, `concurrency`, `counts`, `created_at`, `end_value`, `external_id`, `extra_parameters`, `flow_id`, `id`, `interval_secs`, `parameter`, `start_value`, `tag`, `total` |
 | `list_events` | `events` | `external_id`, `flow_id`, `id`, `name`, `occurred`, `payload`, `related`, `resource`, `run_id`, `seq` |

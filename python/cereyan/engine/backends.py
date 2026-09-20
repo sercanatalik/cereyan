@@ -30,6 +30,10 @@ class Backend:
                         pass_: int = 0) -> tuple[str, int | None]:
         raise NotImplementedError
 
+    def checkpoints(self) -> dict[str, dict]:
+        """Checkpoints of the run's earlier attempts, by dynamic key; empty when there are none."""
+        return {}
+
     def acquire_resources(self, resources: dict, logger):
         return None
 
@@ -141,7 +145,11 @@ class StoreBackend(Backend):
         return external_id, row_id
 
     _TASK_EVENTS = {("Completed", "Skipped"): "task_run.skipped", ("Completed", "Cached"): "task_run.cached",
+                    ("Completed", "Replayed"): "task_run.replayed",
                     "Running": "task_run.running", "Completed": "task_run.completed", "Failed": "task_run.failed"}
+
+    def checkpoints(self) -> dict[str, dict]:
+        return {c["dynamic_key"]: c for c in json.loads(self.store.checkpoints(self.run_id))}
 
     def transition_task_run(self, external_id, state_type, name=None, message=None, details=None) -> dict:
         row_id = self._rows[external_id]
@@ -190,11 +198,16 @@ class StoreBackend(Backend):
 class ReporterBackend(Backend):
     """Batched reporting to a server through the Rust client."""
 
-    def __init__(self, client: _core.Client, run_id: int, report_seq: int = 0) -> None:
+    def __init__(self, client: _core.Client, run_id: int, report_seq: int = 0,
+                 checkpoints: list[dict] | None = None) -> None:
         self.client = client
         self.run_id = run_id
         self._artifact_ids: dict = {}
+        self._checkpoints = {c["dynamic_key"]: c for c in (checkpoints or [])}
         client.begin_run(run_id, report_seq)
+
+    def checkpoints(self) -> dict[str, dict]:
+        return dict(self._checkpoints)
 
     def transition_run(self, state_type, name=None, message=None, details=None) -> dict:
         accepted, body = self.client.transition_run(self.run_id, state_type, name, message, _details(details))

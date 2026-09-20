@@ -219,7 +219,7 @@ pub fn after_transition(state: &Arc<AppState>, run: &Run, previous: Option<&Stat
 fn name_is_terminal(name: &str) -> bool {
     match StateType::parse(name) {
         Some(t) => t.is_terminal(),
-        None => matches!(name, "Cached" | "Skipped" | "TimedOut"),
+        None => matches!(name, "Cached" | "Replayed" | "Skipped" | "TimedOut"),
     }
 }
 

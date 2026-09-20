@@ -43,7 +43,7 @@ Scheduled ──▶ Pending ──▶ Running ──▶ Completed
 | `Cancelling` | Asked to stop |
 | `Completed`, `Failed`, `Cancelled`, `Crashed` | Terminal |
 
-Named sub-states refine a type: `Late` and `AwaitingRetry` and `AwaitingResource` (Scheduled), `Retrying` (Running), `TimedOut` (Failed), `Cached` and `Skipped` (Completed). The exact transition rules, shared by the offline and served paths, are on the [States and transitions](../reference/states.md) page.
+Named sub-states refine a type: `Late` and `AwaitingRetry` and `AwaitingResource` (Scheduled), `Retrying` (Running), `TimedOut` (Failed), `Cached`, `Replayed` and `Skipped` (Completed). The exact transition rules, shared by the offline and served paths, are on the [States and transitions](../reference/states.md) page.
 
 ## What a run records
 
@@ -61,6 +61,12 @@ A run's body can execute more than once, and each execution is a **pass**. The f
 A **crash rerun** is not a pass: the supervisor creates a new run linked to the crashed one through `parent_run_id`, with `created_by` of `crash:<id>` and `attempt` one higher, so a crash chain is a chain of runs rather than one run executed twice.
 
 `GET /api/runs/{id}/tasks` returns every pass, and `?pass=` narrows it to one. The run page shows the latest pass and offers a switcher when there is more than one.
+
+## Checkpoints
+
+Every task that completes by executing its body leaves a **checkpoint**: its result, stored under the run in `<home>/storage`, and recorded on the task run as `result_ref` with a hash of its arguments. A crash rerun and a resume after `wait_for_input` start with the checkpoints of the run's earlier passes (and, for a crash rerun, of the crashed runs before it) and replay them: a task whose key and arguments match returns the stored result without executing and is recorded `Completed` with the sub-state `Replayed` and a `task_run.replayed` event. The first task that has no checkpoint or whose arguments differ ends the replay, and everything after it executes as usual, so a flow that reads the clock or draws a random number stays correct at the cost of some repeated work. In-process retries replay only when the flow says `checkpoint=True`, and `checkpoint=False` turns checkpoints off for a flow.
+
+Two limits keep this honest. A result that cannot be pickled, or is larger than `checkpoint_max_bytes` (50 MB by default), is not checkpointed and runs again. And replay is at-least-once: a task that completed in the moments before a crash, before its report reached the server, executes again on the rerun. [Targets](targets-caching-results.md) remain the tool for making that repeat harmless. Checkpoint files are removed `retain_checkpoints_days` (default 7) after the run ends.
 
 ## Attributes
 

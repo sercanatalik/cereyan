@@ -117,6 +117,7 @@ def test_run_retention_keeps_newest_failed_and_running(srv, isolated_home):
     srv.wait_run(running["id"])
     env = {(e["table"], e["key"]): e for e in c._request("GET", "/api/settings/environment")["configuration"]}
     assert env["defaults", "retain_runs_days"]["source"] == "settings" and env["defaults", "backup_keep"]["value"] == 7
+    assert env["defaults", "retain_checkpoints_days"]["value"] == 7
     assert flows["quick"]
 
 
@@ -183,8 +184,9 @@ def test_pre_migration_copy_is_written_before_upgrading(isolated_home, run_cli, 
     db_path = os.path.join(str(isolated_home), "db.sqlite")
     db = sqlite3.connect(db_path)
     (version,) = db.execute("PRAGMA user_version").fetchone()
-    # Pretend the store is one schema behind: undo migration 0013's column so it can run again.
-    db.execute("ALTER TABLE run DROP COLUMN attributes")
+    # Pretend the store is one schema behind: undo migration 0014's columns so it can run again.
+    db.execute("ALTER TABLE task_run DROP COLUMN result_ref")
+    db.execute("ALTER TABLE task_run DROP COLUMN input_hash")
     db.execute(f"PRAGMA user_version = {version - 1}")
     db.commit()
     db.close()
@@ -196,3 +198,26 @@ def test_pre_migration_copy_is_written_before_upgrading(isolated_home, run_cli, 
     db = sqlite3.connect(db_path)
     assert db.execute("PRAGMA user_version").fetchone()[0] == version
     db.close()
+
+
+def test_checkpoint_retention_removes_old_files_and_references(srv, isolated_home):
+    c = srv.client
+    done = c.run("quick", n=7)
+    srv.wait_run(done["id"])
+    tasks = c.task_runs(done["id"])
+    ref = tasks[0]["result_ref"]
+    storage = os.path.join(str(isolated_home), "storage")
+    path = os.path.join(storage, ref)
+    assert ref.startswith("ckpt-") and os.path.exists(path)
+    # Young: the pass leaves it alone.
+    time.sleep(3)
+    assert os.path.exists(path) and c.task_runs(done["id"])[0]["result_ref"] == ref
+    # Two days old, with a one-day horizon: the reference and the file go.
+    age(isolated_home, [done["id"]], 2)
+    old = time.time() - 3 * 86_400
+    os.utime(path, (old, old))
+    saved = c._request("PATCH", "/api/settings", body={"retain_checkpoints_days": 1})
+    assert saved["retain_checkpoints_days"] == 1
+    assert wait_for(lambda: not os.path.exists(path), timeout=15)
+    assert wait_for(lambda: c.task_runs(done["id"])[0]["result_ref"] is None, timeout=15)
+    assert c.task_runs(done["id"])[0]["input_hash"]

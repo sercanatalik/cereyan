@@ -225,6 +225,7 @@ fn configuration(state: &AppState) -> Vec<ConfigEntry> {
         ("keep_last_runs_per_flow", &state.keep_last_runs_per_flow),
         ("backup_every", &state.backup_every),
         ("backup_keep", &state.backup_keep),
+        ("retain_checkpoints_days", &state.retain_checkpoints_days),
     ] {
         push("defaults", key, json!(slot.load(Ordering::Relaxed)), false);
     }
