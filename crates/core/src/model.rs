@@ -426,6 +426,8 @@ pub struct RuleAction {
     pub routing_key: Option<String>,
     /// `cancel_runs` selector: non-terminal state types; empty means all of them.
     pub states: Vec<String>,
+    /// `run_flow`: seconds from the firing after which the run starts.
+    pub delay: Option<f64>,
 }
 
 /// Clock of a clock-armed proactive rule: a cron expression in a timezone.

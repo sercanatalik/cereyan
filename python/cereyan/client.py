@@ -322,11 +322,14 @@ class Client:
                tags: list[str] | None = None, module: str | None = None, source_dir: str | None = None,
                description: str | None = None, parameter_schema: dict | None = None,
                options: dict | None = None, flow_tags: list[str] | None = None,
-               flow_group: str | None = None, created_by: str = "client") -> dict:
+               flow_group: str | None = None, created_by: str = "client",
+               scheduled_time: int | None = None, delay: float | None = None) -> dict:
         """``POST /api/runs``: create a run with explicit project and flow, registering the flow when needed.
 
         This is the low-level call used by the offline handoff and by `run`; pass
         ``module`` and ``source_dir`` so the server can import a flow it has not seen.
+        ``scheduled_time`` (microseconds) or ``delay`` (seconds) creates the run for
+        later: it waits as Scheduled and starts at that time.
         """
         body: dict[str, Any] = {
             "project": project,
@@ -336,6 +339,10 @@ class Client:
             "tags": tags or [],
             "created_by": created_by,
         }
+        if scheduled_time is not None:
+            body["scheduled_time"] = int(scheduled_time)
+        if delay is not None:
+            body["delay"] = float(delay)
         if module is not None:
             body["module"] = module
         if source_dir is not None:
@@ -353,8 +360,13 @@ class Client:
         return self._request("POST", "/api/runs", body=body)
 
     def run(self, flow: str, project: str | None = None, *, name: str | None = None,
-            tags: list[str] | None = None, **parameters: Any) -> dict:
-        """Create a run of a registered flow by name. Returns the run."""
+            tags: list[str] | None = None, at: "datetime | str | None" = None, delay: float | None = None,
+            **parameters: Any) -> dict:
+        """Create a run of a registered flow by name. Returns the run.
+
+        ``at`` (a datetime, naive meaning UTC, or an ISO 8601 string) or ``delay``
+        (seconds) creates the run for later instead of now.
+        """
         from .params import to_json_value
 
         if project is None:
@@ -365,7 +377,8 @@ class Client:
                 projects = sorted(m["project"] for m in matches)
                 raise CereyanError(f"flow {flow!r} exists in several projects {projects}; pass project=")
             project = matches[0]["project"]
-        return self.submit(project, flow, to_json_value(parameters), name=name, tags=tags)
+        return self.submit(project, flow, to_json_value(parameters), name=name, tags=tags,
+                           scheduled_time=_micros(at), delay=delay)
 
 
 class AuthRequired(CereyanError):

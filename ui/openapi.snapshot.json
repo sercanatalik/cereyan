@@ -591,6 +591,14 @@
               "null"
             ]
           },
+          "delay": {
+            "description": "Start this many seconds from now instead of now; not with `scheduled_time`.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "description": {
             "type": [
               "string",
@@ -637,6 +645,14 @@
           "project": {
             "type": "string"
           },
+          "scheduled_time": {
+            "description": "Start at this time (microseconds since the epoch) instead of now.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "source_dir": {
             "type": [
               "string",
@@ -658,6 +674,14 @@
       },
       "CreateRunForFlowBody": {
         "properties": {
+          "delay": {
+            "description": "Start this many seconds from now instead of now; not with `scheduled_time`.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "name": {
             "type": [
               "string",
@@ -666,6 +690,14 @@
           },
           "parameters": {
             "type": "object"
+          },
+          "scheduled_time": {
+            "description": "Start at this time (microseconds since the epoch) instead of now.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "tags": {
             "items": {
@@ -1997,6 +2029,15 @@
             "description": "Telegram chat id.",
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "delay": {
+            "default": null,
+            "description": "`run_flow`: seconds from the firing after which the run starts.",
+            "format": "double",
+            "type": [
+              "number",
               "null"
             ]
           },

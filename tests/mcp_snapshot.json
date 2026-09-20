@@ -880,10 +880,19 @@
         "destructiveHint": false,
         "readOnlyHint": false
       },
-      "description": "Start a run of a flow now. Creates the run immediately and returns without waiting; follow it with get_run. Parameters are validated against the flow's schema.",
+      "description": "Start a run of a flow now, or at a later time with `at` or `delay_seconds`. Creates the run immediately and returns without waiting; follow it with get_run. Parameters are validated against the flow's schema.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "at": {
+            "description": "Start at this time, ISO 8601, instead of now",
+            "type": "string"
+          },
+          "delay_seconds": {
+            "description": "Start this many seconds from now; not with at",
+            "minimum": 0,
+            "type": "number"
+          },
           "flow": {
             "description": "Flow name, or project/flow when the name exists in several projects",
             "type": "string"

@@ -535,6 +535,11 @@ pub fn validate_spec(spec: &RuleSpec) -> Result<(), String> {
                 if a.flow.as_deref().unwrap_or("").is_empty() {
                     return Err(format!("action {i}: run_flow needs a flow"));
                 }
+                if a.delay.is_some_and(|d| d < 0.0 || !d.is_finite()) {
+                    return Err(format!(
+                        "action {i}: run_flow delay must be zero or more seconds"
+                    ));
+                }
             }
             "cancel_run" | "pause_schedule" | "resume_schedule" => {}
             "cancel_runs" => {

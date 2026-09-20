@@ -431,6 +431,33 @@ def run_flow(flow, args: tuple, kwargs: dict) -> Any:
         _set_outcome(json.loads(run_json) if run_json else None, json.loads(store.task_runs(run_id)))
 
 
+def submit_later(flow, values: dict[str, Any], scheduled_time: int) -> dict:
+    """Create a run of ``flow`` on the running server for ``scheduled_time``
+    (microseconds), registering the flow when the server does not know it.
+    Raises `CereyanError` when no server is live."""
+    from .. import client as client_module
+
+    server = client_module.find_server(_home_override)
+    if server is None:
+        raise CereyanError("a run for later needs a running server (start `cereyan serve`)")
+    load_project_config(flow.source_dir)
+    return server.submit(
+        flow.project,
+        flow.name,
+        json.loads(flow.parameters_json(values)),
+        name=flow.render_run_name(values),
+        module=flow.module,
+        source_dir=flow.source_dir,
+        description=flow.description,
+        parameter_schema=flow.schema,
+        options=flow.options,
+        flow_tags=flow.tags,
+        flow_group=flow.declared_group,
+        created_by="script",
+        scheduled_time=scheduled_time,
+    )
+
+
 def _handoff(flow, values: dict[str, Any], locked: Exception) -> Any:
     """Submit the run to the server that holds the lock and follow it."""
     from .. import client as client_module

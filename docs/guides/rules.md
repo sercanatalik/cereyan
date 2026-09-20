@@ -43,7 +43,7 @@ Any name outside those prefixes is a custom event of yours and is accepted as ty
 
 | Kind | Fields | Effect |
 |---|---|---|
-| `run_flow` | `flow`, `parameters` (templated) | Create a run; it records `created_by = rule:<id>` |
+| `run_flow` | `flow`, `parameters` (templated), `delay` (seconds) | Create a run, now or `delay` seconds later; it records `created_by = rule:<id>` |
 | `cancel_run` | | Cancel the run the event is about |
 | `cancel_runs` | `flow` (templated, defaults to the event's flow), `parameters` (templated), `states` | Cancel every active run of the flow whose parameters equal the rendered values, in the given state types (all non-terminal ones by default), never the event's own run; the outcome lists the ids |
 | `set_state` | `state_type`, `message` | Force the run into a state |

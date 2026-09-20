@@ -18,7 +18,7 @@ cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,check,backup,backfi
 ## `cereyan run`
 
 ```text
-cereyan run [-h] [--param NAME=VALUE] [--quiet] target
+cereyan run [-h] [--param NAME=VALUE] [--quiet] [--at AT] [--in DURATION] [--json] target
 ```
 
 | Argument | Meaning |
@@ -29,6 +29,9 @@ cereyan run [-h] [--param NAME=VALUE] [--quiet] target
 |---|---|
 | `--param`, `-p` `NAME=VALUE` | set a flow parameter; repeatable, values are coerced from the flow's type hints. |
 | `--quiet`, `-q` | do not echo run logs. |
+| `--at` `AT` | instead of running now, create the run on the running server for this ISO 8601 time (naive means UTC). |
+| `--in` `DURATION` | instead of running now, create the run on the running server this long from now: seconds, or 10m, 2h, 1d. |
+| `--json` | with --at or --in, print the created run as JSON. |
 
 ## `cereyan serve`
 

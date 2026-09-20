@@ -33,6 +33,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("target", help="module_or_file:flow, e.g. pipeline.py:etl")
     run.add_argument("--param", "-p", action="append", default=[], metavar="NAME=VALUE", help="set a flow parameter; repeatable, values are coerced from the flow's type hints")
     run.add_argument("--quiet", "-q", action="store_true", help="do not echo run logs")
+    run.add_argument("--at", help="instead of running now, create the run on the running server for this ISO 8601 time (naive means UTC)")
+    run.add_argument("--in", dest="delay", metavar="DURATION", help="instead of running now, create the run on the running server this long from now: seconds, or 10m, 2h, 1d")
+    run.add_argument("--json", action="store_true", help="with --at or --in, print the created run as JSON")
     run.set_defaults(func=cmd_run)
 
     serve = sub.add_parser("serve", help="serve flows with the API, UI, and engines")
@@ -253,6 +256,48 @@ def cmd_backup(args) -> int:
     return EXIT_OK
 
 
+def parse_duration(text: str) -> float:
+    """Seconds from ``90``, ``90s``, ``10m``, ``2h``, or ``1d``."""
+    t = text.strip().lower()
+    units = {"s": 1, "m": 60, "h": 3600, "d": 86_400}
+    scale = units.get(t[-1:], None)
+    number = t[:-1] if scale else t
+    try:
+        seconds = float(number) * (scale or 1)
+    except ValueError:
+        raise ValueError(f"cannot read {text!r} as a duration (use seconds, or 10m, 2h, 1d)") from None
+    if seconds < 0:
+        raise ValueError("a duration cannot be negative")
+    return seconds
+
+
+def _run_later(args, flow, values) -> int:
+    from .client import _micros
+    from .engine.runner import submit_later
+
+    try:
+        if args.at and args.delay:
+            raise ValueError("give --at or --in, not both")
+        if args.at:
+            starts = _micros(args.at)
+        else:
+            starts = int(datetime.now(timezone.utc).timestamp() * 1_000_000) + int(parse_duration(args.delay) * 1_000_000)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_SCHEDULING
+    try:
+        run = submit_later(flow, values, starts)
+    except (CereyanError, AuthRequired) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_SCHEDULING
+    if args.json:
+        print(json.dumps(run, indent=2))
+    else:
+        when = datetime.fromtimestamp((run.get("scheduled_time") or starts) / 1_000_000, tz=timezone.utc).isoformat()
+        print(f"run {run['id']} ({run['name']}) scheduled for {when}")
+    return EXIT_OK
+
+
 def cmd_run(args) -> int:
     if not args.quiet:
         logging.basicConfig(
@@ -270,6 +315,9 @@ def cmd_run(args) -> int:
     except Exception as exc:  # import-time failure inside user code
         print(f"error: loading {args.target!r} failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_SCHEDULING
+
+    if args.at or args.delay:
+        return _run_later(args, flow, values)
 
     from .engine.runner import RunFailed
 

@@ -151,6 +151,7 @@ pub async fn create_run_for_flow(
         .get_flow(id)?
         .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
     let created_by = run_creator(user.as_ref().map(|Extension(u)| u), "api");
+    let starts = super::runs::not_before(body.scheduled_time, body.delay)?;
     let run = create_run_inner(
         &state,
         &flow,
@@ -158,6 +159,7 @@ pub async fn create_run_for_flow(
         body.name,
         body.tags,
         &created_by,
+        starts,
     )
     .await?;
     Ok((StatusCode::CREATED, Json(run)))

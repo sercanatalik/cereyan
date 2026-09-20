@@ -479,8 +479,10 @@ pub fn tool_list() -> Vec<Value> {
             json!({"flow": flow_prop, "project": {"type": "string", "description": "Only schedules of this project"}}), &[]),
         read_tool("explain_failure", "Everything needed to diagnose a run in one call: the run, its failed or crashed task runs, the last warning-or-above log lines, and the run's events. Read-only.",
             json!({"run_id": {"type": "integer"}}), &["run_id"]),
-        write_tool("run_flow", "Start a run of a flow now. Creates the run immediately and returns without waiting; follow it with get_run. Parameters are validated against the flow's schema.",
-            json!({"flow": flow_prop, "parameters": {"type": "object", "description": "Flow parameters as JSON"}, "name": {"type": "string", "description": "Optional run name"}, "tags": {"type": "array", "items": {"type": "string"}}}), &["flow"]),
+        write_tool("run_flow", "Start a run of a flow now, or at a later time with `at` or `delay_seconds`. Creates the run immediately and returns without waiting; follow it with get_run. Parameters are validated against the flow's schema.",
+            json!({"flow": flow_prop, "parameters": {"type": "object", "description": "Flow parameters as JSON"}, "name": {"type": "string", "description": "Optional run name"}, "tags": {"type": "array", "items": {"type": "string"}},
+                   "at": {"type": "string", "description": "Start at this time, ISO 8601, instead of now"},
+                   "delay_seconds": {"type": "number", "minimum": 0, "description": "Start this many seconds from now; not with at"}}), &["flow"]),
         destructive_tool("cancel_run", "Cancel a run. A queued run is cancelled at once; a running run is asked to stop and killed after the grace period.",
             json!({"run_id": {"type": "integer"}}), &["run_id"]),
         write_tool("resume_run", "Answer a Paused run's wait_for_input question and schedule its next attempt. The answer can be any JSON.",
@@ -653,6 +655,7 @@ async fn call_tool(
             None,
             Vec::new(),
             &crate::auth::run_creator(user, &format!("mcp:{client}")),
+            None,
         )
         .await?;
         return Ok(json!({"run": run, "note": "created; follow it with get_run"}));
@@ -774,6 +777,7 @@ async fn call_tool(
                 None,
                 original.tags.clone(),
                 &crate::auth::run_creator(user, &format!("mcp:{client}")),
+                None,
             )
             .await?;
             Ok(
@@ -956,6 +960,12 @@ async fn call_tool(
                         .collect()
                 })
                 .unwrap_or_default();
+            let at = match arg_str(args, "at").filter(|a| !a.trim().is_empty()) {
+                Some(text) => Some(parse_instant(&text)?),
+                None => None,
+            };
+            let delay = args.get("delay_seconds").and_then(|d| d.as_f64());
+            let starts = runs::not_before(at, delay)?;
             let run = runs::create_run_inner(
                 state,
                 &flow,
@@ -963,9 +973,15 @@ async fn call_tool(
                 arg_str(args, "name"),
                 tags,
                 &crate::auth::run_creator(user, &format!("mcp:{client}")),
+                starts,
             )
             .await?;
-            Ok(json!({"run": run, "note": "created; follow it with get_run"}))
+            let note = if starts.is_some_and(|t| t > now_micros()) {
+                "created for later; it starts at scheduled_time"
+            } else {
+                "created; follow it with get_run"
+            };
+            Ok(json!({"run": run, "note": note}))
         }
         "cancel_run" => {
             let id = arg_i64(args, "run_id")?;

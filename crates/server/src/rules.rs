@@ -652,6 +652,10 @@ pub fn execute(
                 params.insert(k.clone(), v.clone());
             }
             crate::validate::validate_parameters(&flow.parameter_schema, &params)?;
+            let due = action
+                .delay
+                .filter(|d| *d > 0.0)
+                .map(|d| now_micros() + (d * 1_000_000.0) as i64);
             let (run_id, _) = state
                 .store
                 .create_run_full(CreateRun {
@@ -662,6 +666,7 @@ pub fn execute(
                     created_by: format!("rule:{}", rule.id),
                     initial_state: Some(State::new(StateType::Scheduled)),
                     priority: options.priority,
+                    scheduled_time: due,
                     ..Default::default()
                 })
                 .map_err(|e| e.to_string())?;
@@ -674,8 +679,11 @@ pub fn execute(
                 .index
                 .insert_run(&run, EngineKey::from_flow(&flow), false);
             state.run_created(&run);
-            crate::dispatch::enqueue_run(state, &run, &flow, None);
-            Ok(json!({"run_id": run.id, "name": run.name}))
+            match due {
+                Some(at) => crate::scheduler::arm_run(state, run.id, at, false),
+                None => crate::dispatch::enqueue_run(state, &run, &flow, None),
+            }
+            Ok(json!({"run_id": run.id, "name": run.name, "scheduled_time": due}))
         }
         "cancel_run" => {
             let run = ctx.run.as_ref().ok_or("event has no run to cancel")?;

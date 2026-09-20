@@ -23,6 +23,7 @@ import { SkipDialog, upcomingQuery } from "@/components/skip-dialog";
 import { StateBadge, StateDot } from "@/components/state-badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { UnderlineTabs } from "@/components/ui/underline-tabs";
@@ -89,6 +90,7 @@ function FlowDetail() {
   const navigate = useNavigate();
   const [tab, setTab] = useState("runs");
   const [runOpen, setRunOpen] = useState(false);
+  const [startAt, setStartAt] = useState("");
   const [backfillOpen, setBackfillOpen] = useState(false);
   const [skipOpen, setSkipOpen] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
@@ -116,7 +118,11 @@ function FlowDetail() {
       unwrap(
         await api.POST("/api/flows/{id}/runs", {
           params: { path: { id } },
-          body: { parameters: parameters as any, tags: [] },
+          body: {
+            parameters: parameters as any,
+            tags: [],
+            scheduled_time: startAt ? new Date(startAt).getTime() * 1000 : null,
+          },
         }),
       ),
     onSuccess: (created) => {
@@ -603,6 +609,17 @@ function FlowDetail() {
       ) : null}
       {tab === "parameters" ? <JsonView value={f.parameter_schema} /> : null}
       <Modal open={runOpen} onClose={() => setRunOpen(false)} title={`Run ${f.project}/${f.name}`}>
+        <label className="mb-3 block text-xs text-muted-foreground" htmlFor="run-start-at">
+          Start at (optional; leave empty to start now)
+          <Input
+            id="run-start-at"
+            type="datetime-local"
+            className="mt-1 w-64"
+            value={startAt}
+            onChange={(e) => setStartAt(e.target.value)}
+            data-testid="run-start-at"
+          />
+        </label>
         <RunForm
           schema={f.parameter_schema}
           onSubmit={(values) => run.mutate(values)}

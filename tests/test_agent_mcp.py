@@ -495,3 +495,16 @@ def test_read_only_mode(isolated_home, tmp_path):
         assert (entries["server", "mcp_read_only"]["value"], entries["server", "mcp_read_only"]["source"]) == (True, "env")
     finally:
         srv.stop()
+
+
+def test_run_flow_for_later(agent):
+    srv = agent
+    out = call(srv, "run_flow", flow="etl", parameters={"day": "2026-09-05"}, delay_seconds=120)
+    run = out["data"]["run"]
+    assert run["state"]["type"] == "Scheduled" and run["scheduled_time"] and "later" in out["data"]["note"]
+    srv.client.cancel(run["id"])
+    out = call(srv, "run_flow", flow="etl", parameters={"day": "2026-09-05"}, at="2099-01-01T00:00:00Z")
+    assert out["data"]["run"]["scheduled_time"] > 4_000_000_000 * 1_000_000
+    srv.client.cancel(out["data"]["run"]["id"])
+    bad = call(srv, "run_flow", flow="etl", at="2099-01-01T00:00:00Z", delay_seconds=5)
+    assert "not both" in json.dumps(bad)

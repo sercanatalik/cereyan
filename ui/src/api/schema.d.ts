@@ -1279,6 +1279,11 @@ export interface components {
          */
         CreateRunBody: {
             created_by?: string | null;
+            /**
+             * Format: double
+             * @description Start this many seconds from now instead of now; not with `scheduled_time`.
+             */
+            delay?: number | null;
             description?: string | null;
             flow: string;
             /** @description The flow's declared group; absent leaves the registered group as it is. */
@@ -1290,12 +1295,27 @@ export interface components {
             parameter_schema?: Record<string, never>;
             parameters?: Record<string, never>;
             project: string;
+            /**
+             * Format: int64
+             * @description Start at this time (microseconds since the epoch) instead of now.
+             */
+            scheduled_time?: number | null;
             source_dir?: string | null;
             tags?: string[];
         };
         CreateRunForFlowBody: {
+            /**
+             * Format: double
+             * @description Start this many seconds from now instead of now; not with `scheduled_time`.
+             */
+            delay?: number | null;
             name?: string | null;
             parameters?: Record<string, never>;
+            /**
+             * Format: int64
+             * @description Start at this time (microseconds since the epoch) instead of now.
+             */
+            scheduled_time?: number | null;
             tags?: string[];
         };
         DatabaseInfo: {
@@ -1756,6 +1776,12 @@ export interface components {
              * @default null
              */
             chat_id: string | null;
+            /**
+             * Format: double
+             * @description `run_flow`: seconds from the firing after which the run starts.
+             * @default null
+             */
+            delay: number | null;
             /** @default null */
             flow: string | null;
             headers?: Record<string, never>;

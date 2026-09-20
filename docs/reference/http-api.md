@@ -1109,6 +1109,7 @@ know it yet (offline handoff from another project).
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `created_by` | string or null | no |  |
+| `delay` | number or null (double) | no | Start this many seconds from now instead of now; not with `scheduled_time`. |
 | `description` | string or null | no |  |
 | `flow` | string | yes |  |
 | `flow_group` | string or null | no | The flow's declared group; absent leaves the registered group as it is. |
@@ -1119,6 +1120,7 @@ know it yet (offline handoff from another project).
 | `parameter_schema` | object | no |  |
 | `parameters` | object | no |  |
 | `project` | string | yes |  |
+| `scheduled_time` | integer or null (int64) | no | Start at this time (microseconds since the epoch) instead of now. |
 | `source_dir` | string or null | no |  |
 | `tags` | array of string | no |  |
 
@@ -1126,8 +1128,10 @@ know it yet (offline handoff from another project).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `delay` | number or null (double) | no | Start this many seconds from now instead of now; not with `scheduled_time`. |
 | `name` | string or null | no |  |
 | `parameters` | object | no |  |
+| `scheduled_time` | integer or null (int64) | no | Start at this time (microseconds since the epoch) instead of now. |
 | `tags` | array of string | no |  |
 
 ### `DatabaseInfo`
@@ -1520,6 +1524,7 @@ One rule action. `kind` selects the variant; other fields are optional.
 | `body` | string or null | no |  |
 | `callable` | string or null | no | Name of the Python callable for `call` actions (code rules). |
 | `chat_id` | string or null | no | Telegram chat id. |
+| `delay` | number or null (double) | no | `run_flow`: seconds from the firing after which the run starts. |
 | `flow` | string or null | no |  |
 | `headers` | object | no |  |
 | `kind` | string | no | `run_flow`, `cancel_run`, `cancel_runs`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`. |

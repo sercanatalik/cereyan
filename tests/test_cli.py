@@ -139,3 +139,10 @@ def test_store_table_in_toml_is_rejected(run_cli, write_module):
     result = run_cli("run", f"{path}:etl", "-p", "day=2026-09-06")
     assert result.returncode == 3
     assert "CEREYAN_HOME" in result.stderr
+
+
+def test_run_later_needs_a_server(run_cli, write_module):
+    path = write_module("proj", PIPELINE)
+    result = run_cli("run", f"{path}:etl", "--param", "day=2026-09-06", "--in", "5m")
+    assert result.returncode == 3 and "running server" in result.stderr
+    assert "run completed" not in result.stdout

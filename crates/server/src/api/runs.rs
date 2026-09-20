@@ -22,6 +22,27 @@ pub struct CreateRunForFlowBody {
     pub name: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Start at this time (microseconds since the epoch) instead of now.
+    #[serde(default)]
+    pub scheduled_time: Option<i64>,
+    /// Start this many seconds from now instead of now; not with `scheduled_time`.
+    #[serde(default)]
+    pub delay: Option<f64>,
+}
+
+/// When a new run should start: `scheduled_time` or now plus `delay`, or none for now.
+pub fn not_before(scheduled_time: Option<i64>, delay: Option<f64>) -> ApiResult<Option<i64>> {
+    match (scheduled_time, delay) {
+        (Some(_), Some(_)) => Err(ApiError::Unprocessable(
+            "give scheduled_time or delay, not both".into(),
+        )),
+        (Some(t), None) => Ok(Some(t)),
+        (None, Some(d)) if d < 0.0 || !d.is_finite() => Err(ApiError::Unprocessable(
+            "delay must be zero or more seconds".into(),
+        )),
+        (None, Some(d)) => Ok(Some(cereyan_core::now_micros() + (d * 1_000_000.0) as i64)),
+        (None, None) => Ok(None),
+    }
 }
 
 /// Create a run by flow key, registering the flow when the server does not
@@ -56,6 +77,12 @@ pub struct CreateRunBody {
     pub tags: Vec<String>,
     #[serde(default)]
     pub created_by: Option<String>,
+    /// Start at this time (microseconds since the epoch) instead of now.
+    #[serde(default)]
+    pub scheduled_time: Option<i64>,
+    /// Start this many seconds from now instead of now; not with `scheduled_time`.
+    #[serde(default)]
+    pub delay: Option<f64>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -119,6 +146,7 @@ pub async fn create_run_inner(
     name: Option<String>,
     tags: Vec<String>,
     created_by: &str,
+    not_before: Option<i64>,
 ) -> ApiResult<Run> {
     if state
         .shutting_down
@@ -167,6 +195,7 @@ pub async fn create_run_inner(
             created_by,
             initial_state: Some(RunState::new(StateType::Scheduled)),
             priority,
+            scheduled_time: not_before,
             ..Default::default()
         })
     })
@@ -179,7 +208,15 @@ pub async fn create_run_inner(
     let key = EngineKey::from_flow(flow);
     state.index.insert_run(&run, key, false);
     state.run_created(&run);
-    crate::dispatch::enqueue_run(state, &run, flow, None);
+    // A run for later is armed on the timer like a schedule fire: it waits in
+    // Scheduled, pre-warms an engine, can be marked Late, and is held by the
+    // global pause. A time already past starts now.
+    match not_before {
+        Some(due) if due > cereyan_core::now_micros() => {
+            crate::scheduler::arm_run(state, run.id, due, false)
+        }
+        _ => crate::dispatch::enqueue_run(state, &run, flow, None),
+    }
     Ok(run)
 }
 
@@ -284,6 +321,7 @@ pub async fn create_run(
             )))
         }
     };
+    let starts = not_before(body.scheduled_time, body.delay)?;
     let run = create_run_inner(
         &state,
         &flow,
@@ -291,6 +329,7 @@ pub async fn create_run(
         body.name,
         body.tags,
         &created_by,
+        starts,
     )
     .await?;
     Ok((StatusCode::CREATED, Json(run)))
@@ -519,6 +558,7 @@ pub async fn bulk_runs(
                         None,
                         run.tags.clone(),
                         &creator,
+                        None,
                     )
                     .await?;
                 }

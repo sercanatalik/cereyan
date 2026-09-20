@@ -604,3 +604,26 @@ def test_maintenance_window_suppresses_rule_actions(obs, webhook):
     wait_until(lambda: len(Hook.calls) == 1)
     firings = c._request("GET", f"/api/rules/{rule['id']}/firings")
     assert {f["run_id"] for f in firings} == {quiet["id"], loud["id"]}
+
+
+def test_run_flow_action_with_delay(obs):
+    c = obs.client
+    rule = c._request("POST", "/api/rules", body={
+        "name": "later", "when": {"events": ["run.completed"], "flows": ["etl"]},
+        "do": [{"kind": "run_flow", "flow": "cleanup", "parameters": {"day": "{{ run.parameters.day }}"}, "delay": 2}],
+        "once": "never",
+    })
+    with pytest.raises(Exception):
+        c._request("POST", "/api/rules", body={
+            "name": "bad delay", "when": {"events": ["run.completed"]},
+            "do": [{"kind": "run_flow", "flow": "cleanup", "delay": -3}],
+        })
+    before = int(time.time() * 1_000_000)
+    run = start(obs, "etl", day="2026-09-09")
+    obs.wait_run(run["id"])
+    created = wait_until(lambda: [r for r in c.runs(flow="cleanup", limit=20)["items"] if r["created_by"] == f"rule:{rule['id']}"])
+    later = created[0]
+    assert later["scheduled_time"] and later["scheduled_time"] >= before + 1_500_000
+    assert c.get_run(later["id"])["state"]["type"] == "Scheduled"
+    done = obs.wait_run(later["id"], timeout=30)
+    assert done["state"]["type"] == "Completed" and done["parameters"]["day"] == "2026-09-09"

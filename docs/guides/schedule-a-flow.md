@@ -55,6 +55,18 @@ To stop one run without pausing the schedule, open the flow's menu on the Flows 
 
 The flow page's **Upcoming** tab does the same row by row, for several rows at once, or for all of them with the header checkbox, and lists fires past the materialised runs as projected so you can skip one days ahead. A skipped fire shows who skipped it and when; at its time it ends `Skipped` without starting, and so do the runs of the flows declared `after=` it. **Undo** takes a skip back until its time. See [Skipping fires](../concepts/schedules.md#skipping-fires).
 
+## Run once, later
+
+A one-off run for later needs no schedule. `POST /api/flows/{id}/runs` and `POST /api/runs` take `delay` (seconds) or `scheduled_time` (microseconds), and the run waits as `Scheduled` with that time, listed under the flow's upcoming runs, until it is due; it pre-warms an engine, can be marked `Late`, and is held by a [global pause](../concepts/schedules.md#pausing-everything) like a schedule fire. A time already past starts the run at once.
+
+```{.python fixture:served}
+run = served.client.run("etl", day="2026-03-02", delay=600)
+assert run["state"]["type"] == "Scheduled" and run["scheduled_time"]
+served.client.cancel(run["id"])
+```
+
+`Client.run(..., at=datetime | ISO string)` names the time instead. From a shell, `cereyan run pipeline.py:etl --in 10m` or `--at 2026-09-21T03:00:00Z` hands the run to the running server rather than executing it, and prints the run's id and start time (`--json` for the run). A rule's `run_flow` action takes `delay`, an agent's `run_flow` tool takes `at` or `delay_seconds`, and the flow page's run dialog has a "Start at" field.
+
 ## Inspect through the API
 
 ```{.python fixture:served}

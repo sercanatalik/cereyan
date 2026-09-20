@@ -646,7 +646,8 @@ pub fn jitter_offset(schedule_id: i64, fire: i64, jitter_secs: i64) -> i64 {
     (hash % (jitter_secs as u64 * 1_000_000)) as i64
 }
 
-fn arm_run(state: &Arc<AppState>, run_id: i64, due: i64, skipped: bool) {
+/// Arm a Scheduled run's due, late-check and pre-warm timers.
+pub fn arm_run(state: &Arc<AppState>, run_id: i64, due: i64, skipped: bool) {
     state.timer.remove_run_events(run_id);
     state.timer.push(due, TimerEvent::Due(run_id));
     // A skipped fire's run never starts: nothing to mark late, no engine to warm.

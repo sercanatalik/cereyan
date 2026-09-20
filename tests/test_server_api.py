@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -42,6 +43,50 @@ def test_create_run_executes_in_engine(server):
     slow = next(l for l in logs if l["message"] == "slow")
     assert slow["task_run_id"] == tasks[0]["id"]
     assert slow["level"] == 30
+
+
+def test_delayed_run_waits_then_starts(server, run_cli, write_module):
+    c = server.client
+    before = int(time.time() * 1_000_000)
+    run = c._request("POST", f"/api/flows/{flow_id(server)}/runs", body={"parameters": {"day": "2026-09-06"}, "delay": 2.5})
+    assert run["state"]["type"] == "Scheduled" and run["schedule_id"] is None
+    assert before + 2_000_000 <= run["scheduled_time"] <= before + 4_000_000
+    time.sleep(1)
+    assert c.get_run(run["id"])["state"]["type"] == "Scheduled"
+    done = server.wait_run(run["id"], timeout=30)
+    assert done["state"]["type"] == "Completed" and done["start_time"] >= run["scheduled_time"] - 200_000
+    # A time already past starts at once, keeping the time for the record.
+    past = c.run("etl", day="2026-09-07", at=datetime.now(timezone.utc) - timedelta(minutes=5))
+    assert past["scheduled_time"] < before
+    assert server.wait_run(past["id"])["state"]["type"] == "Completed"
+    for body in ({"delay": -1}, {"delay": 1, "scheduled_time": before}):
+        with pytest.raises(ApiError) as err:
+            c._request("POST", f"/api/flows/{flow_id(server)}/runs", body={"parameters": {"day": "2026-09-06"}, **body})
+        assert err.value.status == 422
+    # The CLI hands a run for later to the server instead of executing it.
+    path = write_module("later", PIPELINE_LATER)
+    result = run_cli("run", f"{path}:quick", "--in", "10m", "--json")
+    assert result.returncode == 0, result.stderr
+    created = json.loads(result.stdout)
+    assert created["state"]["type"] == "Scheduled" and created["scheduled_time"] > before + 500 * 1_000_000
+    assert created["created_by"] == "script"
+    c.cancel(created["id"])
+    result = run_cli("run", f"{path}:quick", "--at", "2099-01-01T00:00:00Z")
+    assert result.returncode == 0 and "scheduled for 2099-01-01" in result.stdout, result.stderr
+    c.cancel(int(result.stdout.split()[1]))
+    result = run_cli("run", f"{path}:quick", "--in", "soon")
+    assert result.returncode == 3 and "duration" in result.stderr
+
+
+PIPELINE_LATER = """
+from cereyan import App
+
+app = App("later")
+
+@app.flow
+def quick():
+    return 1
+"""
 
 
 def test_invalid_parameters_are_422(server):
