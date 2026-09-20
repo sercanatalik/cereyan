@@ -488,7 +488,11 @@ pub fn tool_list() -> Vec<Value> {
         write_tool("resume_run", "Answer a Paused run's wait_for_input question and schedule its next attempt. The answer can be any JSON.",
             json!({"run_id": {"type": "integer"}, "input": {"description": "The answer, any JSON"}}), &["run_id", "input"]),
         write_tool("backfill", "Create one run per value of a date or datetime parameter between start and end. Defaults to a dry run that only reports how many runs would be created; pass dry_run false to create them. Can create thousands of runs.",
-            json!({"flow": flow_prop, "parameter": {"type": "string"}, "start": {"type": "string", "description": "YYYY-MM-DD or RFC 3339"}, "end": {"type": "string"}, "interval": {"type": "string", "description": "Seconds or a duration such as 1d or 12h (default 1d)"}, "concurrency": {"type": "integer", "default": 1}, "extra_parameters": {"type": "object"}, "reverse": {"type": "boolean"}, "dry_run": {"type": "boolean", "default": true}}), &["flow", "parameter", "start", "end"]),
+            json!({"flow": flow_prop, "parameter": {"type": "string"}, "start": {"type": "string", "description": "YYYY-MM-DD or RFC 3339; not needed with values"}, "end": {"type": "string"}, "interval": {"type": "string", "description": "Seconds or a duration such as 1d or 12h (default 1d)"}, "concurrency": {"type": "integer", "default": 1}, "extra_parameters": {"type": "object"}, "reverse": {"type": "boolean"},
+                   "values": {"type": "array", "items": {"type": "string"}, "description": "Explicit parameter values instead of a range"},
+                   "missing_only": {"type": "boolean", "description": "Leave out values whose latest run completed"},
+                   "force": {"type": "boolean", "description": "Restate: the runs ignore targets, caches, checkpoints and bulk_complete"},
+                   "dry_run": {"type": "boolean", "default": true}}), &["flow", "parameter"]),
         write_tool("create_schedule", "Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Returns the schedule and the next few times it will fire.",
             json!({
                 "flow": flow_prop, "project": {"type": "string"},
@@ -1028,6 +1032,20 @@ async fn call_tool(
                 start: arg_str(args, "start").unwrap_or_default(),
                 end: arg_str(args, "end").unwrap_or_default(),
                 interval: args.get("interval").cloned(),
+                values: args
+                    .get("values")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                missing_only: args
+                    .get("missing_only")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                force: args.get("force").and_then(|v| v.as_bool()).unwrap_or(false),
                 concurrency: args.get("concurrency").and_then(|v| v.as_i64()),
                 extra_parameters: args
                     .get("extra_parameters")
@@ -1044,7 +1062,8 @@ async fn call_tool(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
             if dry_run {
-                let (values, interval) = backfills::plan_backfill(&flow, &body)?;
+                let (values, interval) =
+                    backfills::plan_backfill_with(Some(&state.store), &flow, &body)?;
                 return Ok(json!({
                     "dry_run": true, "flow": flow.name, "parameter": body.parameter,
                     "runs": values.len(), "first": values.first(), "last": values.last(),

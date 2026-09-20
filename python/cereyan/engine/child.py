@@ -133,7 +133,7 @@ def execute_work(client: _core.Client, work: dict, module) -> None:
         watcher = _CancelWatcher(client, run_id)
         watcher.start()
         try:
-            execute_run(flow, values, backend, RunInfo(run_id, work["external_id"], work["run_name"], int(work.get("pass") or 0)))
+            execute_run(flow, values, backend, RunInfo(run_id, work["external_id"], work["run_name"], int(work.get("pass") or 0), bool(work.get("force"))))
         except KeyboardInterrupt:
             if not watcher.fired:
                 raise

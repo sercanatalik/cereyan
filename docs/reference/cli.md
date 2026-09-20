@@ -93,7 +93,7 @@ cereyan backup [-h] [--json]
 ## `cereyan backfill`
 
 ```text
-cereyan backfill [-h] --param PARAM --start START --end END [--interval INTERVAL] [--concurrency CONCURRENCY] [--reverse] [--extra NAME=VALUE] [--json] flow
+cereyan backfill [-h] --param PARAM [--start START] [--end END] [--values VALUE[,VALUE...]] [--missing-only] [--force] [--interval INTERVAL] [--concurrency CONCURRENCY] [--reverse] [--extra NAME=VALUE] [--json] flow
 ```
 
 | Argument | Meaning |
@@ -103,8 +103,11 @@ cereyan backfill [-h] --param PARAM --start START --end END [--interval INTERVAL
 | Option | Meaning |
 |---|---|
 | `--param` `PARAM` | date or datetime parameter name. |
-| `--start` `START` | first value of the parameter, a date or datetime. |
+| `--start` `START` | first value of the parameter, a date or datetime (not with --values). |
 | `--end` `END` | last value of the parameter, inclusive. |
+| `--values` `VALUE[,VALUE...]` | explicit values instead of a range; repeatable or comma separated. |
+| `--missing-only` | leave out values whose latest run completed. |
+| `--force` | restate: the runs ignore targets, caches, checkpoints and bulk_complete. |
 | `--interval` `INTERVAL` | seconds or a duration like 1d, 12h (default 1d). Default `1d`. |
 | `--concurrency` `CONCURRENCY` | how many of the backfill's runs may execute at once. Default `1`. |
 | `--reverse` | create the newest value first. |

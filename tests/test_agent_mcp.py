@@ -527,3 +527,13 @@ def test_get_run_lists_task_state(agent):
     srv.client._request("POST", f"/api/runs/{run['id']}/state", body={"scope": "step-0", "key": "job_id", "value": "j-9"})
     out = call(srv, "get_run", run_id=run["id"])["data"]
     assert out["task_state"] == [{"scope": "step-0", "key": "job_id", "value": "j-9", "updated_at": out["task_state"][0]["updated_at"]}]
+
+
+def test_backfill_values_and_missing_only_dry_run(agent):
+    srv = agent
+    plan = call(srv, "backfill", flow="etl", parameter="day", values=["2026-05-01", "2026-05-02", "2026-05-01"])["data"]
+    assert plan["dry_run"] is True and plan["runs"] == 2
+    done = call(srv, "run_flow", flow="etl", parameters={"day": "2026-05-01"})["data"]["run"]
+    srv.wait_run(done["id"])
+    plan = call(srv, "backfill", flow="etl", parameter="day", values=["2026-05-01", "2026-05-02"], missing_only=True)["data"]
+    assert plan["runs"] == 1

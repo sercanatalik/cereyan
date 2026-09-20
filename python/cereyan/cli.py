@@ -74,8 +74,11 @@ def build_parser() -> argparse.ArgumentParser:
     backfill = sub.add_parser("backfill", help="create runs over a date range (requires a running server)")
     backfill.add_argument("flow", help="flow name, optionally project/flow")
     backfill.add_argument("--param", required=True, help="date or datetime parameter name")
-    backfill.add_argument("--start", required=True, help="first value of the parameter, a date or datetime")
-    backfill.add_argument("--end", required=True, help="last value of the parameter, inclusive")
+    backfill.add_argument("--start", help="first value of the parameter, a date or datetime (not with --values)")
+    backfill.add_argument("--end", help="last value of the parameter, inclusive")
+    backfill.add_argument("--values", action="append", default=[], metavar="VALUE[,VALUE...]", help="explicit values instead of a range; repeatable or comma separated")
+    backfill.add_argument("--missing-only", action="store_true", help="leave out values whose latest run completed")
+    backfill.add_argument("--force", action="store_true", help="restate: the runs ignore targets, caches, checkpoints and bulk_complete")
     backfill.add_argument("--interval", default="1d", help="seconds or a duration like 1d, 12h (default 1d)")
     backfill.add_argument("--concurrency", type=int, default=1, help="how many of the backfill's runs may execute at once")
     backfill.add_argument("--reverse", action="store_true", help="create the newest value first")
@@ -486,9 +489,14 @@ def cmd_backfill(args) -> int:
         return EXIT_SCHEDULING
     extra = parse_params(args.extra)
     try:
+        values = [v.strip() for chunk in args.values for v in chunk.split(",") if v.strip()]
+        if not values and not (args.start and args.end):
+            print("error: give --start and --end, or --values", file=sys.stderr)
+            return EXIT_SCHEDULING
         status = server.backfill(
             matches[0]["id"], args.param, args.start, args.end, interval=args.interval,
             concurrency=args.concurrency, extra_parameters=extra, reverse=args.reverse,
+            values=values, missing_only=args.missing_only, force=args.force,
         )
     except CereyanError as exc:
         print(f"error: {exc}", file=sys.stderr)

@@ -63,6 +63,8 @@ class RunInfo:
     #: Which execution of the run's body this is; the server counts it from the
     #: task runs already recorded, so a resumed run continues where it left off.
     pass_: int = 0
+    #: A forced (restated) run ignores targets, cache hits and checkpoints.
+    force: bool = False
 
 
 def configure(home: str | None) -> None:
@@ -294,8 +296,9 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
         backend=backend,
         runner=runner,
         pass_=run.pass_,
+        force=run.force,
     )
-    if flow.checkpoint is not False:
+    if flow.checkpoint is not False and not ctx.force:
         try:
             ctx.checkpoints = dict(backend.checkpoints())
         except Exception:  # noqa: BLE001 - a missing map only costs a replay
@@ -611,7 +614,7 @@ def _execute_task_body(run: context.RunContext, task, args: tuple, kwargs: dict,
     """Run one task attempt including output, cache, timeout and generator handling."""
     values = _bind_task_values(task, args, kwargs)
     target = resolve_output(task.output, values)
-    if target is not None and target.exists():
+    if target is not None and target.exists() and not run.force:
         logger.info("task %s skipped: output %r exists", task.name, target)
         run.backend.transition_task_run(external_id, "Completed", "Skipped", f"output exists: {target!r}", None)
         return target, True
@@ -630,7 +633,7 @@ def _execute_task_body(run: context.RunContext, task, args: tuple, kwargs: dict,
         store = ResultStore(resolved_home())
         if task.cache:
             key = cache_key(task.key, task.fn, task.cache, values)
-            hit, cached = store.read(key)
+            hit, cached = store.read(key) if not run.force else (False, None)
             if hit:
                 logger.info("task %s cached", task.name)
                 run.backend.transition_task_run(external_id, "Completed", "Cached", f"cache key {key[:12]}", None)

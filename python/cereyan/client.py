@@ -237,19 +237,25 @@ class Client:
         """``GET /api/counts``: run counts by state for the dashboard, optionally per ``project``."""
         return self._request("GET", "/api/counts", params={"project": project})
 
-    def backfill(self, flow_id: int, parameter: str, start: str, end: str, *, interval: Any = "1d",
-                 concurrency: int = 1, extra_parameters: dict | None = None, reverse: bool = False) -> dict:
-        """``POST /api/flows/{id}/backfill``: create one run per step of ``parameter`` from ``start`` to ``end``.
+    def backfill(self, flow_id: int, parameter: str, start: str | None = None, end: str | None = None, *,
+                 interval: Any = "1d", concurrency: int = 1, extra_parameters: dict | None = None,
+                 reverse: bool = False, values: list[str] | None = None, missing_only: bool = False,
+                 force: bool = False) -> dict:
+        """``POST /api/flows/{id}/backfill``: create one run per step of ``parameter`` from ``start`` to ``end``,
+        or one per entry of ``values``.
 
         Args:
             flow_id: The flow's id.
             parameter: The date or datetime parameter to step.
-            start: First value, ISO formatted.
+            start: First value, ISO formatted; not needed with ``values``.
             end: Last value, inclusive.
             interval: Step as seconds or a duration such as ``"1d"`` or ``"12h"``.
             concurrency: How many of the backfill's runs may execute at once.
             extra_parameters: Fixed values for other parameters.
             reverse: Create the newest value first.
+            values: Explicit parameter values instead of a range, in this order.
+            missing_only: Leave out values whose latest run completed.
+            force: A restatement: the runs ignore targets, caches, checkpoints and ``bulk_complete``.
 
         Returns:
             The backfill status with its id, tag, and counts.
@@ -257,8 +263,9 @@ class Client:
         return self._request(
             "POST",
             f"/api/flows/{flow_id}/backfill",
-            body={"parameter": parameter, "start": start, "end": end, "interval": interval, "concurrency": concurrency,
-                  "extra_parameters": extra_parameters or {}, "reverse": reverse},
+            body={"parameter": parameter, "start": start or "", "end": end or "", "interval": interval,
+                  "concurrency": concurrency, "extra_parameters": extra_parameters or {}, "reverse": reverse,
+                  "values": list(values or []), "missing_only": missing_only, "force": force},
         )
 
     def backfill_status(self, backfill_id: int) -> dict:

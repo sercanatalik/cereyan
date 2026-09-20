@@ -289,13 +289,22 @@
             ]
           },
           "end": {
+            "description": "Last value of a range, inclusive; not needed with `values`.",
             "type": "string"
           },
           "extra_parameters": {
             "type": "object"
           },
+          "force": {
+            "description": "A restatement: runs ignore targets, caches, checkpoints and `bulk_complete`.",
+            "type": "boolean"
+          },
           "interval": {
             "description": "Seconds, or a shorthand like `1d`, `12h`, `30m`. Default one day."
+          },
+          "missing_only": {
+            "description": "Leave out values whose latest run Completed.",
+            "type": "boolean"
           },
           "parameter": {
             "type": "string"
@@ -304,13 +313,19 @@
             "type": "boolean"
           },
           "start": {
+            "description": "First value of a range; not needed with `values`.",
             "type": "string"
+          },
+          "values": {
+            "description": "Explicit parameter values instead of a range, in this order.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
-          "parameter",
-          "start",
-          "end"
+          "parameter"
         ],
         "type": "object"
       },
@@ -4232,6 +4247,15 @@
       "UniqueSpec": {
         "description": "`@flow(unique=Unique(...))`: which runs count as the same run.",
         "properties": {
+          "debounce": {
+            "default": null,
+            "description": "`debounce`: seconds a run waits after the last submission before it starts.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "key": {
             "default": null,
             "description": "Template over the parameters, `{day}`; every parameter when absent.",
@@ -4240,9 +4264,18 @@
               "null"
             ]
           },
+          "max_wait": {
+            "default": null,
+            "description": "`debounce`: the longest a run may be pushed back from its creation.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "on_conflict": {
             "default": "skip",
-            "description": "`skip` (answer with the existing run) or `replace` (cancel it and create anew).",
+            "description": "`skip` (answer with the existing run), `replace` (cancel it and create\nanew), `debounce` (move the waiting run along and take the new\nparameters), or `throttle` (keep the first run per sliding `period`).",
             "type": "string"
           },
           "period": {
@@ -4487,6 +4520,10 @@
           },
           "flow": {
             "type": "string"
+          },
+          "force": {
+            "description": "A forced (restated) run: the engine ignores targets, caches and checkpoints.",
+            "type": "boolean"
           },
           "kind": {
             "description": "`run`, `hooks`, or `bulk_complete`.",

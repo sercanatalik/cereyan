@@ -276,6 +276,9 @@ pub struct WorkItem {
     /// crash rerun, the chain of crashed runs before it.
     #[serde(default)]
     pub checkpoints: Vec<cereyan_store::Checkpoint>,
+    /// A forced (restated) run: the engine ignores targets, caches and checkpoints.
+    #[serde(default)]
+    pub force: bool,
     /// The last report sequence the store recorded for this run. A fresh engine
     /// process buffers from zero, and the store skips any event at or below the
     /// run's sequence as a redelivery, so an engine picking up a run someone

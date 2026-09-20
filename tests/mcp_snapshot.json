@@ -993,9 +993,17 @@
             "description": "Flow name, or project/flow when the name exists in several projects",
             "type": "string"
           },
+          "force": {
+            "description": "Restate: the runs ignore targets, caches, checkpoints and bulk_complete",
+            "type": "boolean"
+          },
           "interval": {
             "description": "Seconds or a duration such as 1d or 12h (default 1d)",
             "type": "string"
+          },
+          "missing_only": {
+            "description": "Leave out values whose latest run completed",
+            "type": "boolean"
           },
           "parameter": {
             "type": "string"
@@ -1004,15 +1012,20 @@
             "type": "boolean"
           },
           "start": {
-            "description": "YYYY-MM-DD or RFC 3339",
+            "description": "YYYY-MM-DD or RFC 3339; not needed with values",
             "type": "string"
+          },
+          "values": {
+            "description": "Explicit parameter values instead of a range",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "required": [
           "flow",
-          "parameter",
-          "start",
-          "end"
+          "parameter"
         ],
         "type": "object"
       },

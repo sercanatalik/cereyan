@@ -492,8 +492,59 @@ def test_backfill_bulk_complete_prefilter(sched):
     assert sorted(r["parameters"]["day"] for r in skipped) == ["2026-01-01", "2026-01-02", "2026-01-03"]
 
 
+def test_backfill_values_missing_only_and_force(sched):
+    c = sched.client
+    daily = fid(sched, "daily")
+    # Explicit values: validated, canonical, deduplicated, in the given order.
+    status = c.backfill(daily, "day", values=["2026-03-15", "2026-03-01", "2026-03-15"])
+    assert status["total"] == 2 and status["start_value"] == "2026-03-15" and status["end_value"] == "2026-03-01"
+    runs = c.runs(backfill_id=status["id"], limit=10)["items"]
+    assert sorted(r["parameters"]["day"] for r in runs) == ["2026-03-01", "2026-03-15"]
+    for r in runs:
+        sched.wait_run(r["id"])
+    with pytest.raises(ApiError) as err:
+        c.backfill(daily, "day", values=["not a date"])
+    assert err.value.status == 422
+    with pytest.raises(ApiError) as err:
+        c._request("POST", f"/api/flows/{daily}/backfill", body={"parameter": "day"})
+    assert err.value.status == 422
+    # missing_only: March 1 and 15 completed above, so a range over March 1 to 3 makes two runs.
+    partial = c.backfill(daily, "day", "2026-03-01", "2026-03-03", missing_only=True)
+    assert partial["total"] == 2
+    days = sorted(r["parameters"]["day"] for r in c.runs(backfill_id=partial["id"], limit=10)["items"])
+    assert days == ["2026-03-02", "2026-03-03"]
+    for r in c.runs(backfill_id=partial["id"], limit=10)["items"]:
+        sched.wait_run(r["id"])
+    with pytest.raises(ApiError) as err:
+        c.backfill(daily, "day", values=["2026-03-01"], missing_only=True)
+    assert err.value.status == 422
+    # force: bulk_complete says the first three days are done, yet every run executes.
+    forced = c.backfill(fid(sched, "bulk"), "day", "2026-01-01", "2026-01-06", concurrency=3, force=True)
+    assert forced["total"] == 6
+
+    def settled():
+        counts = c.backfill_status(forced["id"])["counts"]
+        return counts if sum(counts.values()) == 6 and not any(k in ("Scheduled", "Pending", "Running") for k in counts) else None
+
+    counts = wait_until(settled, timeout=40)
+    assert counts == {"Completed": 6}
+    tagged = c.runs(backfill_id=forced["id"], limit=10)["items"]
+    assert all("cereyan:force" in r["tags"] for r in tagged)
+
+
 def test_backfill_cli(sched):
     env = dict(os.environ, CEREYAN_HOME=sched.home)
+    listed = subprocess.run(
+        [sys.executable, "-m", "cereyan", "backfill", "sched/daily", "--param", "day", "--values", "2026-04-01,2026-04-03", "--values", "2026-04-05", "--json"],
+        env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert listed.returncode == 0, listed.stderr
+    assert json.loads(listed.stdout)["total"] == 3
+    neither = subprocess.run(
+        [sys.executable, "-m", "cereyan", "backfill", "sched/daily", "--param", "day"],
+        env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert neither.returncode == 3 and "--values" in neither.stderr
     result = subprocess.run(
         [sys.executable, "-m", "cereyan", "backfill", "sched/daily", "--param", "day", "--start", "2026-03-01", "--end", "2026-03-03", "--json"],
         env=env, capture_output=True, text=True, timeout=60,

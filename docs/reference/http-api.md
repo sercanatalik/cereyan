@@ -1062,12 +1062,15 @@ A stored artifact attached to a run and optionally a task run.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `concurrency` | integer or null (int64) | no |  |
-| `end` | string | yes |  |
+| `end` | string | no | Last value of a range, inclusive; not needed with `values`. |
 | `extra_parameters` | object | no |  |
+| `force` | boolean | no | A restatement: runs ignore targets, caches, checkpoints and `bulk_complete`. |
 | `interval` | any | no | Seconds, or a shorthand like `1d`, `12h`, `30m`. Default one day. |
+| `missing_only` | boolean | no | Leave out values whose latest run Completed. |
 | `parameter` | string | yes |  |
 | `reverse` | boolean | no |  |
-| `start` | string | yes |  |
+| `start` | string | no | First value of a range; not needed with `values`. |
+| `values` | array of string | no | Explicit parameter values instead of a range, in this order. |
 
 ### `BackfillStatus`
 
@@ -2067,8 +2070,10 @@ One entry of a run's task state store.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `debounce` | number or null (double) | no | `debounce`: seconds a run waits after the last submission before it starts. |
 | `key` | string or null | no | Template over the parameters, `{day}`; every parameter when absent. |
-| `on_conflict` | string | no | `skip` (answer with the existing run) or `replace` (cancel it and create anew). |
+| `max_wait` | number or null (double) | no | `debounce`: the longest a run may be pushed back from its creation. |
+| `on_conflict` | string | no | `skip` (answer with the existing run), `replace` (cancel it and create anew), `debounce` (move the waiting run along and take the new parameters), or `throttle` (keep the first run per sliding `period`). |
 | `period` | number or null (double) | no | Fixed windows of this many seconds bucket the key. |
 | `states` | array of string | no | State types in which an existing run counts; empty means every non-terminal one. |
 
@@ -2144,6 +2149,7 @@ Work handed to an engine.
 | `checkpoints` | [`Checkpoint`](#checkpoint)[] | no | Checkpoints a new attempt may replay: the run's earlier passes and, for a crash rerun, the chain of crashed runs before it. |
 | `external_id` | string | yes |  |
 | `flow` | string | yes |  |
+| `force` | boolean | no | A forced (restated) run: the engine ignores targets, caches and checkpoints. |
 | `kind` | string | no | `run`, `hooks`, or `bulk_complete`. |
 | `options` | object | yes |  |
 | `parameters` | object | yes |  |

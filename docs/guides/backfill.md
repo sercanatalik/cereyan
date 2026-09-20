@@ -54,6 +54,14 @@ def daily_etl(day: date) -> None:
     build(day)
 ```
 
+## Pick the values, skip the done ones, or restate
+
+A range is not the only way to say which runs to make. `values` lists the parameter values themselves, validated as dates or datetimes and created in the order given, for the scattered days a range would overshoot: `cereyan backfill proj/daily --param day --values 2026-03-01,2026-03-15`, `Client.backfill(flow_id, "day", values=[...])`, the same field on `POST /api/flows/{id}/backfill` and the MCP `backfill` tool, or the Values box in the dialog.
+
+`missing_only` leaves out every value whose latest run completed, before `bulk_complete` prunes the rest, so a backfill after an outage only makes the runs that are missing; a request that leaves nothing to do is refused with 422.
+
+`force` is a restatement: the runs carry the tag `cereyan:force`, ignore output targets, cache hits and checkpoints, and the `bulk_complete` prefilter is not consulted, so a flow whose logic changed recomputes days whose outputs already exist. The runs overwrite what they produce; nothing is deleted first.
+
 ## Watch and cancel
 
 Runs carry the tag `backfill:<id>`; filter the Runs page by it. `GET /api/backfills/{id}` reports counts by state, and `POST /api/backfills/{id}/cancel` (or the Cancel button) cancels the remaining Scheduled and Running runs. The backfill's own resource keeps it to `concurrency` runs at once, and every run still respects the flow's `max_concurrent` and resources.

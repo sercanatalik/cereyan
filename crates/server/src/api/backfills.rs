@@ -19,8 +19,21 @@ use crate::supervisor::EngineKey;
 #[derive(Deserialize, utoipa::ToSchema, Default, Clone)]
 pub struct BackfillBody {
     pub parameter: String,
+    /// First value of a range; not needed with `values`.
+    #[serde(default)]
     pub start: String,
+    /// Last value of a range, inclusive; not needed with `values`.
+    #[serde(default)]
     pub end: String,
+    /// Explicit parameter values instead of a range, in this order.
+    #[serde(default)]
+    pub values: Vec<String>,
+    /// Leave out values whose latest run Completed.
+    #[serde(default)]
+    pub missing_only: bool,
+    /// A restatement: runs ignore targets, caches, checkpoints and `bulk_complete`.
+    #[serde(default)]
+    pub force: bool,
     /// Seconds, or a shorthand like `1d`, `12h`, `30m`. Default one day.
     #[serde(default)]
     pub interval: Option<Value>,
@@ -40,6 +53,10 @@ pub struct BackfillStatus {
     pub counts: std::collections::HashMap<String, i64>,
     pub tag: String,
 }
+
+/// The tag a forced backfill puts on its runs: targets, caches, checkpoints
+/// and `bulk_complete` are ignored for them.
+pub const FORCE_TAG: &str = "cereyan:force";
 
 pub fn parse_interval(v: Option<&Value>) -> Result<f64, String> {
     let Some(v) = v else { return Ok(86_400.0) };
@@ -165,17 +182,64 @@ pub async fn create_backfill(
 
 /// The parameter values a backfill request would create, without creating anything.
 pub fn plan_backfill(flow: &Flow, body: &BackfillBody) -> ApiResult<(Vec<String>, f64)> {
+    plan_backfill_with(None, flow, body)
+}
+
+/// As `plan_backfill`; with a store, `missing_only` leaves out values whose
+/// latest run Completed.
+pub fn plan_backfill_with(
+    store: Option<&cereyan_store::Store>,
+    flow: &Flow,
+    body: &BackfillBody,
+) -> ApiResult<(Vec<String>, f64)> {
     let kind = parameter_kind(flow, &body.parameter)?;
     let interval = parse_interval(body.interval.as_ref()).map_err(ApiError::Unprocessable)?;
-    let values = generate_values(
-        matches!(kind, Kind::Date),
-        &body.start,
-        &body.end,
-        interval,
-        body.reverse,
-    )?;
+    let mut values = if body.values.is_empty() {
+        if body.start.trim().is_empty() || body.end.trim().is_empty() {
+            return Err(ApiError::Unprocessable(
+                "give start and end, or values".into(),
+            ));
+        }
+        generate_values(
+            matches!(kind, Kind::Date),
+            &body.start,
+            &body.end,
+            interval,
+            body.reverse,
+        )?
+    } else {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for raw in &body.values {
+            // One value is a one-element range: parsed and rendered the same way.
+            let one = generate_values(matches!(kind, Kind::Date), raw, raw, interval, false)?;
+            if let Some(v) = one.into_iter().next() {
+                if seen.insert(v.clone()) {
+                    out.push(v);
+                }
+            }
+        }
+        if body.reverse {
+            out.reverse();
+        }
+        out
+    };
+    if body.missing_only {
+        if let Some(store) = store {
+            values.retain(|v| {
+                !matches!(
+                    store.latest_run_with_param(flow.id, &body.parameter, v),
+                    Ok(Some(run)) if run.state.state_type == StateType::Completed
+                )
+            });
+        }
+    }
     if values.is_empty() {
-        return Err(ApiError::Unprocessable("the range produces no runs".into()));
+        return Err(ApiError::Unprocessable(if body.missing_only {
+            "every value already has a completed run".into()
+        } else {
+            "the range produces no runs".into()
+        }));
     }
     Ok((values, interval))
 }
@@ -186,15 +250,19 @@ pub async fn create_backfill_inner(
     flow: &Flow,
     body: &BackfillBody,
 ) -> ApiResult<BackfillStatus> {
-    let (values, interval) = plan_backfill(flow, body)?;
+    let (values, interval) = plan_backfill_with(Some(&state.store), flow, body)?;
     let concurrency = body.concurrency.unwrap_or(1).max(1);
     let options = FlowOptions::from_map(&flow.options);
     let st = state.clone();
     let flow_clone = flow.clone();
     let parameter = body.parameter.clone();
     let extra = body.extra_parameters.clone();
-    let start_v = body.start.clone();
-    let end_v = body.end.clone();
+    let force = body.force;
+    let start_v = values
+        .first()
+        .cloned()
+        .unwrap_or_else(|| body.start.clone());
+    let end_v = values.last().cloned().unwrap_or_else(|| body.end.clone());
     let values_clone = values.clone();
     let (backfill_id, created) = tokio::task::spawn_blocking(move || {
         let (backfill_id, _) = st.store.create_backfill(CreateBackfill {
@@ -210,6 +278,9 @@ pub async fn create_backfill_inner(
         let tag = format!("backfill:{backfill_id}");
         let mut tags = flow_clone.tags.clone();
         tags.push(tag);
+        if force {
+            tags.push(FORCE_TAG.to_string());
+        }
         let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".into());
         let defaults: Map<String, Value> = flow_clone
             .parameter_schema
@@ -255,7 +326,7 @@ pub async fn create_backfill_inner(
     let key = EngineKey::from_flow(flow);
     let st = state.clone();
     let flow_for_dispatch = flow.clone();
-    let has_bulk = options.has_bulk_complete;
+    let has_bulk = options.has_bulk_complete && !force;
     let count = created.len();
     // Index insertion and dispatch happen in the background so the creation
     // call returns as soon as the transaction commits.

@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import type { Flow } from "@/api/client";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input, Select, Textarea } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 
 export function dateParameters(flow: Pick<Flow, "parameter_schema">): string[] {
@@ -47,6 +48,9 @@ export function BackfillDialog({
     end: string;
     interval: string;
     concurrency: number;
+    values?: string[];
+    missing_only?: boolean;
+    force?: boolean;
   }) => void;
   busy?: boolean;
   error?: string | null;
@@ -57,7 +61,14 @@ export function BackfillDialog({
   const [end, setEnd] = useState("");
   const [interval, setInterval] = useState("1d");
   const [concurrency, setConcurrency] = useState(1);
-  const count = countRuns(start, end, interval);
+  const [valuesText, setValuesText] = useState("");
+  const [missingOnly, setMissingOnly] = useState(false);
+  const [force, setForce] = useState(false);
+  const values = valuesText
+    .split(/[\n,]/)
+    .map((v) => v.trim())
+    .filter(Boolean);
+  const count = values.length ? values.length : countRuns(start, end, interval);
   return (
     <Modal
       open={open}
@@ -70,7 +81,18 @@ export function BackfillDialog({
           </Button>
           <Button
             disabled={!count || !parameter || busy}
-            onClick={() => onSubmit({ parameter, start, end, interval, concurrency })}
+            onClick={() =>
+              onSubmit({
+                parameter,
+                start,
+                end,
+                interval,
+                concurrency,
+                values,
+                missing_only: missingOnly,
+                force,
+              })
+            }
           >
             Create {count ?? ""} runs
           </Button>
@@ -139,8 +161,32 @@ export function BackfillDialog({
             />
           </label>
           <div className="self-end text-sm" data-testid="backfill-count">
-            {count === null ? "Pick a range and interval" : `${count} runs will be created`}
+            {count === null ? "Pick a range and interval, or list values" : `${count} runs will be created`}
           </div>
+          <label className="col-span-2 text-xs text-muted-foreground" htmlFor="bf-values">
+            Values (optional; comma or newline separated, instead of the range)
+            <Textarea
+              id="bf-values"
+              rows={2}
+              className="mt-1"
+              value={valuesText}
+              onChange={(e) => setValuesText(e.target.value)}
+              placeholder="2026-03-01, 2026-03-15"
+              aria-label="Values"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor="bf-missing">
+            <Checkbox
+              id="bf-missing"
+              checked={missingOnly}
+              onCheckedChange={(c) => setMissingOnly(c === true)}
+            />
+            Only values without a completed run
+          </label>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground" htmlFor="bf-force">
+            <Checkbox id="bf-force" checked={force} onCheckedChange={(c) => setForce(c === true)} />
+            Force: ignore targets, caches and bulk_complete
+          </label>
           {error ? <div className="col-span-2 text-xs text-red-600">{error}</div> : null}
         </div>
       )}

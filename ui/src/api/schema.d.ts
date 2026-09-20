@@ -1214,13 +1214,21 @@ export interface components {
         BackfillBody: {
             /** Format: int64 */
             concurrency?: number | null;
-            end: string;
+            /** @description Last value of a range, inclusive; not needed with `values`. */
+            end?: string;
             extra_parameters?: Record<string, never>;
+            /** @description A restatement: runs ignore targets, caches, checkpoints and `bulk_complete`. */
+            force?: boolean;
             /** @description Seconds, or a shorthand like `1d`, `12h`, `30m`. Default one day. */
             interval?: unknown;
+            /** @description Leave out values whose latest run Completed. */
+            missing_only?: boolean;
             parameter: string;
             reverse?: boolean;
-            start: string;
+            /** @description First value of a range; not needed with `values`. */
+            start?: string;
+            /** @description Explicit parameter values instead of a range, in this order. */
+            values?: string[];
         };
         BackfillStatus: components["schemas"]["Backfill"] & {
             counts: {
@@ -2527,12 +2535,26 @@ export interface components {
         /** @description `@flow(unique=Unique(...))`: which runs count as the same run. */
         UniqueSpec: {
             /**
+             * Format: double
+             * @description `debounce`: seconds a run waits after the last submission before it starts.
+             * @default null
+             */
+            debounce: number | null;
+            /**
              * @description Template over the parameters, `{day}`; every parameter when absent.
              * @default null
              */
             key: string | null;
             /**
-             * @description `skip` (answer with the existing run) or `replace` (cancel it and create anew).
+             * Format: double
+             * @description `debounce`: the longest a run may be pushed back from its creation.
+             * @default null
+             */
+            max_wait: number | null;
+            /**
+             * @description `skip` (answer with the existing run), `replace` (cancel it and create
+             *     anew), `debounce` (move the waiting run along and take the new
+             *     parameters), or `throttle` (keep the first run per sliding `period`).
              * @default skip
              */
             on_conflict: string;
@@ -2619,6 +2641,8 @@ export interface components {
             checkpoints?: components["schemas"]["Checkpoint"][];
             external_id: string;
             flow: string;
+            /** @description A forced (restated) run: the engine ignores targets, caches and checkpoints. */
+            force?: boolean;
             /** @description `run`, `hooks`, or `bulk_complete`. */
             kind?: string;
             options: Record<string, never>;

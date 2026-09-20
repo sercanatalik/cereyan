@@ -32,6 +32,8 @@ class RunContext:
     #: Whether the next task call may return a checkpoint. The first task that
     #: has none, or whose inputs differ, turns it off for the rest of the attempt.
     replaying: bool = False
+    #: A forced (restated) run: targets, cache hits and checkpoints are ignored.
+    force: bool = False
     #: The thread executing the flow body, captured where the context is made.
     #: `wait_for_input` pauses by raising out of the body, which only works on
     #: this thread; from a task on a worker thread it would surface as a task
