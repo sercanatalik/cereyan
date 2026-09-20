@@ -518,3 +518,12 @@ def test_rerun_run_from_failure(agent):
     assert out["rerun_of"] == failed["id"] and out["from"] == "failure" and "retry" in out["note"]
     assert out["run"]["created_by"].startswith("mcp:") and out["run"]["parent_run_id"] == failed["id"]
     srv.wait_run(out["run"]["id"])
+
+
+def test_get_run_lists_task_state(agent):
+    srv = agent
+    run = call(srv, "run_flow", flow="etl", parameters={"day": "2026-09-04"})["data"]["run"]
+    srv.wait_run(run["id"])
+    srv.client._request("POST", f"/api/runs/{run['id']}/state", body={"scope": "step-0", "key": "job_id", "value": "j-9"})
+    out = call(srv, "get_run", run_id=run["id"])["data"]
+    assert out["task_state"] == [{"scope": "step-0", "key": "job_id", "value": "j-9", "updated_at": out["task_state"][0]["updated_at"]}]

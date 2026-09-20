@@ -881,6 +881,100 @@ pub async fn retry_run(
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
+pub struct StateQuery {
+    /// The task's dynamic key, or empty for the flow body; with `key`, reads one value.
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub key: Option<String>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct StateValue {
+    pub found: bool,
+    pub value: Value,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct StateBody {
+    #[serde(default)]
+    pub scope: String,
+    pub key: String,
+    #[serde(default)]
+    pub value: Value,
+    /// Remove the entry instead of setting it.
+    #[serde(default)]
+    pub delete: bool,
+}
+
+/// The largest JSON value a task may keep in its state store.
+pub const TASK_STATE_MAX_BYTES: usize = 64 * 1024;
+
+#[utoipa::path(get, path = "/api/runs/{id}/state", params(("id" = i64, Path), StateQuery), responses((status = 200, body = Vec<cereyan_store::TaskStateRow>, description = "Every entry, or with scope and key one StateValue"), (status = 404)))]
+pub async fn run_state(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+    Query(q): Query<StateQuery>,
+) -> ApiResult<axum::response::Response> {
+    use axum::response::IntoResponse;
+    state
+        .store
+        .get_run(id)?
+        .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
+    if let Some(key) = q.key.filter(|k| !k.is_empty()) {
+        let scope = q.scope.unwrap_or_default();
+        let st = state.clone();
+        let raw = tokio::task::spawn_blocking(move || st.store.task_state_get(id, &scope, &key))
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))??;
+        let out = match raw {
+            Some(text) => StateValue {
+                found: true,
+                value: serde_json::from_str(&text).unwrap_or(Value::String(text)),
+            },
+            None => StateValue {
+                found: false,
+                value: Value::Null,
+            },
+        };
+        return Ok(Json(out).into_response());
+    }
+    let st = state.clone();
+    let rows = tokio::task::spawn_blocking(move || st.store.task_state_list(id))
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))??;
+    Ok(Json(rows).into_response())
+}
+
+#[utoipa::path(post, path = "/api/runs/{id}/state", params(("id" = i64, Path)), request_body = StateBody, responses((status = 200, description = "ok"), (status = 404), (status = 422)))]
+pub async fn set_run_state(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+    Json(body): Json<StateBody>,
+) -> ApiResult<Json<Value>> {
+    let key = body.key.trim().to_string();
+    if key.is_empty() || key.len() > 200 {
+        return Err(ApiError::Unprocessable(
+            "key must be 1 to 200 characters".into(),
+        ));
+    }
+    let ok = if body.delete {
+        state.store.task_state_delete(id, &body.scope, &key)?;
+        state.store.get_run(id)?.is_some()
+    } else {
+        let text = body.value.to_string();
+        if text.len() > TASK_STATE_MAX_BYTES {
+            return Err(ApiError::Unprocessable("value exceeds 64 KB".into()));
+        }
+        state.store.task_state_set(id, &body.scope, &key, &text)?
+    };
+    if !ok {
+        return Err(ApiError::NotFound("run not found".into()));
+    }
+    Ok(Json(serde_json::json!({"ok": true})))
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
 pub struct PassQuery {
     /// One execution of the run's body: 0 the first time, the next after a
     /// resume or an in-process flow retry.

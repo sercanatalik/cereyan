@@ -70,6 +70,24 @@ nightly(date(2026, 3, 2))
 nightly(date(2026, 3, 2))
 ```
 
+## Remember what you started
+
+A target says whether the work finished. When the work is an external job, the dangerous moment is earlier: the job was submitted, the task died, and the retry submits it again. Note the job id in the task's state store the moment you have it, and check for it first:
+
+```python
+from cereyan import task, task_state
+
+@task(retries=3, retry_delay=10)
+def load_warehouse(day: str) -> str:
+    job = task_state.get("job_id")
+    if job is None:
+        job = warehouse.submit(day)
+        task_state.set("job_id", job)
+    return warehouse.wait(job)
+```
+
+The note is scoped to this task in this run and is there on a retry, a crash rerun, or a retry from failure; see [Task state](../concepts/tasks.md#task-state).
+
 ## Skip whole runs
 
 Targets skip tasks, not runs. To avoid scheduling runs for work already done, give the flow `bulk_complete=` and let [backfills](backfill.md) skip those values before they are created.

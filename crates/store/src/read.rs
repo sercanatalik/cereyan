@@ -82,6 +82,17 @@ pub struct EventsPage {
     pub next_cursor: Option<i64>,
 }
 
+/// One entry of a run's task state store.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TaskStateRow {
+    /// The task's dynamic key, or empty for the flow body.
+    pub scope: String,
+    pub key: String,
+    pub value: serde_json::Value,
+    pub updated_at: i64,
+}
+
 /// kv key holding the checkpoints a run was seeded with, as a JSON list.
 pub fn checkpoint_seed_key(run_id: i64) -> String {
     format!("run.checkpoints:{run_id}")
@@ -873,6 +884,50 @@ impl Store {
             )?;
             let rows = stmt
                 .query_map([backfill_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// One task state value, from the run or the crash and retry parents it
+    /// continues, nearest first.
+    pub fn task_state_get(&self, run_id: i64, scope: &str, key: &str) -> Result<Option<String>> {
+        self.with_reader(|conn| {
+            Ok(conn
+                .query_row(
+                    "WITH RECURSIVE chain(id, depth) AS (
+                        SELECT ?1, 0
+                        UNION ALL
+                        SELECT r.parent_run_id, chain.depth + 1 FROM run r JOIN chain ON r.id = chain.id
+                        WHERE r.parent_run_id IS NOT NULL
+                          AND (r.created_by LIKE 'crash:%' OR r.created_by LIKE 'retry:%')
+                          AND chain.depth < 50
+                     )
+                     SELECT s.value FROM task_state s JOIN chain ON s.run_id = chain.id
+                     WHERE s.scope = ?2 AND s.key = ?3 ORDER BY chain.depth LIMIT 1",
+                    rusqlite::params![run_id, scope, key],
+                    |r| r.get(0),
+                )
+                .optional()?)
+        })
+    }
+
+    /// Every task state entry a run wrote itself.
+    pub fn task_state_list(&self, run_id: i64) -> Result<Vec<TaskStateRow>> {
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT scope, key, value, updated_at FROM task_state WHERE run_id = ?1 ORDER BY scope, key",
+            )?;
+            let rows = stmt
+                .query_map([run_id], |r| {
+                    let raw: String = r.get(2)?;
+                    Ok(TaskStateRow {
+                        scope: r.get(0)?,
+                        key: r.get(1)?,
+                        value: serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw)),
+                        updated_at: r.get(3)?,
+                    })
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })

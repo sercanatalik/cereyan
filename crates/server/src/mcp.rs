@@ -855,7 +855,8 @@ async fn call_tool(
                 .get_run(id)?
                 .ok_or_else(|| ToolError::Failed(format!("run {id} not found")))?;
             let tasks = state.store.task_runs_by_run(id, None)?;
-            Ok(json!({"run": run, "task_runs": tasks}))
+            let task_state = state.store.task_state_list(id)?;
+            Ok(json!({"run": run, "task_runs": tasks, "task_state": task_state}))
         }
         "compare_runs" => {
             let a = arg_i64(args, "run_id")?;

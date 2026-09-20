@@ -374,6 +374,19 @@ pub enum WriteCommand {
         value: String,
         reply: Reply<()>,
     },
+    TaskStateSet {
+        run_id: i64,
+        scope: String,
+        key: String,
+        value: String,
+        reply: Reply<bool>,
+    },
+    TaskStateDelete {
+        run_id: i64,
+        scope: String,
+        key: String,
+        reply: Reply<bool>,
+    },
     /// Forget the checkpoint references of terminal runs that ended before `before`.
     ClearCheckpointsBefore {
         before: i64,
@@ -826,6 +839,45 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
             conn.execute("DELETE FROM kv WHERE key = ?1", params![key])
                 .map(|n| n > 0)
                 .map_err(Into::into),
+        ),
+        WriteCommand::TaskStateSet {
+            run_id,
+            scope,
+            key,
+            value,
+            reply,
+        } => ack(reply, {
+            let exists: Result<bool> = conn
+                .query_row("SELECT 1 FROM run WHERE id = ?1", [run_id], |_| Ok(true))
+                .optional()
+                .map(|r| r.is_some())
+                .map_err(StoreError::from);
+            match exists {
+                Ok(false) => Ok(false),
+                Ok(true) => conn
+                    .execute(
+                        "INSERT INTO task_state (run_id, scope, key, value, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+                         ON CONFLICT (run_id, scope, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                        params![run_id, scope, key, value, now_micros()],
+                    )
+                    .map(|_| true)
+                    .map_err(StoreError::from),
+                Err(e) => Err(e),
+            }
+        }),
+        WriteCommand::TaskStateDelete {
+            run_id,
+            scope,
+            key,
+            reply,
+        } => ack(
+            reply,
+            conn.execute(
+                "DELETE FROM task_state WHERE run_id = ?1 AND scope = ?2 AND key = ?3",
+                params![run_id, scope, key],
+            )
+            .map(|n| n > 0)
+            .map_err(StoreError::from),
         ),
         WriteCommand::ClearCheckpointsBefore { before, reply } => ack(reply, {
             let cleared = conn.execute(

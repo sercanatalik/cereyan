@@ -322,6 +322,53 @@ impl Store {
         run.map(|r| json(&r)).transpose()
     }
 
+    /// One task state value (JSON text) from the run or the runs it continues.
+    fn task_state_get(
+        &self,
+        py: Python<'_>,
+        run_id: i64,
+        scope: String,
+        key: String,
+    ) -> PyResult<Option<String>> {
+        let store = self.inner.clone();
+        py.detach(move || store.task_state_get(run_id, &scope, &key))
+            .map_err(to_py)
+    }
+
+    fn task_state_set(
+        &self,
+        py: Python<'_>,
+        run_id: i64,
+        scope: String,
+        key: String,
+        value: String,
+    ) -> PyResult<bool> {
+        let store = self.inner.clone();
+        py.detach(move || store.task_state_set(run_id, &scope, &key, &value))
+            .map_err(to_py)
+    }
+
+    fn task_state_delete(
+        &self,
+        py: Python<'_>,
+        run_id: i64,
+        scope: String,
+        key: String,
+    ) -> PyResult<bool> {
+        let store = self.inner.clone();
+        py.detach(move || store.task_state_delete(run_id, &scope, &key))
+            .map_err(to_py)
+    }
+
+    /// Every task state entry of a run, as JSON.
+    fn task_state_list(&self, py: Python<'_>, run_id: i64) -> PyResult<String> {
+        let store = self.inner.clone();
+        let rows = py
+            .detach(move || store.task_state_list(run_id))
+            .map_err(to_py)?;
+        json(&rows)
+    }
+
     /// The checkpoint map a new attempt of `run_id` replays from, as JSON.
     fn checkpoints(&self, py: Python<'_>, run_id: i64) -> PyResult<String> {
         let store = self.inner.clone();

@@ -17,6 +17,7 @@ pub use manage::{ProjectCounts, ProjectRow, TableCounts, BACKUP_DIR};
 pub use migrations::latest_version as latest_schema_version;
 pub use read::{
     checkpoint_seed_key, ArtifactFilter, ArtifactsPage, Checkpoint, EventFilter, EventsPage,
+    TaskStateRow,
 };
 pub use read::{ListRunsFilter, ListTaskRunsFilter, LogFilter, LogsPage, RunsPage, TaskRunsPage};
 pub use writer::{
@@ -306,6 +307,26 @@ impl Store {
     /// (microseconds); the files are the caller's to remove. Returns the rows cleared.
     pub fn clear_checkpoints_before(&self, before: i64) -> Result<usize> {
         self.write(|reply| WriteCommand::ClearCheckpointsBefore { before, reply })
+    }
+
+    /// Set one task state entry; false when the run does not exist.
+    pub fn task_state_set(&self, run_id: i64, scope: &str, key: &str, value: &str) -> Result<bool> {
+        self.write(|reply| WriteCommand::TaskStateSet {
+            run_id,
+            scope: scope.into(),
+            key: key.into(),
+            value: value.into(),
+            reply,
+        })
+    }
+
+    pub fn task_state_delete(&self, run_id: i64, scope: &str, key: &str) -> Result<bool> {
+        self.write(|reply| WriteCommand::TaskStateDelete {
+            run_id,
+            scope: scope.into(),
+            key: key.into(),
+            reply,
+        })
     }
 
     pub fn kv_delete(&self, key: &str) -> Result<bool> {

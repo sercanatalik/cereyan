@@ -61,6 +61,10 @@ assert squares() == [1, 4, 9]
 
 Inside a task, `get_run_logger()` returns a logger whose records are stored with the run and tagged with the task run; standard `logging` calls from any logger are captured the same way. With `log_prints=True` on the task or the flow, `print` output is logged at INFO as well.
 
+## Task state
+
+A task that starts something outside Cereyan needs to remember what it started. `cereyan.task_state` is a small note store scoped to the run and the task's dynamic key: `task_state.set("job_id", job)` after submitting an external job, `task_state.get("job_id")` at the top of the task, and the same task finds the note on a retry, a later pass of the run, a crash rerun, or a retry from failure, instead of submitting the job twice. `delete(key)` and `items()` complete the API; from the flow body the scope is the run itself. Values are JSON up to 64 KB, are listed on the run page's Details tab, `GET /api/runs/{id}/state`, and the MCP `get_run` tool, and are deleted with the run. It is not for passing data between tasks: return values and [results](targets-caching-results.md) do that.
+
 ## Results
 
 A task's return value flows back to the caller as usual. With `persist_result=True` it is also written under `<home>/storage`, which is what caching and replay after a pause read from.

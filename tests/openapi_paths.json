@@ -46,6 +46,7 @@
   "/api/runs/{id}/logs",
   "/api/runs/{id}/resume",
   "/api/runs/{id}/retry",
+  "/api/runs/{id}/state",
   "/api/runs/{id}/tasks",
   "/api/runs/{id}/transition",
   "/api/scheduler",

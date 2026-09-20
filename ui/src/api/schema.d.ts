@@ -726,6 +726,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["run_state"];
+        put?: never;
+        post: operations["set_run_state"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{id}/tasks": {
         parameters: {
             query?: never;
@@ -2381,6 +2397,13 @@ export interface components {
             timestamp: components["schemas"]["i64"];
             type: components["schemas"]["StateType"];
         };
+        StateBody: {
+            /** @description Remove the entry instead of setting it. */
+            delete?: boolean;
+            key: string;
+            scope?: string;
+            value?: unknown;
+        };
         StateEntry: {
             is_sub_state: boolean;
             name: string;
@@ -2389,6 +2412,10 @@ export interface components {
         };
         /** @enum {string} */
         StateType: "Scheduled" | "Pending" | "Running" | "Completed" | "Failed" | "Cancelled" | "Crashed" | "Paused" | "Cancelling";
+        StateValue: {
+            found: boolean;
+            value: unknown;
+        };
         /** @description Row counts for the Data tab and the reset dialog. */
         TableCounts: {
             /** Format: int64 */
@@ -2475,6 +2502,15 @@ export interface components {
             /** Format: int64 */
             id: number;
             state: components["schemas"]["State"];
+        };
+        /** @description One entry of a run's task state store. */
+        TaskStateRow: {
+            key: string;
+            /** @description The task's dynamic key, or empty for the flow body. */
+            scope: string;
+            /** Format: int64 */
+            updated_at: number;
+            value: unknown;
         };
         TransitionBody: {
             details?: Record<string, never>;
@@ -4133,6 +4169,74 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    run_state: {
+        parameters: {
+            query?: {
+                key?: string | null;
+                /** @description The task's dynamic key, or empty for the flow body; with `key`, reads one value. */
+                scope?: string | null;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every entry, or with scope and key one StateValue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskStateRow"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_run_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StateBody"];
+            };
+        };
+        responses: {
+            /** @description ok */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

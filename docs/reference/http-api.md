@@ -382,6 +382,33 @@ Also served on POST, which is what the engine client speaks.
 | 409 | no body |
 | 422 | no body |
 
+### `GET /api/runs/{id}/state`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+| `scope` | query | string or null | no | The task's dynamic key, or empty for the flow body; with `key`, reads one value. |
+| `key` | query | string or null | no |  |
+
+| Status | Body |
+|---|---|
+| 200 | [`TaskStateRow`](#taskstaterow)[] (application/json) |
+| 404 | no body |
+
+### `POST /api/runs/{id}/state`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+**Request body** (application/json): [`StateBody`](#statebody)
+
+| Status | Body |
+|---|---|
+| 200 | ok |
+| 404 | no body |
+| 422 | no body |
+
 ### `GET /api/runs/{id}/tasks`
 
 | Parameter | In | Type | Required | Description |
@@ -1910,6 +1937,15 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `timestamp` | [`i64`](#i64) | yes |  |
 | `type` | [`StateType`](#statetype) | yes |  |
 
+### `StateBody`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `delete` | boolean | no | Remove the entry instead of setting it. |
+| `key` | string | yes |  |
+| `scope` | string | no |  |
+| `value` |  | no |  |
+
 ### `StateEntry`
 
 | Field | Type | Required | Description |
@@ -1921,6 +1957,13 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 ### `StateType`
 
 One of: `Scheduled`, `Pending`, `Running`, `Completed`, `Failed`, `Cancelled`, `Crashed`, `Paused`, `Cancelling`.
+
+### `StateValue`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `found` | boolean | yes |  |
+| `value` |  | yes |  |
 
 ### `TableCounts`
 
@@ -1988,6 +2031,17 @@ Row counts for the Data tab and the reset dialog.
 | `duration` | integer or null (int64) | no |  |
 | `id` | integer (int64) | yes |  |
 | `state` | [`State`](#state) | yes |  |
+
+### `TaskStateRow`
+
+One entry of a run's task state store.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key` | string | yes |  |
+| `scope` | string | yes | The task's dynamic key, or empty for the flow body. |
+| `updated_at` | integer (int64) | yes |  |
+| `value` |  | yes |  |
 
 ### `TransitionBody`
 

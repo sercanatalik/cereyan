@@ -108,6 +108,8 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         runs::bulk_runs,
         runs::compare_runs,
         runs::retry_run,
+        runs::run_state,
+        runs::set_run_state,
         runs::run_tasks,
         runs::run_graph,
         runs::transition_run,
@@ -185,6 +187,9 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         pause::SchedulerStatus,
         pause::PauseBody,
         runs::RunConflict,
+        runs::StateValue,
+        runs::StateBody,
+        cereyan_store::TaskStateRow,
         runs::RetryBody,
         runs::RetryResponse,
         crate::compare::RunComparison,
@@ -421,6 +426,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/runs/{id}/cancel", post(runs::cancel_run))
         .route("/api/runs/{id}/resume", post(runs::resume_run))
         .route("/api/runs/{id}/retry", post(runs::retry_run))
+        .route(
+            "/api/runs/{id}/state",
+            get(runs::run_state).post(runs::set_run_state),
+        )
         .route("/api/runs/{id}/input", get(runs::run_input))
         .route("/api/task-runs", get(task_runs::list_task_runs))
         .route("/api/task-runs/{id}", get(task_runs::get_task_run))

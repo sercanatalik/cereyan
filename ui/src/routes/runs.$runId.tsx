@@ -141,6 +141,12 @@ function RunDetail() {
     enabled: !!r,
   });
   const previous = earlier.data?.items.find((x) => x.id < id) ?? null;
+  // Notes tasks kept for their own later attempts (task_state).
+  const notes = useQuery({
+    queryKey: ["run-state", id],
+    queryFn: async () => unwrap(await api.GET("/api/runs/{id}/state", { params: { path: { id } } })),
+    enabled: !!r,
+  });
   if (!r)
     return (
       <Page crumbs={[{ label: "Runs", to: "/runs" }, { label: runId }]}>
@@ -330,6 +336,10 @@ function RunDetail() {
             {tab === "details" ? (
               <KeyValueList
                 items={[
+                  ...((Array.isArray(notes.data) ? notes.data : []).map((n) => ({
+                    label: `State ${n.scope ? `${n.scope}.` : ""}${n.key}`,
+                    value: <code className="font-mono text-xs">{JSON.stringify(n.value)}</code>,
+                  })) as { label: string; value: React.ReactNode }[]),
                   { label: "Id", value: String(r.id) },
                   { label: "External id", value: r.external_id },
                   { label: "Project", value: r.project },

@@ -313,7 +313,8 @@
         },
         "keys": [
           "run",
-          "task_runs"
+          "task_runs",
+          "task_state"
         ]
       }
     },

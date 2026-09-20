@@ -34,6 +34,18 @@ class Backend:
         """Checkpoints of the run's earlier attempts, by dynamic key; empty when there are none."""
         return {}
 
+    def task_state_get(self, scope: str, key: str) -> str | None:
+        raise NotImplementedError
+
+    def task_state_set(self, scope: str, key: str, value_json: str) -> None:
+        raise NotImplementedError
+
+    def task_state_delete(self, scope: str, key: str) -> bool:
+        raise NotImplementedError
+
+    def task_state_list(self) -> list[dict]:
+        raise NotImplementedError
+
     def acquire_resources(self, resources: dict, logger):
         return None
 
@@ -151,6 +163,18 @@ class StoreBackend(Backend):
     def checkpoints(self) -> dict[str, dict]:
         return {c["dynamic_key"]: c for c in json.loads(self.store.checkpoints(self.run_id))}
 
+    def task_state_get(self, scope, key):
+        return self.store.task_state_get(self.run_id, scope, key)
+
+    def task_state_set(self, scope, key, value_json):
+        self.store.task_state_set(self.run_id, scope, key, value_json)
+
+    def task_state_delete(self, scope, key):
+        return self.store.task_state_delete(self.run_id, scope, key)
+
+    def task_state_list(self):
+        return json.loads(self.store.task_state_list(self.run_id))
+
     def transition_task_run(self, external_id, state_type, name=None, message=None, details=None) -> dict:
         row_id = self._rows[external_id]
         state = json.loads(self.store.transition_task_run(row_id, state_type, name, message, _details(details)))
@@ -208,6 +232,32 @@ class ReporterBackend(Backend):
 
     def checkpoints(self) -> dict[str, dict]:
         return dict(self._checkpoints)
+
+    def task_state_get(self, scope, key):
+        from urllib.parse import urlencode
+
+        status, text = self.client.get(f"/api/runs/{self.run_id}/state?" + urlencode({"scope": scope, "key": key}))
+        if status >= 300 or not text:
+            raise CereyanError(f"task_state read was refused ({status}): {text}")
+        data = json.loads(text)
+        return json.dumps(data["value"]) if data.get("found") else None
+
+    def task_state_set(self, scope, key, value_json):
+        status, text = self.client.post(f"/api/runs/{self.run_id}/state", json.dumps({"scope": scope, "key": key, "value": json.loads(value_json)}))
+        if status >= 300:
+            raise CereyanError(f"task_state write was refused ({status}): {text}")
+
+    def task_state_delete(self, scope, key):
+        status, text = self.client.post(f"/api/runs/{self.run_id}/state", json.dumps({"scope": scope, "key": key, "delete": True}))
+        if status >= 300:
+            raise CereyanError(f"task_state delete was refused ({status}): {text}")
+        return True
+
+    def task_state_list(self):
+        status, text = self.client.get(f"/api/runs/{self.run_id}/state")
+        if status >= 300 or not text:
+            raise CereyanError(f"task_state list was refused ({status}): {text}")
+        return json.loads(text)
 
     def transition_run(self, state_type, name=None, message=None, details=None) -> dict:
         accepted, body = self.client.transition_run(self.run_id, state_type, name, message, _details(details))

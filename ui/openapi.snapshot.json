@@ -3821,6 +3821,25 @@
         ],
         "type": "object"
       },
+      "StateBody": {
+        "properties": {
+          "delete": {
+            "description": "Remove the entry instead of setting it.",
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "value": {}
+        },
+        "required": [
+          "key"
+        ],
+        "type": "object"
+      },
       "StateEntry": {
         "properties": {
           "is_sub_state": {
@@ -3854,6 +3873,19 @@
           "Cancelling"
         ],
         "type": "string"
+      },
+      "StateValue": {
+        "properties": {
+          "found": {
+            "type": "boolean"
+          },
+          "value": {}
+        },
+        "required": [
+          "found",
+          "value"
+        ],
+        "type": "object"
       },
       "TableCounts": {
         "description": "Row counts for the Data tab and the reset dialog.",
@@ -4116,6 +4148,30 @@
         "required": [
           "id",
           "state"
+        ],
+        "type": "object"
+      },
+      "TaskStateRow": {
+        "description": "One entry of a run's task state store.",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "scope": {
+            "description": "The task's dynamic key, or empty for the flow body.",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "value": {}
+        },
+        "required": [
+          "scope",
+          "key",
+          "value",
+          "updated_at"
         ],
         "type": "object"
       },
@@ -6874,6 +6930,104 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}/state": {
+      "get": {
+        "operationId": "run_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The task's dynamic key, or empty for the flow body; with `key`, reads one value.",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TaskStateRow"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Every entry, or with scope and key one StateValue"
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      },
+      "post": {
+        "operationId": "set_run_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ok"
+          },
+          "404": {
             "description": ""
           },
           "422": {

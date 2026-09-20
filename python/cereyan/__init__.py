@@ -8,7 +8,7 @@ from .apps import App, get_default_app
 from .exceptions import Abort, CereyanError, ParameterError
 from .flows import Flow, flow, Unique
 from .logging import get_run_logger
-from . import artifacts, events, states
+from . import artifacts, events, states, task_state
 from .events import emit_event
 from .attributes import set_attributes
 from .inputs import wait_for_input
@@ -33,6 +33,7 @@ __all__ = [
     "Future",
     "INPUTS",
     "Interval",
+    "task_state",
     "Unique",
     "LocalTarget",
     "ProcessRunner",

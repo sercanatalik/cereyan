@@ -871,6 +871,7 @@ fn flows_written_before_the_group_column_read_as_their_project() {
              ALTER TABLE task_run DROP COLUMN result_ref; \
              ALTER TABLE task_run DROP COLUMN input_hash; \
              DROP INDEX run_unique_key; ALTER TABLE run DROP COLUMN unique_key; \
+             DROP TABLE task_state; \
              PRAGMA user_version = 6;",
         )
         .unwrap();

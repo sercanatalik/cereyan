@@ -184,9 +184,8 @@ def test_pre_migration_copy_is_written_before_upgrading(isolated_home, run_cli, 
     db_path = os.path.join(str(isolated_home), "db.sqlite")
     db = sqlite3.connect(db_path)
     (version,) = db.execute("PRAGMA user_version").fetchone()
-    # Pretend the store is one schema behind: undo migration 0015 so it can run again.
-    db.execute("DROP INDEX run_unique_key")
-    db.execute("ALTER TABLE run DROP COLUMN unique_key")
+    # Pretend the store is one schema behind: undo migration 0016 so it can run again.
+    db.execute("DROP TABLE task_state")
     db.execute(f"PRAGMA user_version = {version - 1}")
     db.commit()
     db.close()
