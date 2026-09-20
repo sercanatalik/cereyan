@@ -1,0 +1,254 @@
+{#-
+  The landing page. Selected by `template: home.html` in docs/index.md, whose only
+  content is the pipeline example rendered into the hero card below, so the code on
+  the front page is the code the documentation tests run.
+
+  Styles live in docs/stylesheets/home.css, scoped under `.cy-home`.
+-#}
+{% extends "main.html" %}
+
+{% block content %}{% endblock %}
+
+{% block tabs %}
+  {{ super() }}
+
+  <div class="cy-home">
+
+    <section class="cy-hero">
+      <div class="cy-hero__copy">
+        <p class="cy-eyebrow">
+          <span class="cy-chip">v{{ config.extra.version_display | default("2.2.0", true) }}</span>
+          <span>MIT licensed</span>
+          <span class="cy-dot" aria-hidden="true"></span>
+          <span>Python 3.11+</span>
+          <span class="cy-dot" aria-hidden="true"></span>
+          <span>Rust core</span>
+        </p>
+        <h1 class="cy-h1">Orchestration that starts as one local file.</h1>
+        <p class="cy-lead">Cereyan is a minimal, local-first orchestrator for Python data
+        pipelines. A Rust core sits behind a thin layer of decorators, and the whole thing
+        ships as one wheel with no runtime dependencies.</p>
+        <p class="cy-actions">
+          <a class="cy-btn cy-btn--solid" href="{{ 'get-started/quickstart/' | url }}">Read the quickstart</a>
+          <a class="cy-btn cy-btn--ghost" href="{{ 'get-started/tour/' | url }}">Take the tour</a>
+        </p>
+        <p class="cy-install"><code><span class="cy-prompt">$</span> pip install cereyan</code></p>
+      </div>
+      <div class="cy-hero__code" data-md-color-scheme="slate">
+        <div class="cy-codecard__bar">
+          <span>pipeline.py</span>
+          <span>python</span>
+        </div>
+        <div class="cy-codecard__body md-typeset">
+          {{ page.content }}
+        </div>
+      </div>
+    </section>
+
+    <section class="cy-band">
+      <svg class="cy-wave" viewBox="0 0 1440 200" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+        <path d="M0 100 c29.45 -81.8 60.55 -81.8 90 0 s60.55 81.8 90 0 s60.55 -81.8 90 0 s60.55 81.8 90 0 s60.55 -81.8 90 0 s60.55 81.8 90 0 s60.55 -81.8 90 0 s60.55 81.8 90 0 s60.55 -81.8 90 0 s60.55 81.8 90 0 s60.55 -81.8 90 0 s60.55 81.8 90 0 s60.55 -81.8 90 0 s60.55 81.8 90 0 s60.55 -81.8 90 0 s60.55 81.8 90 0" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round"/>
+      </svg>
+      <div class="cy-band__inner">
+        <div class="cy-band__lede">
+          <h2>Three ways to run the same file.</h2>
+          <p>No daemon to register with, no manifest to publish. The script is the pipeline.</p>
+        </div>
+        <dl class="cy-commands">
+          <dt><code><span class="cy-prompt">$</span> python pipeline.py</code></dt>
+          <dd>records a run in ~/.cereyan/db.sqlite</dd>
+          <dt><code><span class="cy-prompt">$</span> cereyan run pipeline.py:etl --param day=2026-01-02</code></dt>
+          <dd>the same, with parameters and a summary</dd>
+          <dt><code><span class="cy-prompt">$</span> cereyan serve .</code></dt>
+          <dd>API, UI, scheduler and engines on 127.0.0.1:4200</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="cy-section cy-tour">
+      <div class="cy-section__head">
+        <div>
+          <h2>One process serves the whole thing.</h2>
+          <p>The API, the web UI, the scheduler, a warm pool of engine processes, rules, and a
+          built-in MCP server for agents, all behind a single <code>cereyan serve</code>.</p>
+        </div>
+        <a class="cy-more" href="{{ 'get-started/tour/' | url }}">Take the full tour</a>
+      </div>
+      <figure class="cy-shot">
+        <div class="cy-shot__bar"><span class="cy-shot__url">127.0.0.1:4200</span></div>
+        <img src="{{ 'images/dashboard.png' | url }}#only-light" alt="The cereyan dashboard: counts by state, a histogram, a Needs attention list with a paused and a failed run, Running now, and the recently completed table">
+        <img src="{{ 'images/dashboard-dark.png' | url }}#only-dark" alt="The cereyan dashboard: counts by state, a histogram, a Needs attention list with a paused and a failed run, Running now, and the recently completed table">
+      </figure>
+    </section>
+
+    <section class="cy-pillars">
+      <div class="cy-pillar">
+        <svg class="cy-mark" viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 9C4.7 3 7.2 3 9 9s4.3 6 6.5 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <h3>Offline first</h3>
+        <p>A script records runs into a local SQLite file. Nothing else needs to be running,
+        and nothing leaves the machine.</p>
+      </div>
+      <div class="cy-pillar">
+        <svg class="cy-mark" viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 9C4.7 3 7.2 3 9 9s4.3 6 6.5 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <h3>One process to serve</h3>
+        <p>API, UI, scheduler, engine pool, rules and MCP in one command. One wheel, with no
+        runtime dependencies to resolve.</p>
+      </div>
+      <div class="cy-pillar">
+        <svg class="cy-mark" viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 9C4.7 3 7.2 3 9 9s4.3 6 6.5 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <h3>Pipeline semantics</h3>
+        <p>Targets, backfills, keyed resources, chaining and fan-in, unique keys, and rules that
+        react to events or to their absence.</p>
+      </div>
+      <div class="cy-pillar">
+        <svg class="cy-mark" viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 9C4.7 3 7.2 3 9 9s4.3 6 6.5 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <h3>Durable runs</h3>
+        <p>Every finished task is checkpointed, so a retry resumes after the last one. A run can
+        sleep or wait without holding an engine.</p>
+      </div>
+    </section>
+
+    <section class="cy-section cy-features">
+      <h2 class="cy-features__title">Built for the things data pipelines actually do.</h2>
+
+      <div class="cy-feature">
+        <div class="cy-feature__copy">
+          <p class="cy-kicker">Targets</p>
+          <h3>Reruns only do the missing work.</h3>
+          <p>Declare where a task writes. When that output already exists the task ends Skipped
+          and the body never runs, so rerunning a day, a failed run or an entire backfill is safe.</p>
+          <a class="cy-more" href="{{ 'guides/idempotent-reruns/' | url }}">Idempotent reruns</a>
+        </div>
+        <div class="cy-feature__figure cy-figure--dark">
+          <pre class="cy-snippet"><span class="cy-dec">@task</span>(output=<span class="cy-kw">lambda</span> day: LocalTarget(<span class="cy-str">f"data/{day}.csv"</span>))
+<span class="cy-kw">def</span> export(day: date) -&gt; None:
+    <span class="cy-kw">with</span> LocalTarget(<span class="cy-str">f"data/{day}.csv"</span>).open(<span class="cy-str">"w"</span>) <span class="cy-kw">as</span> fh:
+        fh.write(rows)</pre>
+          <p class="cy-snippet__foot">
+            <span class="cy-state cy-state--skipped">Skipped</span>
+            <code>output exists &middot; task_run.skipped</code>
+          </p>
+        </div>
+      </div>
+
+      <div class="cy-feature cy-feature--flip">
+        <div class="cy-feature__copy">
+          <p class="cy-kicker">Events and rules</p>
+          <h3>React to what happened, and to what did not.</h3>
+          <p>Every transition is an event on a live feed. Rules match them and act, and a rule can
+          also fire when an expected event never arrives, which is how a missed delivery becomes a
+          page rather than silence.</p>
+          <a class="cy-more" href="{{ 'guides/rules/' | url }}">Rules and events</a>
+        </div>
+        <div class="cy-feature__figure cy-feed">
+          <div class="cy-feed__bar">
+            <span>Live events</span>
+            <span class="cy-feed__live">streaming</span>
+          </div>
+          <ol class="cy-feed__list">
+            <li><time>09:15:02</time><span class="cy-state cy-state--completed">Completed</span><code>run.completed</code><span class="cy-feed__what">etl-2026-01-02</span></li>
+            <li><time>09:14:58</time><span class="cy-state cy-state--failed">Failed</span><code>task_run.failed</code><span class="cy-feed__what">load, retry 2 of 3</span></li>
+            <li><time>09:14:41</time><span class="cy-state cy-state--late">Overdue</span><code>run.overdue</code><span class="cy-feed__what">vendor_drop never arrived</span></li>
+            <li><time>09:14:12</time><span class="cy-state cy-state--paused">Paused</span><code>run.paused</code><span class="cy-feed__what">awaiting approval</span></li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="cy-feature">
+        <div class="cy-feature__copy">
+          <p class="cy-kicker">Backfills</p>
+          <h3>Cover a date range in one command.</h3>
+          <p>A backfill creates a run per date or per listed value, respects the flow's resources,
+          and pairs with targets so a second pass touches only the days that are still missing.</p>
+          <a class="cy-more" href="{{ 'guides/backfill/' | url }}">Backfill a date range</a>
+        </div>
+        <div class="cy-feature__figure cy-backfill">
+          <p class="cy-backfill__cmd">
+            <code>cereyan backfill daily --from 2026-01-01 --to 2026-01-28</code>
+            <span>28 runs</span>
+          </p>
+          <div class="cy-backfill__grid" role="img" aria-label="Twenty-eight backfill runs: eighteen completed, four skipped, two running, one failed, and seven still scheduled">
+            <span class="is-completed"></span><span class="is-completed"></span><span class="is-skipped"></span>
+            <span class="is-completed"></span><span class="is-completed"></span><span class="is-failed"></span>
+            <span class="is-completed"></span><span class="is-skipped"></span><span class="is-completed"></span>
+            <span class="is-completed"></span><span class="is-completed"></span><span class="is-skipped"></span>
+            <span class="is-completed"></span><span class="is-completed"></span><span class="is-completed"></span>
+            <span class="is-skipped"></span><span class="is-completed"></span><span class="is-completed"></span>
+            <span class="is-running"></span><span class="is-running"></span><span class="is-scheduled"></span>
+            <span class="is-scheduled"></span><span class="is-scheduled"></span><span class="is-scheduled"></span>
+            <span class="is-scheduled"></span><span class="is-scheduled"></span><span class="is-scheduled"></span>
+            <span class="is-scheduled"></span>
+          </div>
+          <p class="cy-legend">
+            <span class="is-completed">Completed</span>
+            <span class="is-skipped">Skipped</span>
+            <span class="is-running">Running</span>
+            <span class="is-failed">Failed</span>
+            <span class="is-scheduled">Scheduled</span>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="cy-perf">
+      <div class="cy-perf__inner">
+        <div class="cy-perf__lede">
+          <h2>Targets the benchmarks enforce.</h2>
+          <p>These numbers shaped the design, and CI fails when one is missed or regresses more
+          than twenty percent against the checked-in baseline. Measured on a developer laptop; a
+          small server does better.</p>
+          <a class="cy-more" href="{{ 'design/performance/' | url }}">How they are checked</a>
+        </div>
+        <table class="cy-table">
+          <caption>Performance targets</caption>
+          <tbody>
+            <tr><th scope="row">Server start with 1M historical runs</th><td>under 200 ms</td></tr>
+            <tr><th scope="row">Task transitions ingested</th><td>20k per second</td></tr>
+            <tr><th scope="row">Log lines ingested</th><td>100k per second</td></tr>
+            <tr><th scope="row">Runs list query at 1M runs</th><td>under 10 ms</td></tr>
+            <tr><th scope="row">Schedule wake-up drift</th><td>under 50 ms</td></tr>
+            <tr><th scope="row">Backfill create of 10k runs</th><td>under 1 s</td></tr>
+            <tr><th scope="row">Warm-pool overhead, Scheduled to user code</th><td>under 5 ms</td></tr>
+            <tr><th scope="row">Counts endpoint</th><td>under 5 ms</td></tr>
+            <tr><th scope="row">Orchestration cost per completed task run</th><td>under 200 &micro;s</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="cy-section cy-cards">
+      <div class="cy-card">
+        <h3>Agents read the same store you do.</h3>
+        <p>A built-in MCP server exposes runs, logs, states and actions as tools, so an assistant
+        can diagnose a failure without a scraping layer. The whole site is published as one file
+        for retrieval too.</p>
+        <p class="cy-card__links">
+          <a href="{{ 'llms.txt' | url }}">llms.txt</a>
+          <a href="{{ 'llms-full.txt' | url }}">llms-full.txt</a>
+          <a href="{{ 'reference/mcp/' | url }}">MCP reference</a>
+        </p>
+      </div>
+      <div class="cy-card">
+        <h3>Coming from Prefect or Luigi?</h3>
+        <p>The decorators will look familiar, and the migration guide maps the concepts you
+        already have onto flows, tasks, targets and rules, including the ones that do not
+        translate cleanly.</p>
+        <p class="cy-card__links">
+          <a class="cy-more" href="{{ 'guides/migrate/' | url }}">Read the migration guide</a>
+        </p>
+      </div>
+    </section>
+
+    <section class="cy-cta">
+      <svg class="cy-mark cy-mark--big" viewBox="0 0 18 18" aria-hidden="true"><path d="M2.5 9C4.7 3 7.2 3 9 9s4.3 6 6.5 0" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <h2>Install it, run your script, and look at what happened.</h2>
+      <p>Nothing to sign up for and nothing to configure. The first run is recorded before you
+      have decided whether you like it.</p>
+      <p class="cy-actions">
+        <code class="cy-install cy-install--dark"><span class="cy-prompt">$</span> pip install cereyan</code>
+        <a class="cy-btn cy-btn--invert" href="{{ 'get-started/quickstart/' | url }}">Read the quickstart</a>
+      </p>
+    </section>
+
+  </div>
+{% endblock %}

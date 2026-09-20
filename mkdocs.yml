@@ -16,6 +16,7 @@ exclude_docs: |
 
 theme:
   name: material
+  custom_dir: overrides
   language: en
   logo: assets/logo.svg
   favicon: assets/favicon.svg
@@ -51,6 +52,7 @@ theme:
 
 extra_css:
   - stylesheets/brand.css
+  - stylesheets/home.css
 
 markdown_extensions:
   - admonition
