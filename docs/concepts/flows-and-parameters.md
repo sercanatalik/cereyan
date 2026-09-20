@@ -43,6 +43,9 @@ Runs get a random `adjective-animal` name unless the flow sets `run_name`: a `st
 | Reliability | `retries`, `retry_delay`, `timeout_seconds`, `crash_retries` | [Retry, time out and survive crashes](../guides/retries-timeouts-crashes.md) |
 | Hooks | `on_completion`, `on_failure`, `on_crashed`, `on_cancellation` | [Run code on state changes](../guides/state-hooks.md) |
 | Concurrency | `max_concurrent`, `on_overlap`, `resources`, `priority`, `disable_after` | [Resources and concurrency](resources-and-concurrency.md) |
+| Admission | `unique` | [Keep runs unique](../guides/resources-and-overlap.md#keep-runs-unique) |
+| Recovery | `checkpoint`, `checkpoint_max_bytes` | [Checkpoints](runs-and-states.md#checkpoints) |
+| Health | `fresh_within`, `expect_by`, `expect_by_tz`, `expected_duration`, `overdue_factor` | [Freshness and deadlines](../guides/detect-missing-events.md#freshness-and-deadlines-in-one-line) |
 | Dependencies | `after`, `batch_key` | [Dependencies](dependencies.md) |
 | Backfills | `bulk_complete` | [Backfills](backfills.md) |
 | Execution | `runner`, `isolated`, `log_prints` | [Tasks](tasks.md), [Engines and the home directory](engines-and-home.md) |

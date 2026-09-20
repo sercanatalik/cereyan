@@ -19,7 +19,8 @@ assert etl(date(2026, 9, 6)) == 6   # recorded as a run in ~/.cereyan/db.sqlite
 
 - **Offline first.** `python pipeline.py` records runs into a local SQLite file. Nothing else needs to run.
 - **One process to serve.** `cereyan serve dir/` hosts the API, the UI, the scheduler, a warm pool of engine processes, and a built-in MCP server for agents.
-- **Data-pipeline semantics.** Targets make reruns idempotent, backfills cover date ranges, resources are named semaphores, flows chain and fan in by key, and rules react to events or to their absence.
+- **Data-pipeline semantics.** Targets make reruns idempotent, backfills cover date ranges or listed values, resources are named semaphores that can be keyed by parameter, flows chain and fan in by key, unique keys stop duplicate runs, and rules react to events or to their absence.
+- **Durable runs.** Every completed task is checkpointed, so a crash rerun or a retry from failure resumes after the last finished task; a run can sleep, wait for an event or a target, or snooze without holding an engine; and a task keeps notes that survive its retries.
 
 ![The dashboard: counts by state, a Needs attention list, Running now with task progress, and the live event feed](images/dashboard.png#only-light)
 ![The dashboard: counts by state, a Needs attention list, Running now with task progress, and the live event feed](images/dashboard-dark.png#only-dark)

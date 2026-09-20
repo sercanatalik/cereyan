@@ -204,6 +204,9 @@ nav:
       - Alerting: examples/alerting.md
       - Webhook route: examples/webhook_route.md
       - Agent diagnosis: examples/agent_diagnosis.md
+      - Durable load: examples/durable_load.md
+      - Admission control: examples/admission.md
+      - Freshness and deadlines: examples/freshness.md
   - Design:
       - Design and limitations: design/limitations.md
       - Architecture: design/architecture.md

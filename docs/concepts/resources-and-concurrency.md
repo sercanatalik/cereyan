@@ -19,6 +19,8 @@ A **resource** is a named counting semaphore with a total set in `cereyan.toml` 
 
 Offline, a resource is a local semaphore of size one, which serialises tasks holding the same name inside a single process.
 
+A name can be a template over the run's parameters, `api:{{ tenant }}`, rendered when the run is admitted or the task starts; a `[resources]` key with `*` gives every matching name its own total, and `tag:<name>` totals limit runs by tag. See [Keyed resources](../guides/resources-and-overlap.md#keyed-resources).
+
 ## Per-flow cap and overlap
 
 `max_concurrent=N` is a resource named after the flow with total `N`: at most `N` runs of the flow are Pending or Running at once. The default is unlimited. `on_overlap` decides what a new run does when the cap is reached:

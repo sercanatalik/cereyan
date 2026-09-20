@@ -122,4 +122,5 @@ Rules can also be created in the UI with webhook, email, run-flow, cancel, set-s
 
 - Take the [tour of the UI](tour.md).
 - Read the [concepts](../concepts/app-and-projects.md) for the model behind what you just did.
-- Pick a guide: [retries and timeouts](../guides/retries-timeouts-crashes.md), [schedules](../guides/schedule-a-flow.md), [backfills](../guides/backfill.md), [rules](../guides/rules.md), or [using cereyan with an AI agent](../guides/agents.md).
+- Pick a guide: [retries and timeouts](../guides/retries-timeouts-crashes.md), [schedules](../guides/schedule-a-flow.md), [backfills](../guides/backfill.md), [rules](../guides/rules.md), [waiting without holding an engine](../guides/wait-durably.md), or [using cereyan with an AI agent](../guides/agents.md).
+- See the [examples](../examples/pipeline.md): a durable load, admission control, and freshness and deadlines each show one of the newer features end to end.

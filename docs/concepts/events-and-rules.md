@@ -54,8 +54,9 @@ Every other name is yours and is never checked, so `on="orders.table_empty"` nee
 
 | Action | Effect |
 |---|---|
-| `run_flow` | Create a run of a flow with templated parameters |
+| `run_flow` | Create a run of a flow with templated parameters, now or after `delay` seconds |
 | `cancel_run` | Cancel the run the event is about |
+| `cancel_runs` | Cancel the active runs a templated selector matches (flow, parameters, states), never the event's own run |
 | `set_state` | Force the run into a state |
 | `pause_schedule`, `resume_schedule` | Stop or restart a schedule |
 | `webhook` | HTTP request with a templated body; three attempts with backoff |

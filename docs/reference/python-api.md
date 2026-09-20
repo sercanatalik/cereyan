@@ -117,6 +117,34 @@ assert report().endswith("/record-0")   # "report#1: <run name>/record-0"
 
 ::: cereyan.wait_for_input
 
+## Durable waits
+
+::: cereyan.sleep
+
+::: cereyan.sleep_until
+
+::: cereyan.wait_for_event
+
+::: cereyan.wait_for_target
+
+::: cereyan.Snooze
+
+::: cereyan.WaitTimeout
+
+## Task state
+
+::: cereyan.task_state.get
+
+::: cereyan.task_state.set
+
+::: cereyan.task_state.delete
+
+::: cereyan.task_state.items
+
+## Unique runs
+
+::: cereyan.Unique
+
 ## Client
 
 The module-level functions use the server recorded in `server.json` of the runtime home; `Client` targets any server explicitly.
