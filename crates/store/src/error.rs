@@ -19,6 +19,8 @@ pub enum StoreError {
     Migration(String),
     #[error("{0} not found")]
     NotFound(&'static str),
+    #[error("run {existing} already holds the unique key")]
+    UniqueConflict { existing: i64 },
     #[error("invalid {0}")]
     Invalid(String),
     #[error("writer thread is gone")]

@@ -158,6 +158,7 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 
 | Status | Body |
 |---|---|
+| 200 | [`RunConflict`](#runconflict) (application/json) |
 | 201 | [`Run`](#run) (application/json) |
 | 422 | Invalid parameters |
 
@@ -230,6 +231,7 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 
 | Status | Body |
 |---|---|
+| 200 | [`RunConflict`](#runconflict) (application/json) |
 | 201 | [`Run`](#run) (application/json) |
 | 404 | Unknown flow and no module given |
 | 422 | no body |
@@ -1129,6 +1131,8 @@ know it yet (offline handoff from another project).
 | `flow` | string | yes |  |
 | `flow_group` | string or null | no | The flow's declared group; absent leaves the registered group as it is. |
 | `flow_tags` | array of string | no |  |
+| `idempotency_key` | string or null | no | The same key for this flow within `idempotency_ttl` answers with the run first created. |
+| `idempotency_ttl` | number or null (double) | no | Seconds the idempotency key stays valid (default 86400). |
 | `module` | string or null | no |  |
 | `name` | string or null | no |  |
 | `options` | object | no |  |
@@ -1144,6 +1148,8 @@ know it yet (offline handoff from another project).
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `delay` | number or null (double) | no | Start this many seconds from now instead of now; not with `scheduled_time`. |
+| `idempotency_key` | string or null | no | The same key for this flow within `idempotency_ttl` answers with the run first created. |
+| `idempotency_ttl` | number or null (double) | no | Seconds the idempotency key stays valid (default 86400). |
 | `name` | string or null | no |  |
 | `parameters` | object | no |  |
 | `scheduled_time` | integer or null (int64) | no | Start at this time (microseconds since the epoch) instead of now. |
@@ -1330,6 +1336,7 @@ Flow-level options declared in Python and stored as JSON on the flow row.
 | `schedules` | [`ScheduleDecl`](#scheduledecl)[] | no |  |
 | `start_deadline` | number or null (double) | no | Seconds a run may wait to start before it is skipped; a schedule's own value wins. |
 | `timeout_seconds` | number or null (double) | no |  |
+| `unique` | null or [`UniqueSpec`](#uniquespec) | no |  |
 
 ### `FlowSummary`
 
@@ -1675,6 +1682,7 @@ Type: any.
 | `tags` | array of string | no |  |
 | `task_counts` | object | no | Task runs of this run counted by state type; empty until tasks exist. |
 | `total_run_time` | null or [`i64`](#i64) | no |  |
+| `unique_key` | string or null | no | The admission key the run was created under, when the flow is unique or the request carried an idempotency key. |
 
 ### `RunComparison`
 
@@ -1691,6 +1699,15 @@ Type: any.
 | `same_flow` | boolean | yes |  |
 | `summary` | [`CompareSummary`](#comparesummary) | yes |  |
 | `tasks` | [`TaskDiff`](#taskdiff)[] | yes |  |
+
+### `RunConflict`
+
+The run that holds a unique key already, answered instead of a new one.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `conflict` | boolean | yes |  |
+| `run` | [`Run`](#run) | yes |  |
 
 ### `RunGraph`
 
@@ -1989,6 +2006,17 @@ Row counts for the Data tab and the reset dialog.
 | `current` | null or [`State`](#state) | no |  |
 | `error` | string | yes |  |
 | `reason` | string | yes |  |
+
+### `UniqueSpec`
+
+`@flow(unique=Unique(...))`: which runs count as the same run.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key` | string or null | no | Template over the parameters, `{day}`; every parameter when absent. |
+| `on_conflict` | string | no | `skip` (answer with the existing run) or `replace` (cancel it and create anew). |
+| `period` | number or null (double) | no | Fixed windows of this many seconds bucket the key. |
+| `states` | array of string | no | State types in which an existing run counts; empty means every non-terminal one. |
 
 ### `UpcomingItem`
 

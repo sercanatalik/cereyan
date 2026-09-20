@@ -330,13 +330,17 @@ class Client:
                description: str | None = None, parameter_schema: dict | None = None,
                options: dict | None = None, flow_tags: list[str] | None = None,
                flow_group: str | None = None, created_by: str = "client",
-               scheduled_time: int | None = None, delay: float | None = None) -> dict:
+               scheduled_time: int | None = None, delay: float | None = None,
+               idempotency_key: str | None = None, idempotency_ttl: float | None = None) -> dict:
         """``POST /api/runs``: create a run with explicit project and flow, registering the flow when needed.
 
         This is the low-level call used by the offline handoff and by `run`; pass
         ``module`` and ``source_dir`` so the server can import a flow it has not seen.
         ``scheduled_time`` (microseconds) or ``delay`` (seconds) creates the run for
-        later: it waits as Scheduled and starts at that time.
+        later: it waits as Scheduled and starts at that time. ``idempotency_key``
+        makes a repeated call within ``idempotency_ttl`` seconds (default a day)
+        answer with the run first created; the returned run then carries
+        ``conflict: True``, as it does when the flow's own ``unique`` key is held.
         """
         body: dict[str, Any] = {
             "project": project,
@@ -350,6 +354,10 @@ class Client:
             body["scheduled_time"] = int(scheduled_time)
         if delay is not None:
             body["delay"] = float(delay)
+        if idempotency_key is not None:
+            body["idempotency_key"] = idempotency_key
+        if idempotency_ttl is not None:
+            body["idempotency_ttl"] = float(idempotency_ttl)
         if module is not None:
             body["module"] = module
         if source_dir is not None:
@@ -364,10 +372,14 @@ class Client:
             body["flow_tags"] = flow_tags
         if flow_group is not None:
             body["flow_group"] = flow_group
-        return self._request("POST", "/api/runs", body=body)
+        answer = self._request("POST", "/api/runs", body=body)
+        if isinstance(answer, dict) and answer.get("conflict") and isinstance(answer.get("run"), dict):
+            return {**answer["run"], "conflict": True}
+        return answer
 
     def run(self, flow: str, project: str | None = None, *, name: str | None = None,
             tags: list[str] | None = None, at: "datetime | str | None" = None, delay: float | None = None,
+            idempotency_key: str | None = None, idempotency_ttl: float | None = None,
             **parameters: Any) -> dict:
         """Create a run of a registered flow by name. Returns the run.
 
@@ -385,7 +397,8 @@ class Client:
                 raise CereyanError(f"flow {flow!r} exists in several projects {projects}; pass project=")
             project = matches[0]["project"]
         return self.submit(project, flow, to_json_value(parameters), name=name, tags=tags,
-                           scheduled_time=_micros(at), delay=delay)
+                           scheduled_time=_micros(at), delay=delay,
+                           idempotency_key=idempotency_key, idempotency_ttl=idempotency_ttl)
 
 
 class AuthRequired(CereyanError):

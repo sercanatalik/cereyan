@@ -621,6 +621,21 @@
             },
             "type": "array"
           },
+          "idempotency_key": {
+            "description": "The same key for this flow within `idempotency_ttl` answers with the run first created.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "idempotency_ttl": {
+            "description": "Seconds the idempotency key stays valid (default 86400).",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "module": {
             "type": [
               "string",
@@ -676,6 +691,21 @@
         "properties": {
           "delay": {
             "description": "Start this many seconds from now instead of now; not with `scheduled_time`.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "idempotency_key": {
+            "description": "The same key for this flow within `idempotency_ttl` answers with the run first created.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "idempotency_ttl": {
+            "description": "Seconds the idempotency key stays valid (default 86400).",
             "format": "double",
             "type": [
               "number",
@@ -1348,6 +1378,18 @@
             "type": [
               "number",
               "null"
+            ]
+          },
+          "unique": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UniqueSpec",
+                "description": "At most one run per key at a time; see `UniqueSpec`."
+              }
             ]
           }
         },
@@ -2684,6 +2726,13 @@
                 "$ref": "#/components/schemas/i64"
               }
             ]
+          },
+          "unique_key": {
+            "description": "The admission key the run was created under, when the flow is unique\nor the request carried an idempotency key.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -2767,6 +2816,22 @@
           "new_errors",
           "artifacts",
           "summary"
+        ],
+        "type": "object"
+      },
+      "RunConflict": {
+        "description": "The run that holds a unique key already, answered instead of a new one.",
+        "properties": {
+          "conflict": {
+            "type": "boolean"
+          },
+          "run": {
+            "$ref": "#/components/schemas/Run"
+          }
+        },
+        "required": [
+          "conflict",
+          "run"
         ],
         "type": "object"
       },
@@ -4108,6 +4173,42 @@
         ],
         "type": "object"
       },
+      "UniqueSpec": {
+        "description": "`@flow(unique=Unique(...))`: which runs count as the same run.",
+        "properties": {
+          "key": {
+            "default": null,
+            "description": "Template over the parameters, `{day}`; every parameter when absent.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "on_conflict": {
+            "default": "skip",
+            "description": "`skip` (answer with the existing run) or `replace` (cancel it and create anew).",
+            "type": "string"
+          },
+          "period": {
+            "default": null,
+            "description": "Fixed windows of this many seconds bucket the key.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "states": {
+            "default": [],
+            "description": "State types in which an existing run counts; empty means every non-terminal one.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "UpcomingItem": {
         "description": "One entry of the upcoming list: a run, or with `projected=N` a fire without one.",
         "oneOf": [
@@ -5381,6 +5482,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunConflict"
+                }
+              }
+            },
+            "description": "A run already holds the unique or idempotency key"
+          },
           "201": {
             "content": {
               "application/json": {
@@ -6237,6 +6348,16 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunConflict"
+                }
+              }
+            },
+            "description": "A run already holds the unique or idempotency key"
+          },
           "201": {
             "content": {
               "application/json": {

@@ -669,6 +669,7 @@ mod tests {
             attempt: 0,
             backfill_id: None,
             task_counts: Default::default(),
+            unique_key: None,
         }
     }
 

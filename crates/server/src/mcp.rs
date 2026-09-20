@@ -982,7 +982,7 @@ async fn call_tool(
             };
             let delay = args.get("delay_seconds").and_then(|d| d.as_f64());
             let starts = runs::not_before(at, delay)?;
-            let run = runs::create_run_inner(
+            let (run, conflict) = runs::create_run_checked(
                 state,
                 &flow,
                 parameters,
@@ -991,14 +991,17 @@ async fn call_tool(
                 &crate::auth::run_creator(user, &format!("mcp:{client}")),
                 starts,
                 None,
+                None,
             )
             .await?;
-            let note = if starts.is_some_and(|t| t > now_micros()) {
+            let note = if conflict {
+                "not created: this run already holds the flow's unique key; follow it with get_run"
+            } else if starts.is_some_and(|t| t > now_micros()) {
                 "created for later; it starts at scheduled_time"
             } else {
                 "created; follow it with get_run"
             };
-            Ok(json!({"run": run, "note": note}))
+            Ok(json!({"run": run, "conflict": conflict, "note": note}))
         }
         "cancel_run" => {
             let id = arg_i64(args, "run_id")?;

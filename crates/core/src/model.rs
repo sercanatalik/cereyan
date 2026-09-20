@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::id::Id;
-use crate::state::State;
+use crate::state::{State, StateType};
 use crate::time::Micros;
 
 /// A registered flow. Identity is `(project, name)`.
@@ -102,6 +102,10 @@ pub struct Run {
     /// Task runs of this run counted by state type; empty until tasks exist.
     #[serde(default)]
     pub task_counts: std::collections::BTreeMap<String, i64>,
+    /// The admission key the run was created under, when the flow is unique
+    /// or the request carried an idempotency key.
+    #[serde(default)]
+    pub unique_key: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -246,6 +250,50 @@ pub struct FlowOptions {
     pub has_crash_hooks: bool,
     /// Seconds a run may wait to start before it is skipped; a schedule's own value wins.
     pub start_deadline: Option<f64>,
+    /// At most one run per key at a time; see `UniqueSpec`.
+    pub unique: Option<UniqueSpec>,
+}
+
+/// `@flow(unique=Unique(...))`: which runs count as the same run.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(default)]
+pub struct UniqueSpec {
+    /// Template over the parameters, `{day}`; every parameter when absent.
+    pub key: Option<String>,
+    /// Fixed windows of this many seconds bucket the key.
+    pub period: Option<f64>,
+    /// State types in which an existing run counts; empty means every non-terminal one.
+    pub states: Vec<String>,
+    /// `skip` (answer with the existing run) or `replace` (cancel it and create anew).
+    pub on_conflict: String,
+}
+
+impl Default for UniqueSpec {
+    fn default() -> Self {
+        UniqueSpec {
+            key: None,
+            period: None,
+            states: Vec::new(),
+            on_conflict: "skip".into(),
+        }
+    }
+}
+
+impl UniqueSpec {
+    /// The states an existing run must be in to count: the declared ones, or
+    /// every non-terminal state type.
+    pub fn counting_states(&self) -> Vec<String> {
+        if self.states.is_empty() {
+            StateType::ALL
+                .into_iter()
+                .filter(|t| !t.is_terminal())
+                .map(|t| t.as_str().to_string())
+                .collect()
+        } else {
+            self.states.clone()
+        }
+    }
 }
 
 impl FlowOptions {

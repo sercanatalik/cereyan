@@ -421,7 +421,15 @@ def run_flow(flow, args: tuple, kwargs: dict) -> Any:
 
     flow_id = register_flow(store, flow)
     run_name = flow.render_run_name(values) or names.generate(store)
-    run_id, external_id = store.create_run(flow_id, run_name, flow.parameters_json(values), json.dumps(flow.tags))
+    if flow.unique is not None:
+        run_id, external_id, conflict = store.create_run_unique(
+            flow_id, run_name, flow.parameters_json(values), json.dumps(flow.tags), json.dumps(flow.unique.spec())
+        )
+        if conflict:
+            print(f"cereyan: run {run_id} already holds the unique key of flow {flow.name!r}; not running again", file=sys.stderr)
+            return None
+    else:
+        run_id, external_id = store.create_run(flow_id, run_name, flow.parameters_json(values), json.dumps(flow.tags))
     backend = StoreBackend(store, run_id)
     try:
         return execute_run(flow, values, backend, RunInfo(run_id, external_id, run_name))

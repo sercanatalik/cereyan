@@ -6,7 +6,7 @@ from ._core import StoreLocked, TransitionRejected
 from . import client, runtime
 from .apps import App, get_default_app
 from .exceptions import Abort, CereyanError, ParameterError
-from .flows import Flow, flow
+from .flows import Flow, flow, Unique
 from .logging import get_run_logger
 from . import artifacts, events, states
 from .events import emit_event
@@ -33,6 +33,7 @@ __all__ = [
     "Future",
     "INPUTS",
     "Interval",
+    "Unique",
     "LocalTarget",
     "ProcessRunner",
     "RRule",

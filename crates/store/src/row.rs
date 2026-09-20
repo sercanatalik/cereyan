@@ -45,7 +45,7 @@ pub const RUN_COLUMNS: &str =
     r.attributes, \
     (SELECT json_group_object(st, n) FROM (SELECT COALESCE(t.state_type, 'Pending') AS st, COUNT(*) AS n \
      FROM task_run t WHERE t.run_id = r.id GROUP BY st)) AS task_counts, \
-    COALESCE(f.flow_group, f.project) AS flow_group";
+    COALESCE(f.flow_group, f.project) AS flow_group, r.unique_key";
 
 pub fn run_from_row(row: &Row<'_>) -> rusqlite::Result<Run> {
     let external: Vec<u8> = row.get(1)?;
@@ -86,6 +86,7 @@ pub fn run_from_row(row: &Row<'_>) -> rusqlite::Result<Run> {
         attempt: row.get(27)?,
         backfill_id: row.get(28)?,
         task_counts: json_counts(row.get(30)?),
+        unique_key: row.get(32)?,
     })
 }
 

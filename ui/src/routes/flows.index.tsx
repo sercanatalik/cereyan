@@ -123,7 +123,10 @@ function FlowsPage() {
     onSuccess: (created) => {
       setTarget(null);
       client.invalidateQueries({ queryKey: ["runs"] });
-      navigate({ to: "/runs/$runId", params: { runId: String(created.id) } });
+      navigate({
+        to: "/runs/$runId",
+        params: { runId: String("conflict" in created ? created.run.id : created.id) },
+      });
     },
     onError: (e) => setError(e instanceof ApiError ? e.message : String(e)),
   });

@@ -50,6 +50,30 @@ assert train() == "select 1"
 
 A run or task run waits as `AwaitingResource` until every resource it declares has capacity, and a `resource.exhausted` event records the first wait. Units are released on every terminal state, on pause, and when an engine dies. Resources are global to the machine, so two projects declaring `db` share the same four units. A resource that is not declared in configuration has no limit.
 
+## Keep runs unique
+
+Overlap policies act on a flow as a whole; a unique key acts on *which* run it is. `@flow(unique=Unique(key="{day}"))` says that at most one run of `load` for a given `day` exists at a time: while such a run is Scheduled, Pending, Running or Paused, submitting another for the same day creates nothing and answers with the run that holds the key. The check applies wherever a run is created: `POST /api/runs` answers `200 {"conflict": true, "run": ...}` instead of `201`, `Client.run` returns the run with `conflict: True`, the MCP `run_flow` tool reports `conflict`, a rule's `run_flow` records it in its outcome, and an offline flow call returns `None` without executing.
+
+```python
+from cereyan import Unique, flow
+
+@flow(unique=Unique(key="{day}"))
+def load(day: str) -> str:
+    return day
+
+@flow(unique=Unique(period=3600, states=("Scheduled", "Pending", "Running", "Completed")))
+def hourly_report(region: str) -> str:
+    return region
+
+@flow(unique=Unique(on_conflict="replace"))
+def sync() -> None:
+    ...
+```
+
+Without `key`, every parameter is the key. `period` buckets the key by fixed clock windows, and adding `Completed` to `states` keeps the key taken after the run ends, so `hourly_report` runs at most once per region per hour whatever asks for it. `on_conflict="replace"` cancels the run that holds the key and creates the new one; a run that is already winding down keeps it.
+
+A request can carry its own key instead: `idempotency_key` (and `idempotency_ttl`, a day by default) on `POST /api/runs`, `POST /api/flows/{id}/runs` and `Client.run` makes a repeated call, a webhook delivered twice for instance, answer with the run first created whatever its state. Runs started by a dependency are keyed by their upstream run, so an upstream completion processed twice starts one downstream run.
+
 ## Order the queue
 
 `priority` (higher first) decides which waiting run gets the next free engine or unit. It never preempts a running run. A negative priority also lowers the engine's OS scheduling priority on Linux and macOS, useful for background reprocessing:

@@ -127,7 +127,9 @@ function FlowDetail() {
       ),
     onSuccess: (created) => {
       setRunOpen(false);
-      navigate({ to: "/runs/$runId", params: { runId: String(created.id) } });
+      // 200 `{conflict, run}` when a run already holds the flow's unique key.
+      const target = "conflict" in created ? created.run : created;
+      navigate({ to: "/runs/$runId", params: { runId: String(target.id) } });
     },
     onError: (e) => setError(e instanceof ApiError ? e.message : String(e)),
   });

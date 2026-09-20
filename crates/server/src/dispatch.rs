@@ -331,6 +331,7 @@ pub fn crash_rerun(state: &Arc<AppState>, crashed_id: i64) {
         parent_run_id: Some(crashed_id),
         attempt: crashed.attempt + 1,
         backfill_id: crashed.backfill_id,
+        unique: None,
     });
     let Ok((run_id, _)) = created else { return };
     let Ok(Some(run)) = state.store.get_run(run_id) else {
@@ -566,6 +567,20 @@ fn trigger_dependents_at(state: &Arc<AppState>, upstream: &Flow, run: &Run, dept
         } else {
             State::new(StateType::Scheduled)
         };
+        // Keyed by the upstream run unless the flow declares its own key, so a
+        // completion delivered twice starts one downstream run.
+        let unique = crate::api::runs::unique_check_for(&downstream, &params, None).or_else(|| {
+            Some(cereyan_store::UniqueCheck {
+                key: cereyan_core::unique::unique_key(
+                    downstream.id,
+                    &format!("dep:{}", run.id),
+                    None,
+                    0,
+                ),
+                states: Vec::new(),
+                since: None,
+            })
+        });
         let created = state.store.create_run_full(CreateRun {
             flow_id: downstream.id,
             name,
@@ -574,6 +589,7 @@ fn trigger_dependents_at(state: &Arc<AppState>, upstream: &Flow, run: &Run, dept
             created_by: format!("run:{}", run.id),
             initial_state: Some(initial),
             priority: opts.priority,
+            unique,
             ..Default::default()
         });
         if let Ok((run_id, _)) = created {

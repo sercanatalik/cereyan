@@ -7,7 +7,7 @@ use cereyan_core::{Flow, Run};
 use serde::{Deserialize, Serialize};
 
 use super::error::{ApiError, ApiResult};
-use super::runs::{create_run_inner, CreateRunForFlowBody};
+use super::runs::CreateRunForFlowBody;
 use crate::auth::{run_creator, AuthenticatedUser};
 use crate::state::AppState;
 
@@ -139,20 +139,22 @@ pub async fn delete_flow(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[utoipa::path(post, path = "/api/flows/{id}/runs", params(("id" = i64, Path)), request_body = CreateRunForFlowBody, responses((status = 201, body = Run), (status = 422, description = "Invalid parameters")))]
+#[utoipa::path(post, path = "/api/flows/{id}/runs", params(("id" = i64, Path)), request_body = CreateRunForFlowBody, responses((status = 201, body = Run), (status = 200, body = super::runs::RunConflict, description = "A run already holds the unique or idempotency key"), (status = 422, description = "Invalid parameters")))]
 pub async fn create_run_for_flow(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
     user: Option<Extension<AuthenticatedUser>>,
     Json(body): Json<CreateRunForFlowBody>,
-) -> ApiResult<(StatusCode, Json<Run>)> {
+) -> ApiResult<axum::response::Response> {
     let flow = state
         .store
         .get_flow(id)?
         .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
     let created_by = run_creator(user.as_ref().map(|Extension(u)| u), "api");
     let starts = super::runs::not_before(body.scheduled_time, body.delay)?;
-    let run = create_run_inner(
+    let idempotency =
+        super::runs::Idempotency::from_body(body.idempotency_key, body.idempotency_ttl)?;
+    let (run, conflict) = super::runs::create_run_checked(
         &state,
         &flow,
         body.parameters,
@@ -161,7 +163,8 @@ pub async fn create_run_for_flow(
         &created_by,
         starts,
         None,
+        idempotency,
     )
     .await?;
-    Ok((StatusCode::CREATED, Json(run)))
+    Ok(super::runs::created_response(run, conflict))
 }

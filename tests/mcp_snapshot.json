@@ -453,7 +453,8 @@
             "state",
             "tags",
             "task_counts",
-            "total_run_time"
+            "total_run_time",
+            "unique_key"
           ]
         },
         "keys": [
@@ -534,6 +535,7 @@
     "run_flow": {
       "default": {
         "keys": [
+          "conflict",
           "note",
           "run"
         ]

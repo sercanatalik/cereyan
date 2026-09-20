@@ -8,6 +8,7 @@ pub mod rules;
 pub mod schedule;
 pub mod state;
 pub mod time;
+pub mod unique;
 
 pub use events::{check_event_name, check_state_name, EventName, NameError, RESERVED_PREFIXES};
 pub use id::{new_id, Id};

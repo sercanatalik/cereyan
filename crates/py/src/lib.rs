@@ -24,12 +24,19 @@ create_exception!(
     PyRuntimeError,
     "A state transition was rejected by the rules."
 );
+create_exception!(
+    _core,
+    UniqueConflict,
+    PyRuntimeError,
+    "A run with the same unique key already exists; the message is its id."
+);
 
 fn to_py(e: StoreError) -> PyErr {
     match e {
         StoreError::Locked { .. } => StoreLocked::new_err(e.to_string()),
         StoreError::Rejected(reason) => TransitionRejected::new_err(reason),
         StoreError::RejectedWith { reason, .. } => TransitionRejected::new_err(reason),
+        StoreError::UniqueConflict { existing } => UniqueConflict::new_err(existing.to_string()),
         StoreError::Invalid(_) => PyValueError::new_err(e.to_string()),
         other => PyRuntimeError::new_err(other.to_string()),
     }
@@ -151,6 +158,53 @@ impl Store {
             .detach(move || store.create_run(flow_id, &name, &parameters, &tags))
             .map_err(to_py)?;
         Ok((id, ext.to_string()))
+    }
+
+    /// Create a run under a flow's `unique` declaration (JSON of the
+    /// UniqueSpec). Returns (id, external_id, conflict): with `conflict` true
+    /// the id is the run that already holds the key and nothing was created.
+    fn create_run_unique(
+        &self,
+        py: Python<'_>,
+        flow_id: i64,
+        name: String,
+        parameters: String,
+        tags: String,
+        unique: String,
+    ) -> PyResult<(i64, String, bool)> {
+        let spec: cereyan_core::UniqueSpec = serde_json::from_str(&unique)
+            .map_err(|e| PyValueError::new_err(format!("bad unique spec: {e}")))?;
+        let params: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(&parameters).unwrap_or_default();
+        let rendered = cereyan_core::unique::render_key(spec.key.as_deref(), &params);
+        let key = cereyan_core::unique::unique_key(
+            flow_id,
+            &rendered,
+            spec.period,
+            cereyan_core::now_micros(),
+        );
+        let check = cereyan_store::UniqueCheck {
+            key,
+            states: spec.counting_states(),
+            since: None,
+        };
+        let store = self.inner.clone();
+        let result = py.detach(move || {
+            store.create_run_full(cereyan_store::CreateRun {
+                flow_id,
+                name,
+                parameters,
+                tags,
+                created_by: "script".into(),
+                unique: Some(check),
+                ..Default::default()
+            })
+        });
+        match result {
+            Ok((id, ext)) => Ok((id, ext.to_string(), false)),
+            Err(StoreError::UniqueConflict { existing }) => Ok((existing, String::new(), true)),
+            Err(e) => Err(to_py(e)),
+        }
     }
 
     /// Propose a run state. Returns the accepted state as JSON or raises TransitionRejected.
@@ -745,6 +799,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(schedule_fires, m)?)?;
     m.add_function(wrap_pyfunction!(check_routes, m)?)?;
     m.add("StoreLocked", m.py().get_type::<StoreLocked>())?;
+    m.add("UniqueConflict", m.py().get_type::<UniqueConflict>())?;
     m.add(
         "TransitionRejected",
         m.py().get_type::<TransitionRejected>(),

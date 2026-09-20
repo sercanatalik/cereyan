@@ -42,6 +42,43 @@ def _parse_after(after, batch_key):
     return {"flow": names[0], "flows": names, "key": batch_key, "parameters": parameters}
 
 
+class Unique:
+    """At most one run of the flow per key at a time: ``@flow(unique=Unique(...))``.
+
+    Args:
+        key: Template over the flow's parameters, ``"{day}"``; every parameter when
+            ``None``. Two submissions render the same key when they name the same run.
+        period: Seconds; fixed windows bucket the key, so ``period=3600`` allows one
+            run per key per clock hour.
+        states: State types in which an existing run counts, default every
+            non-terminal one. Add ``"Completed"`` to keep a key taken after the run ends.
+        on_conflict: ``"skip"`` (the default) answers with the run that holds the key
+            and creates nothing; ``"replace"`` cancels it and creates the new run.
+    """
+
+    def __init__(self, key: str | None = None, period: float | None = None,
+                 states: Iterable[str] = (), on_conflict: str = "skip") -> None:
+        if on_conflict not in ("skip", "replace"):
+            raise ValueError("on_conflict must be 'skip' or 'replace'")
+        if period is not None and float(period) <= 0:
+            raise ValueError("period must be a positive number of seconds")
+        known = ("Scheduled", "Pending", "Running", "Paused", "Cancelling", "Completed", "Failed", "Cancelled", "Crashed")
+        self.states = tuple(states)
+        for st in self.states:
+            if st not in known:
+                raise ValueError(f"unknown state type {st!r} in Unique(states=...)")
+        self.key = key
+        self.period = float(period) if period is not None else None
+        self.on_conflict = on_conflict
+
+    def spec(self) -> dict[str, Any]:
+        """The declaration as the server records it in the flow's options."""
+        return {"key": self.key, "period": self.period, "states": list(self.states), "on_conflict": self.on_conflict}
+
+    def __repr__(self) -> str:
+        return f"Unique(key={self.key!r}, period={self.period!r}, states={self.states!r}, on_conflict={self.on_conflict!r})"
+
+
 class Flow:
     """A registered flow: the wrapped function plus its options, parameters, and identity.
 
@@ -85,6 +122,7 @@ class Flow:
         start_deadline: float | None = None,
         checkpoint: bool | None = None,
         checkpoint_max_bytes: int = 50_000_000,
+        unique: "Unique | None" = None,
     ) -> None:
         if not callable(fn):
             raise TypeError("@flow must decorate a callable")
@@ -108,6 +146,9 @@ class Flow:
             raise ValueError("checkpoint must be None, True, or False")
         self.checkpoint = checkpoint
         self.checkpoint_max_bytes = int(checkpoint_max_bytes)
+        if unique is not None and not isinstance(unique, Unique):
+            raise TypeError("unique must be a cereyan.Unique")
+        self.unique = unique
         self.priority = int(priority)
         if max_concurrent is not None and int(max_concurrent) < 1:
             raise ValueError("max_concurrent must be at least 1")
@@ -201,6 +242,7 @@ class Flow:
             "start_deadline": self.start_deadline,
             "checkpoint": self.checkpoint,
             "checkpoint_max_bytes": self.checkpoint_max_bytes,
+            "unique": self.unique.spec() if self.unique else None,
         }
 
     # -- parameters -------------------------------------------------------
@@ -311,6 +353,9 @@ def flow(
             ``False`` never checkpoints. Replay stops at the first task whose inputs differ.
         checkpoint_max_bytes (int): Largest encoded result that is checkpointed (default
             50 MB); a larger or unpicklable result executes again on replay.
+        unique (Unique | None): At most one run per key at a time; see `Unique`. A
+            second submission answers with the run that holds the key (or, with
+            ``on_conflict="replace"``, cancels it), wherever the run is created.
         resources (dict[str, float] | None): Named resources and the amount each run holds, for example
             ``{"db": 1}``; a run waits as AwaitingResource until they are free.
         after (str | tuple | list[str] | None): Upstream dependency: a flow name, ``(name, {param: template})`` to map

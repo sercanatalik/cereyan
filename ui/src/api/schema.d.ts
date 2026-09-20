@@ -1305,6 +1305,13 @@ export interface components {
             /** @description The flow's declared group; absent leaves the registered group as it is. */
             flow_group?: string | null;
             flow_tags?: string[];
+            /** @description The same key for this flow within `idempotency_ttl` answers with the run first created. */
+            idempotency_key?: string | null;
+            /**
+             * Format: double
+             * @description Seconds the idempotency key stays valid (default 86400).
+             */
+            idempotency_ttl?: number | null;
             module?: string | null;
             name?: string | null;
             options?: Record<string, never>;
@@ -1325,6 +1332,13 @@ export interface components {
              * @description Start this many seconds from now instead of now; not with `scheduled_time`.
              */
             delay?: number | null;
+            /** @description The same key for this flow within `idempotency_ttl` answers with the run first created. */
+            idempotency_key?: string | null;
+            /**
+             * Format: double
+             * @description Seconds the idempotency key stays valid (default 86400).
+             */
+            idempotency_ttl?: number | null;
             name?: string | null;
             parameters?: Record<string, never>;
             /**
@@ -1563,6 +1577,8 @@ export interface components {
              * @default null
              */
             timeout_seconds: number | null;
+            /** @default null */
+            unique: null | components["schemas"]["UniqueSpec"];
         };
         FlowSummary: components["schemas"]["Flow"] & {
             /** @description The batch key of a keyed fan-in. */
@@ -2024,6 +2040,11 @@ export interface components {
                 [key: string]: number;
             };
             total_run_time?: null | components["schemas"]["i64"];
+            /**
+             * @description The admission key the run was created under, when the flow is unique
+             *     or the request carried an idempotency key.
+             */
+            unique_key?: string | null;
         };
         RunComparison: {
             artifacts: components["schemas"]["ArtifactDiff"][];
@@ -2039,6 +2060,11 @@ export interface components {
             same_flow: boolean;
             summary: components["schemas"]["CompareSummary"];
             tasks: components["schemas"]["TaskDiff"][];
+        };
+        /** @description The run that holds a unique key already, answered instead of a new one. */
+        RunConflict: {
+            conflict: boolean;
+            run: components["schemas"]["Run"];
         };
         RunGraph: {
             edges: components["schemas"]["GraphEdge"][];
@@ -2461,6 +2487,30 @@ export interface components {
             current?: null | components["schemas"]["State"];
             error: string;
             reason: string;
+        };
+        /** @description `@flow(unique=Unique(...))`: which runs count as the same run. */
+        UniqueSpec: {
+            /**
+             * @description Template over the parameters, `{day}`; every parameter when absent.
+             * @default null
+             */
+            key: string | null;
+            /**
+             * @description `skip` (answer with the existing run) or `replace` (cancel it and create anew).
+             * @default skip
+             */
+            on_conflict: string;
+            /**
+             * Format: double
+             * @description Fixed windows of this many seconds bucket the key.
+             * @default null
+             */
+            period: number | null;
+            /**
+             * @description State types in which an existing run counts; empty means every non-terminal one.
+             * @default []
+             */
+            states: string[];
         };
         /** @description One entry of the upcoming list: a run, or with `projected=N` a fire without one. */
         UpcomingItem: components["schemas"]["UpcomingRun"] | components["schemas"]["ProjectedFire"];
@@ -3194,6 +3244,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description A run already holds the unique or idempotency key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunConflict"];
+                };
+            };
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -3754,6 +3813,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description A run already holds the unique or idempotency key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunConflict"];
+                };
+            };
             201: {
                 headers: {
                     [name: string]: unknown;

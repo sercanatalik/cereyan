@@ -110,7 +110,10 @@ function RunDetail() {
           body: { parameters: r.parameters as any, tags: [] },
         }),
       ),
-    onSuccess: (created) => navigate({ to: "/runs/$runId", params: { runId: String(created.id) } }),
+    onSuccess: (created) => {
+      const target = "conflict" in created ? created.run : created;
+      navigate({ to: "/runs/$runId", params: { runId: String(target.id) } });
+    },
   });
   const retry = useMutation({
     mutationFn: async (from: string) =>

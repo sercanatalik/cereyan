@@ -656,20 +656,25 @@ pub fn execute(
                 .delay
                 .filter(|d| *d > 0.0)
                 .map(|d| now_micros() + (d * 1_000_000.0) as i64);
-            let (run_id, _) = state
-                .store
-                .create_run_full(CreateRun {
-                    flow_id: flow.id,
-                    name: format!("{}-rule-{}", flow.name, rule.id),
-                    parameters: serde_json::to_string(&params).unwrap_or_else(|_| "{}".into()),
-                    tags: serde_json::to_string(&flow.tags).unwrap_or_else(|_| "[]".into()),
-                    created_by: format!("rule:{}", rule.id),
-                    initial_state: Some(State::new(StateType::Scheduled)),
-                    priority: options.priority,
-                    scheduled_time: due,
-                    ..Default::default()
-                })
-                .map_err(|e| e.to_string())?;
+            let unique = crate::api::runs::unique_check_for(&flow, &params, None);
+            let (run_id, _) = match state.store.create_run_full(CreateRun {
+                flow_id: flow.id,
+                name: format!("{}-rule-{}", flow.name, rule.id),
+                parameters: serde_json::to_string(&params).unwrap_or_else(|_| "{}".into()),
+                tags: serde_json::to_string(&flow.tags).unwrap_or_else(|_| "[]".into()),
+                created_by: format!("rule:{}", rule.id),
+                initial_state: Some(State::new(StateType::Scheduled)),
+                priority: options.priority,
+                scheduled_time: due,
+                unique,
+                ..Default::default()
+            }) {
+                Ok(created) => created,
+                Err(cereyan_store::StoreError::UniqueConflict { existing }) => {
+                    return Ok(json!({"conflict": true, "run_id": existing}));
+                }
+                Err(e) => return Err(e.to_string()),
+            };
             let run = state
                 .store
                 .get_run(run_id)

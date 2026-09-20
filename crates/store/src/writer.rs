@@ -36,6 +36,16 @@ pub struct UpsertFlow {
     pub group: Option<String>,
 }
 
+/// Refuse the creation when a run with `key` exists in one of `states`
+/// (created at or after `since`, when set); the writer answers with its id.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UniqueCheck {
+    pub key: String,
+    /// Empty means every state.
+    pub states: Vec<String>,
+    pub since: Option<i64>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CreateRun {
     pub flow_id: i64,
@@ -50,6 +60,7 @@ pub struct CreateRun {
     pub parent_run_id: Option<i64>,
     pub attempt: i64,
     pub backfill_id: Option<i64>,
+    pub unique: Option<UniqueCheck>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1104,11 +1115,28 @@ fn upsert_flow(conn: &Connection, f: &UpsertFlow) -> Result<i64> {
 }
 
 fn create_run(conn: &Connection, r: &CreateRun) -> Result<(i64, Id)> {
+    if let Some(check) = &r.unique {
+        // Inside the writer, so the lookup and the insert cannot interleave.
+        let states = serde_json::to_string(&check.states).unwrap_or_else(|_| "[]".into());
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM run WHERE unique_key = ?1
+                   AND (?2 = '[]' OR state_type IN (SELECT value FROM json_each(?2)))
+                   AND (?3 IS NULL OR created_at >= ?3)
+                 ORDER BY id DESC LIMIT 1",
+                params![check.key, states, check.since],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(existing) = existing {
+            return Err(StoreError::UniqueConflict { existing });
+        }
+    }
     let id = new_id();
     let mut stmt = conn.prepare_cached(
         "INSERT INTO run (external_id, flow_id, name, parameters, tags, created_at, created_by,
-                          schedule_id, scheduled_time, priority, parent_run_id, attempt, backfill_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                          schedule_id, scheduled_time, priority, parent_run_id, attempt, backfill_id, unique_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
     )?;
     stmt.execute(params![
         id.as_bytes().as_slice(),
@@ -1123,7 +1151,8 @@ fn create_run(conn: &Connection, r: &CreateRun) -> Result<(i64, Id)> {
         r.priority,
         r.parent_run_id,
         r.attempt,
-        r.backfill_id
+        r.backfill_id,
+        r.unique.as_ref().map(|u| u.key.clone())
     ])?;
     drop(stmt);
     let run_id = conn.last_insert_rowid();

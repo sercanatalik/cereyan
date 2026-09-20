@@ -184,6 +184,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         crate::scheduler::Pause,
         pause::SchedulerStatus,
         pause::PauseBody,
+        runs::RunConflict,
         runs::RetryBody,
         runs::RetryResponse,
         crate::compare::RunComparison,

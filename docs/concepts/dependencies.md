@@ -46,6 +46,10 @@ A run skipped by a person, a [skipped fire](schedules.md#skipping-fires) of its 
 
 `batch_key` is required when `after` lists more than one flow; registration rejects the flow otherwise.
 
+## One run per upstream
+
+A downstream run carries a unique key naming the upstream run that triggered it (or the flow's own `unique` key when it declares one), so a completion processed twice starts one run. See [Keep runs unique](../guides/resources-and-overlap.md#keep-runs-unique).
+
 ## Visibility
 
 The flow page lists upstreams under *Triggered by* and downstreams under *Triggers*, the Flows page names every upstream in the flow's **Starts after** column, and a run created by a dependency links to the run that triggered it. An `after=` naming a flow the server has not registered is reported as a flow error at start without stopping other flows.

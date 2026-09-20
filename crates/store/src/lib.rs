@@ -22,7 +22,7 @@ pub use read::{ListRunsFilter, ListTaskRunsFilter, LogFilter, LogsPage, RunsPage
 pub use writer::{
     ArmExpectation, CreateBackfill, CreateRun, CreateTaskRun, DeletedCounts, FlowRows, NewEvent,
     NewLog, ReportEvent, ReportOutcome, ResetScope, RuleWrite, SchedulePatch, ScheduleWrite,
-    UpsertArtifact, UpsertFlow, WriteCommand,
+    UniqueCheck, UpsertArtifact, UpsertFlow, WriteCommand,
 };
 
 use std::path::{Path, PathBuf};

@@ -28,6 +28,92 @@ pub struct CreateRunForFlowBody {
     /// Start this many seconds from now instead of now; not with `scheduled_time`.
     #[serde(default)]
     pub delay: Option<f64>,
+    /// The same key for this flow within `idempotency_ttl` answers with the run first created.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
+    /// Seconds the idempotency key stays valid (default 86400).
+    #[serde(default)]
+    pub idempotency_ttl: Option<f64>,
+}
+
+/// A request-level idempotency key: the same key for the same flow within
+/// `ttl` seconds answers with the run first created.
+#[derive(Clone, Debug)]
+pub struct Idempotency {
+    pub key: String,
+    pub ttl: Option<f64>,
+}
+
+impl Idempotency {
+    pub fn from_body(key: Option<String>, ttl: Option<f64>) -> ApiResult<Option<Idempotency>> {
+        let key = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
+        if ttl.is_some_and(|t| t <= 0.0 || !t.is_finite()) {
+            return Err(ApiError::Unprocessable(
+                "idempotency_ttl must be a positive number of seconds".into(),
+            ));
+        }
+        Ok(key.map(|key| Idempotency { key, ttl }))
+    }
+}
+
+/// What makes this creation unique: the request's idempotency key when given,
+/// else the flow's own `unique` declaration, else nothing.
+pub fn unique_check_for(
+    flow: &Flow,
+    parameters: &Map<String, Value>,
+    idempotency: Option<&Idempotency>,
+) -> Option<cereyan_store::UniqueCheck> {
+    let now = cereyan_core::now_micros();
+    if let Some(idem) = idempotency {
+        let ttl = idem.ttl.unwrap_or(86_400.0);
+        return Some(cereyan_store::UniqueCheck {
+            key: cereyan_core::unique::idempotency_key(flow.id, &idem.key),
+            states: Vec::new(),
+            since: Some(now - (ttl * 1_000_000.0) as i64),
+        });
+    }
+    let spec = FlowOptions::from_map(&flow.options).unique?;
+    let rendered = cereyan_core::unique::render_key(spec.key.as_deref(), parameters);
+    Some(cereyan_store::UniqueCheck {
+        key: cereyan_core::unique::unique_key(flow.id, &rendered, spec.period, now),
+        states: spec.counting_states(),
+        since: None,
+    })
+}
+
+async fn insert_run(
+    state: &Arc<AppState>,
+    cmd: CreateRun,
+) -> ApiResult<Result<(i64, cereyan_core::Id), cereyan_store::StoreError>> {
+    let st = state.clone();
+    tokio::task::spawn_blocking(move || st.store.create_run_full(cmd))
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))
+}
+
+/// The run that holds a unique key already, answered instead of a new one.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct RunConflict {
+    pub conflict: bool,
+    pub run: Run,
+}
+
+/// 201 with the run when created, 200 with `{conflict: true, run}` when a run
+/// already held the key.
+pub fn created_response(run: Run, conflict: bool) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if conflict {
+        (
+            StatusCode::OK,
+            Json(RunConflict {
+                conflict: true,
+                run,
+            }),
+        )
+            .into_response()
+    } else {
+        (StatusCode::CREATED, Json(run)).into_response()
+    }
 }
 
 /// When a new run should start: `scheduled_time` or now plus `delay`, or none for now.
@@ -83,6 +169,12 @@ pub struct CreateRunBody {
     /// Start this many seconds from now instead of now; not with `scheduled_time`.
     #[serde(default)]
     pub delay: Option<f64>,
+    /// The same key for this flow within `idempotency_ttl` answers with the run first created.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
+    /// Seconds the idempotency key stays valid (default 86400).
+    #[serde(default)]
+    pub idempotency_ttl: Option<f64>,
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -150,6 +242,28 @@ pub async fn create_run_inner(
     not_before: Option<i64>,
     parent: Option<(i64, i64)>,
 ) -> ApiResult<Run> {
+    create_run_checked(
+        state, flow, parameters, name, tags, created_by, not_before, parent, None,
+    )
+    .await
+    .map(|(run, _)| run)
+}
+
+/// Create a run under the flow's `unique` declaration or a request's
+/// idempotency key. Returns the run and whether it was one that already held
+/// the key (`skip`), in which case nothing was created.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_run_checked(
+    state: &Arc<AppState>,
+    flow: &Flow,
+    parameters: Map<String, Value>,
+    name: Option<String>,
+    tags: Vec<String>,
+    created_by: &str,
+    not_before: Option<i64>,
+    parent: Option<(i64, i64)>,
+    idempotency: Option<Idempotency>,
+) -> ApiResult<(Run, bool)> {
     if state
         .shutting_down
         .load(std::sync::atomic::Ordering::SeqCst)
@@ -187,24 +301,58 @@ pub async fn create_run_inner(
     let st = state.clone();
     let flow_id = flow.id;
     let created_by = created_by.to_string();
-    let priority = FlowOptions::from_map(&flow.options).priority;
-    let (run_id, _) = tokio::task::spawn_blocking(move || {
-        st.store.create_run_full(CreateRun {
-            flow_id,
-            name,
-            parameters: serde_json::to_string(&effective).unwrap_or_else(|_| "{}".into()),
-            tags: serde_json::to_string(&all_tags).unwrap_or_else(|_| "[]".into()),
-            created_by,
-            initial_state: Some(RunState::new(StateType::Scheduled)),
-            priority,
-            scheduled_time: not_before,
-            parent_run_id: parent.map(|(id, _)| id),
-            attempt: parent.map(|(_, attempt)| attempt).unwrap_or(0),
-            ..Default::default()
-        })
-    })
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))??;
+    let options = FlowOptions::from_map(&flow.options);
+    let priority = options.priority;
+    let unique = unique_check_for(flow, &effective, idempotency.as_ref());
+    let replace = idempotency.is_none()
+        && options
+            .unique
+            .as_ref()
+            .is_some_and(|u| u.on_conflict == "replace");
+    let make = |unique: Option<cereyan_store::UniqueCheck>| CreateRun {
+        flow_id,
+        name: name.clone(),
+        parameters: serde_json::to_string(&effective).unwrap_or_else(|_| "{}".into()),
+        tags: serde_json::to_string(&all_tags).unwrap_or_else(|_| "[]".into()),
+        created_by: created_by.clone(),
+        initial_state: Some(RunState::new(StateType::Scheduled)),
+        priority,
+        scheduled_time: not_before,
+        parent_run_id: parent.map(|(id, _)| id),
+        attempt: parent.map(|(_, attempt)| attempt).unwrap_or(0),
+        unique,
+        ..Default::default()
+    };
+    let holder_of = |existing: i64| -> ApiResult<Run> {
+        state
+            .store
+            .get_run(existing)?
+            .ok_or_else(|| ApiError::Internal("run vanished".into()))
+    };
+    let run_id = match insert_run(&st, make(unique.clone())).await? {
+        Ok((run_id, _)) => run_id,
+        Err(cereyan_store::StoreError::UniqueConflict { existing }) => {
+            let holder = holder_of(existing)?;
+            // `replace`: cancel the holder and try once more; a holder that is
+            // still winding down keeps the key, and the caller gets it.
+            if replace && !holder.state.is_terminal() {
+                let cancelled = cancel_inner(state, &holder).await?;
+                if !cancelled.state.is_terminal() {
+                    return Ok((cancelled, true));
+                }
+                match insert_run(&st, make(unique.clone())).await? {
+                    Ok((run_id, _)) => run_id,
+                    Err(cereyan_store::StoreError::UniqueConflict { existing }) => {
+                        return Ok((holder_of(existing)?, true))
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            } else {
+                return Ok((holder, true));
+            }
+        }
+        Err(e) => return Err(e.into()),
+    };
     let run = state
         .store
         .get_run(run_id)?
@@ -221,7 +369,7 @@ pub async fn create_run_inner(
         }
         _ => crate::dispatch::enqueue_run(state, &run, flow, None),
     }
-    Ok(run)
+    Ok((run, false))
 }
 
 #[utoipa::path(get, path = "/api/runs", params(ListRunsFilter), responses((status = 200, body = RunsPage)))]
@@ -236,12 +384,12 @@ pub async fn list_runs(
     Ok(Json(page))
 }
 
-#[utoipa::path(post, path = "/api/runs", request_body = CreateRunBody, responses((status = 201, body = Run), (status = 404, description = "Unknown flow and no module given"), (status = 422)))]
+#[utoipa::path(post, path = "/api/runs", request_body = CreateRunBody, responses((status = 201, body = Run), (status = 200, body = RunConflict, description = "A run already holds the unique or idempotency key"), (status = 404, description = "Unknown flow and no module given"), (status = 422)))]
 pub async fn create_run(
     State(state): State<Arc<AppState>>,
     user: Option<Extension<crate::auth::AuthenticatedUser>>,
     Json(body): Json<CreateRunBody>,
-) -> ApiResult<(StatusCode, Json<Run>)> {
+) -> ApiResult<axum::response::Response> {
     // A signed-in user overrides whatever the client claims.
     let created_by = crate::auth::run_creator(
         user.as_ref().map(|Extension(u)| u),
@@ -326,7 +474,8 @@ pub async fn create_run(
         }
     };
     let starts = not_before(body.scheduled_time, body.delay)?;
-    let run = create_run_inner(
+    let idempotency = Idempotency::from_body(body.idempotency_key, body.idempotency_ttl)?;
+    let (run, conflict) = create_run_checked(
         &state,
         &flow,
         body.parameters,
@@ -335,9 +484,10 @@ pub async fn create_run(
         &created_by,
         starts,
         None,
+        idempotency,
     )
     .await?;
-    Ok((StatusCode::CREATED, Json(run)))
+    Ok(created_response(run, conflict))
 }
 
 #[utoipa::path(get, path = "/api/runs/{id}", params(("id" = i64, Path)), responses((status = 200, body = Run), (status = 404)))]
