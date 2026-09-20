@@ -408,6 +408,16 @@ pub struct RuleAction {
     pub subject: Option<String>,
     /// Name of the Python callable for `call` actions (code rules).
     pub callable: Option<String>,
+    /// Webhook body preset: `slack`, `teams`, `discord`, `ntfy`, `telegram`, or `pagerduty`.
+    pub preset: Option<String>,
+    /// Webhook signing secret (Standard Webhooks headers when set).
+    pub secret: Option<String>,
+    /// ntfy topic.
+    pub topic: Option<String>,
+    /// Telegram chat id.
+    pub chat_id: Option<String>,
+    /// PagerDuty Events API routing key.
+    pub routing_key: Option<String>,
 }
 
 /// Clock of a clock-armed proactive rule: a cron expression in a timezone.
@@ -432,6 +442,8 @@ pub struct RuleSpec {
     pub cooldown_seconds: f64,
     pub max_per_minute: i64,
     pub allow_self: bool,
+    /// Fire only on an event whose `failures_in_a_row` is at least this; 0 is off.
+    pub after_consecutive: i64,
     /// Proactive rules: the expected event that disarms an expectation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unless: Option<RuleMatch>,
@@ -452,6 +464,7 @@ impl Default for RuleSpec {
             cooldown_seconds: 0.0,
             max_per_minute: 60,
             allow_self: false,
+            after_consecutive: 0,
             unless: None,
             within: None,
             at: None,

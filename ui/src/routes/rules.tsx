@@ -90,6 +90,7 @@ function RulesPage() {
           cooldown_seconds: 0,
           max_per_minute: 60,
           allow_self: false,
+          after_consecutive: 0,
         }
       : editing
         ? {
@@ -101,6 +102,7 @@ function RulesPage() {
             cooldown_seconds: editing.cooldown_seconds,
             max_per_minute: editing.max_per_minute,
             allow_self: editing.allow_self,
+            after_consecutive: editing.after_consecutive ?? 0,
           }
         : undefined;
   return (

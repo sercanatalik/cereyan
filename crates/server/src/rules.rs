@@ -467,10 +467,50 @@ pub fn on_event(state: &Arc<AppState>, event: Event) {
 }
 
 /// Execute a rule's actions against an event and record the firing.
+/// Where a run's page is: `public_url` when set, else the server's own address.
+pub fn run_url(state: &AppState, run_id: i64) -> String {
+    let base = state
+        .config
+        .public_url
+        .clone()
+        .unwrap_or_else(|| state.public_url());
+    format!("{}/runs/{run_id}", base.trim_end_matches('/'))
+}
+
 pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunContext) {
     let env = cereyan_rules::environment();
-    let template_ctx = cereyan_rules::template_context(event, ctx);
-    let mut outcomes: Vec<Value> = Vec::new();
+    let mut template_ctx = cereyan_rules::template_context(event, ctx);
+    if let Some(run) = &ctx.run {
+        if let Some(obj) = template_ctx.get_mut("run").and_then(|r| r.as_object_mut()) {
+            obj.insert("url".into(), json!(run_url(state, run.id)));
+        }
+    }
+    let mut outcomes: Vec<Value> = rule
+        .spec
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(i, a)| json!({"index": i, "kind": a.kind, "status": "pending"}))
+        .collect();
+    // Recorded before anything is sent, so an interrupted firing still shows
+    // which actions went out; every outcome below replaces its pending slot.
+    let firing_id = state
+        .store
+        .record_firing(
+            rule.id,
+            Some(event.id),
+            ctx.run.as_ref().map(|r| r.id),
+            &serde_json::to_string(&outcomes).unwrap_or_else(|_| "[]".into()),
+        )
+        .ok();
+    let save = |outcomes: &Vec<Value>| {
+        if let Some(id) = firing_id {
+            let _ = state.store.update_firing(
+                id,
+                &serde_json::to_string(outcomes).unwrap_or_else(|_| "[]".into()),
+            );
+        }
+    };
     let _ = state.record_engine_event(
         EventName::RuleFired,
         ctx.run.as_ref().map(|r| r.id),
@@ -482,9 +522,9 @@ pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunConte
             Ok(a) => a,
             Err(e) => {
                 let msg = e.to_string();
-                outcomes.push(
-                    json!({"index": i, "kind": action.kind, "status": "failed", "error": msg}),
-                );
+                outcomes[i] =
+                    json!({"index": i, "kind": action.kind, "status": "failed", "error": msg});
+                save(&outcomes);
                 let _ = state.record_engine_event(
                     EventName::RuleActionFailed,
                     ctx.run.as_ref().map(|r| r.id),
@@ -503,7 +543,8 @@ pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunConte
         );
         match result {
             Ok(detail) => {
-                outcomes.push(json!({"index": i, "kind": action.kind, "status": "completed", "detail": detail}));
+                outcomes[i] = json!({"index": i, "kind": action.kind, "status": "completed", "detail": detail});
+                save(&outcomes);
                 let _ = state.record_engine_event(
                     EventName::RuleActionCompleted,
                     ctx.run.as_ref().map(|r| r.id),
@@ -512,9 +553,9 @@ pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunConte
                 );
             }
             Err(msg) => {
-                outcomes.push(
-                    json!({"index": i, "kind": action.kind, "status": "failed", "error": msg}),
-                );
+                outcomes[i] =
+                    json!({"index": i, "kind": action.kind, "status": "failed", "error": msg});
+                save(&outcomes);
                 let _ = state.record_engine_event(
                     EventName::RuleActionFailed,
                     ctx.run.as_ref().map(|r| r.id),
@@ -524,12 +565,6 @@ pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunConte
             }
         }
     }
-    let _ = state.store.record_firing(
-        rule.id,
-        Some(event.id),
-        ctx.run.as_ref().map(|r| r.id),
-        &serde_json::to_string(&outcomes).unwrap_or_else(|_| "[]".into()),
-    );
     if let Ok(Some(updated)) = state.store.get_rule(rule.id) {
         let mut rules = state.rules.rules.write().unwrap_or_else(|e| e.into_inner());
         if let Some(slot) = rules.iter_mut().find(|r| r.id == rule.id) {
@@ -684,7 +719,16 @@ pub fn execute(
             Ok(json!({"flow": flow.name, "schedules": rows.len()}))
         }
         "webhook" => {
-            let url = action.url.clone().unwrap_or_default();
+            let url = action
+                .url
+                .clone()
+                .filter(|u| !u.trim().is_empty())
+                .unwrap_or_else(|| cereyan_rules::PAGERDUTY_URL.to_string());
+            let signature = action
+                .secret
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|secret| sign_body(secret, action.body.as_deref().unwrap_or("")));
             let method = action
                 .method
                 .clone()
@@ -721,6 +765,12 @@ pub fn execute(
                 }
                 if !has_ct {
                     req = req.header("content-type", "application/json");
+                }
+                if let Some((id, ts, sig)) = &signature {
+                    req = req
+                        .header("webhook-id", id.as_str())
+                        .header("webhook-timestamp", ts.as_str())
+                        .header("webhook-signature", sig.as_str());
                 }
                 match req.send(body.as_bytes()) {
                     Ok(resp) => {
@@ -867,6 +917,40 @@ pub(crate) fn find_flow(
     }
 }
 
+/// Standard Webhooks signing: `webhook-id`, `webhook-timestamp` (Unix seconds),
+/// and `webhook-signature` as `v1,` plus base64 HMAC-SHA256 over `id.ts.body`.
+pub fn sign_body(secret: &str, body: &str) -> (String, String, String) {
+    let id = cereyan_core::new_id().to_string();
+    let ts = (now_micros() / 1_000_000).to_string();
+    let mac = hmac_sha256(secret.as_bytes(), format!("{id}.{ts}.{body}").as_bytes());
+    use base64::Engine as _;
+    let sig = format!(
+        "v1,{}",
+        base64::engine::general_purpose::STANDARD.encode(mac)
+    );
+    (id, ts, sig)
+}
+
+/// HMAC-SHA256 (RFC 2104) over `sha2`, which the workspace already ships.
+pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    const BLOCK: usize = 64;
+    let mut k = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        k[..32].copy_from_slice(&Sha256::digest(key));
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Sha256::new();
+    inner.update(k.iter().map(|b| b ^ 0x36).collect::<Vec<u8>>());
+    inner.update(message);
+    let inner_hash = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(k.iter().map(|b| b ^ 0x5c).collect::<Vec<u8>>());
+    outer.update(inner_hash);
+    outer.finalize().into()
+}
+
 pub fn send_email(
     cfg: &crate::EmailConfig,
     to: &[String],
@@ -950,4 +1034,19 @@ pub fn test_rule(state: &Arc<AppState>, rule: &RuleRow) -> Result<Value, String>
         )
         .collect();
     Ok(json!({"event": event, "actions": actions}))
+}
+
+#[cfg(test)]
+mod signing_tests {
+    use super::hmac_sha256;
+
+    #[test]
+    fn matches_rfc_4231_case_2() {
+        let mac = hmac_sha256(b"Jefe", b"what do ya want for nothing?");
+        let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex,
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+        );
+    }
 }

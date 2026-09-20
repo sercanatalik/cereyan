@@ -38,6 +38,11 @@ def cleanup(day: date = date(2026, 1, 1)):
     return str(day)
 
 @app.flow
+def maybe(ok: bool = True):
+    if not ok:
+        raise RuntimeError("bad day")
+
+@app.flow
 def fail():
     raise ValueError("bad")
 
@@ -80,12 +85,14 @@ def on_fail(event, run):
 
 class Hook(http.server.BaseHTTPRequestHandler):
     calls = []
+    headers_seen = []
     fail_first = 0
 
     def do_POST(self):
         length = int(self.headers.get("content-length", 0))
         body = self.rfile.read(length)
         Hook.calls.append(body)
+        Hook.headers_seen.append({k.lower(): v for k, v in self.headers.items()})
         if Hook.fail_first > 0:
             Hook.fail_first -= 1
             self.send_response(503)
@@ -101,6 +108,7 @@ class Hook(http.server.BaseHTTPRequestHandler):
 def webhook():
     server = http.server.HTTPServer(("127.0.0.1", 0), Hook)
     Hook.calls = []
+    Hook.headers_seen = []
     Hook.fail_first = 0
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
@@ -231,7 +239,14 @@ def test_webhook_retries_and_template_error_isolation(obs, webhook):
     })
     run = start(obs, "fail")
     obs.wait_run(run["id"])
-    firing = wait_until(lambda: (f := c._request("GET", f"/api/rules/{rule['id']}/firings")) and f[0], timeout=20)
+    # The firing is recorded before its actions run and filled in as they complete.
+    firing = wait_until(
+        lambda: (f := c._request("GET", f"/api/rules/{rule['id']}/firings"))
+        and f[0]
+        and all(o["status"] != "pending" for o in f[0]["outcomes"])
+        and f[0],
+        timeout=20,
+    )
     assert firing["outcomes"][0]["status"] == "failed" and "undefined" in firing["outcomes"][0]["error"]
     assert firing["outcomes"][1]["status"] == "completed" and firing["outcomes"][1]["detail"]["attempts"] == 3
     assert len(Hook.calls) == 3
@@ -422,5 +437,104 @@ def test_email_action_over_local_smtp(obs):
         assert firing["outcomes"][0]["status"] == "completed", firing
         body = b"".join(received).decode(errors="replace")
         assert "ValueError: bad" in body and "Subject:" in body
+    finally:
+        srv.stop()
+
+
+def test_failure_streak_recovery_and_consecutive_guard(obs, webhook):
+    c = obs.client
+    rule = c._request("POST", "/api/rules", body={
+        "name": "third strike", "when": {"events": ["run.failed"], "flows": ["maybe"]},
+        "do": [{"kind": "webhook", "url": webhook, "body": "{{ payload.failures_in_a_row }}"}],
+        "once": "never", "after_consecutive": 2,
+    })
+    failures = []
+    for _ in range(3):
+        run = start(obs, "maybe", ok=False)
+        obs.wait_run(run["id"])
+        failures.append(run["id"])
+    ok = start(obs, "maybe", ok=True)
+    obs.wait_run(ok["id"])
+    failed = [e for e in c.events(kind="run.failed") if e["run_id"] in failures]
+    assert sorted(e["payload"]["failures_in_a_row"] for e in failed) == [1, 2, 3]
+    recovered = [e for e in c.events(kind="flow.recovered") if e["run_id"] == ok["id"]]
+    assert len(recovered) == 1
+    assert {k: recovered[0]["payload"][k] for k in ("flow", "project", "failures", "run_id")} == {"flow": "maybe", "project": "obs", "failures": 3, "run_id": ok["id"]}
+    firings = wait_until(lambda: (lambda f: f if len(f) == 2 else None)(c._request("GET", f"/api/rules/{rule['id']}/firings")))
+    assert {f["run_id"] for f in firings} == set(failures[1:])
+    wait_until(lambda: all(o["status"] == "completed" for f in c._request("GET", f"/api/rules/{rule['id']}/firings") for o in f["outcomes"]))
+    assert sorted(b.decode() for b in Hook.calls) == ["2", "3"]
+    again = start(obs, "maybe", ok=True)
+    obs.wait_run(again["id"])
+    assert not [e for e in c.events(kind="flow.recovered") if e["run_id"] == again["id"]]
+
+
+def test_webhook_presets_signature_and_run_url(obs, webhook):
+    import base64
+    import hashlib
+    import hmac
+
+    c = obs.client
+    c._request("POST", "/api/rules", body={
+        "name": "slack", "when": {"events": ["run.failed"], "flows": ["maybe"]},
+        "do": [{"kind": "webhook", "url": webhook, "preset": "slack", "secret": "s3cret"}],
+    })
+    c._request("POST", "/api/rules", body={
+        "name": "pager", "when": {"events": ["run.failed", "flow.recovered"], "flows": ["maybe"]},
+        "do": [{"kind": "webhook", "url": webhook, "preset": "pagerduty", "routing_key": "rk-1"}],
+        "once": "never",
+    })
+    with pytest.raises(Exception):
+        c._request("POST", "/api/rules", body={
+            "name": "bad", "when": {"events": ["run.failed"]},
+            "do": [{"kind": "webhook", "url": webhook, "preset": "ntfy"}],
+        })
+    failed = start(obs, "maybe", ok=False)
+    obs.wait_run(failed["id"])
+    wait_until(lambda: len(Hook.calls) >= 2)
+    bodies = [json.loads(b) for b in Hook.calls]
+    slack = next(b for b in bodies if "text" in b)
+    assert "maybe: run.failed" in slack["text"] and "bad day" in slack["text"]
+    assert f"{obs.info['url']}/runs/{failed['id']}" in slack["text"]
+    index = next(i for i, h in enumerate(Hook.headers_seen) if "webhook-signature" in h)
+    signed, body = Hook.headers_seen[index], Hook.calls[index]
+    expected = hmac.new(b"s3cret", f"{signed['webhook-id']}.{signed['webhook-timestamp']}.".encode() + body, hashlib.sha256).digest()
+    assert signed["webhook-signature"] == "v1," + base64.b64encode(expected).decode()
+    trigger = next(b for b in bodies if b.get("event_action") == "trigger")
+    assert trigger["routing_key"] == "rk-1" and trigger["dedup_key"] == "cereyan-obs-maybe"
+    assert trigger["payload"]["custom_details"]["run_url"].endswith(f"/runs/{failed['id']}")
+    ok = start(obs, "maybe", ok=True)
+    obs.wait_run(ok["id"])
+    wait_until(lambda: any(json.loads(b).get("event_action") == "resolve" for b in Hook.calls))
+    resolve = next(json.loads(b) for b in Hook.calls if json.loads(b).get("event_action") == "resolve")
+    assert resolve["dedup_key"] == "cereyan-obs-maybe"
+
+
+def test_backfill_completed_event(obs):
+    c = obs.client
+    made = c._request("POST", f"/api/flows/{fid(obs, 'etl')}/backfill", body={"parameter": "day", "start": "2026-03-01", "end": "2026-03-02", "concurrency": 2})
+    bf = made.get("backfill", made)["id"]
+    wait_until(lambda: (lambda items: items and all(r["state"]["type"] in ("Completed", "Failed", "Cancelled", "Crashed") for r in items))(c.runs(backfill_id=bf, limit=50)["items"]), timeout=60)
+    events = wait_until(lambda: [e for e in c.events(kind="backfill.completed") if e["payload"]["backfill_id"] == bf])
+    assert len(events) == 1 and sum(events[0]["payload"]["counts"].values()) == 2
+
+
+def test_run_url_uses_public_url(isolated_home, obs_dir, webhook):
+    from cereyan import engine
+
+    engine.close_store()
+    srv = ServerProcess(str(isolated_home), str(obs_dir), env={"CEREYAN_PUBLIC_URL": "https://cereyan.example.com/"})
+    try:
+        c = srv.client
+        c._request("POST", "/api/rules", body={
+            "name": "link", "when": {"events": ["run.completed"], "flows": ["etl"]},
+            "do": [{"kind": "webhook", "url": webhook, "body": "{{ run.url }}"}],
+        })
+        run = c._request("POST", f"/api/flows/{fid(srv, 'etl')}/runs", body={"parameters": {}})
+        srv.wait_run(run["id"])
+        wait_until(lambda: Hook.calls)
+        assert Hook.calls[0].decode() == f"https://cereyan.example.com/runs/{run['id']}"
+        env = {(e["table"], e["key"]): e for e in c._request("GET", "/api/settings/environment")["configuration"]}
+        assert env["server", "public_url"]["value"] == "https://cereyan.example.com"
     finally:
         srv.stop()

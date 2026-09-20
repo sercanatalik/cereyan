@@ -352,6 +352,21 @@ def _auth_scope(directory: str, auth_scope: str | None = None, app_auth_scope: s
     return value, source
 
 
+def _public_url(directory: str, public_url: str | None = None, app_public_url: str | None = None) -> tuple[str | None, dict]:
+    value, source = _string_setting(directory, "public_url", "CEREYAN_PUBLIC_URL", "--public-url", public_url, app_public_url)
+    if value is None or not value.strip():
+        return None, source
+    value = value.strip().rstrip("/")
+    if not (value.startswith("http://") or value.startswith("https://")) or urlsplit(value).hostname is None:
+        raise CereyanError(f"invalid public_url {value!r} from {_describe(source)}: expected an http or https URL")
+    return value, source
+
+
+def resolve_public_url(directory: str, public_url: str | None = None, app_public_url: str | None = None) -> str | None:
+    """Flag, environment, app.serve(), cereyan.toml. None means the server's own address."""
+    return _public_url(directory, public_url, app_public_url)[0]
+
+
 def resolve_auth_scope(directory: str, auth_scope: str | None = None, app_auth_scope: str | None = None) -> str:
     """Flag, environment, app.serve(), cereyan.toml. ``"api"`` unless set."""
     return _auth_scope(directory, auth_scope, app_auth_scope)[0]
@@ -482,7 +497,8 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
           app_allowed_hosts: list[str] | tuple[str, ...] | None = None,
           allow_unauthenticated: bool | None = None, app_allow_unauthenticated: bool | None = None,
           mcp_read_only: bool | None = None, app_mcp_read_only: bool | None = None,
-          metrics_public: bool | None = None, app_metrics_public: bool | None = None) -> int:
+          metrics_public: bool | None = None, app_metrics_public: bool | None = None,
+          public_url: str | None = None, app_public_url: str | None = None) -> int:
     """Serve ``directory``. ``host``, ``port``, ``token``, ``socket``, ``base_path``,
     ``enable_auth``, ``auth_cookie``, ``auth_scope``, ``login_url``,
     ``allowed_hosts``, ``allow_unauthenticated``, and ``mcp_read_only`` are the CLI flags; the
@@ -508,6 +524,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     )
     resolved_mcp_read_only, sources["server.mcp_read_only"] = _mcp_read_only(directory, mcp_read_only, app_mcp_read_only)
     resolved_metrics_public, sources["server.metrics_public"] = _metrics_public(directory, metrics_public, app_metrics_public)
+    resolved_public_url, sources["server.public_url"] = _public_url(directory, public_url, app_public_url)
     if resolved_auth_scope == "all" and not resolved_enable_auth:
         raise CereyanError(
             "auth_scope 'all' requires enable_auth: without an authenticator the UI could not load its token prompt"
@@ -625,6 +642,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "allow_unauthenticated": resolved_allow_unauthenticated,
         "mcp_read_only": resolved_mcp_read_only,
         "metrics_public": resolved_metrics_public,
+        "public_url": resolved_public_url,
         "open_browser": bool(should_open),
         "sources": sources,
         "python_version": platform.python_version(),

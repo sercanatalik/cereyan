@@ -303,6 +303,12 @@ pub enum WriteCommand {
         priority: i64,
         reply: Reply<()>,
     },
+    /// Replace a firing's per-action outcomes as they complete.
+    UpdateFiring {
+        id: i64,
+        outcomes: String,
+        reply: Reply<()>,
+    },
     /// Merge a JSON object into the run's searchable attributes.
     MergeRunAttributes {
         run_id: i64,
@@ -674,6 +680,19 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
                 None => Ok(out),
             }
         }),
+        WriteCommand::UpdateFiring {
+            id,
+            outcomes,
+            reply,
+        } => ack(
+            reply,
+            conn.execute(
+                "UPDATE rule_firing SET outcomes = ?1 WHERE id = ?2",
+                params![outcomes, id],
+            )
+            .map(|_| ())
+            .map_err(Into::into),
+        ),
         WriteCommand::MergeRunAttributes {
             run_id,
             patch,

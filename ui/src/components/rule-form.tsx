@@ -73,6 +73,7 @@ export function emptyRule(): { name: string; enabled: boolean } & RuleSpec {
     cooldown_seconds: 0,
     max_per_minute: 60,
     allow_self: false,
+    after_consecutive: 0,
     unless: null,
     within: null,
     at: null,
@@ -345,14 +346,66 @@ export function RuleForm({
               {a.kind === "webhook" ? (
                 <>
                   <Input
-                    placeholder="https://..."
+                    placeholder={
+                      a.preset === "pagerduty"
+                        ? "https://events.pagerduty.com/v2/enqueue (default)"
+                        : "https://..."
+                    }
                     value={a.url ?? ""}
                     onChange={(e) => setAction(i, { url: e.target.value })}
                     aria-label="URL"
                   />
+                  <Select
+                    value={a.preset ?? ""}
+                    onChange={(e) => setAction(i, { preset: e.target.value || undefined })}
+                    aria-label="Preset"
+                  >
+                    <option value="">custom body</option>
+                    <option value="slack">Slack</option>
+                    <option value="teams">Microsoft Teams</option>
+                    <option value="discord">Discord</option>
+                    <option value="ntfy">ntfy</option>
+                    <option value="telegram">Telegram</option>
+                    <option value="pagerduty">PagerDuty</option>
+                  </Select>
+                  {a.preset === "ntfy" ? (
+                    <Input
+                      placeholder="topic"
+                      value={a.topic ?? ""}
+                      onChange={(e) => setAction(i, { topic: e.target.value })}
+                      aria-label="Topic"
+                    />
+                  ) : null}
+                  {a.preset === "telegram" ? (
+                    <Input
+                      placeholder="chat id"
+                      value={a.chat_id ?? ""}
+                      onChange={(e) => setAction(i, { chat_id: e.target.value })}
+                      aria-label="Chat id"
+                    />
+                  ) : null}
+                  {a.preset === "pagerduty" ? (
+                    <Input
+                      placeholder="routing key"
+                      value={a.routing_key ?? ""}
+                      onChange={(e) => setAction(i, { routing_key: e.target.value })}
+                      aria-label="Routing key"
+                    />
+                  ) : null}
+                  <Input
+                    type="password"
+                    placeholder="signing secret (optional; sends webhook-signature)"
+                    value={a.secret ?? ""}
+                    onChange={(e) => setAction(i, { secret: e.target.value || undefined })}
+                    aria-label="Signing secret"
+                  />
                   <Textarea
                     rows={2}
-                    placeholder="body template (default: the event as JSON)"
+                    placeholder={
+                      a.preset
+                        ? "body template (default: the preset's message)"
+                        : "body template (default: the event as JSON)"
+                    }
                     value={a.body ?? ""}
                     onChange={(e) => setAction(i, { body: e.target.value })}
                     aria-label="Body"

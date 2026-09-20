@@ -16,8 +16,8 @@ Resource `run`; related `flow` and the run's tags. Offline the payload is `state
 | `run.pending` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | An engine accepted the run |
 | `run.running` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | User code started |
 | `run.completed` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run finished without error |
-| `run.failed` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run raised, timed out, or was set failed |
-| `run.crashed` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The engine died while the run was executing |
+| `run.failed` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by`, `failures_in_a_row` | The run raised, timed out, or was set failed |
+| `run.crashed` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by`, `failures_in_a_row` | The engine died while the run was executing |
 | `run.cancelled` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run was cancelled |
 | `run.late` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by`, `scheduled_time`, `name` | The scheduled time passed 15 seconds ago and the run has not started |
 | `run.retrying` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | A retry attempt started |
@@ -51,6 +51,7 @@ Resource `flow`.
 | `flow.disabled` | `failures`, `window_seconds`, `until` | `disable_after` tripped; the flow's schedules are paused until `until` |
 | `flow.enabled` | empty | The disable window ended and the schedules resumed |
 | `flow.fan_in` | `key`, `value`, `upstream`, `run_id` | Every upstream completed a run for the key value and the downstream run was created |
+| `flow.recovered` | `flow`, `project`, `failures`, `run_id` | A run completed after the flow's previous terminal run had failed or crashed |
 
 ## Schedule events
 
@@ -90,7 +91,7 @@ Runs created by a rule record `created_by = rule:<id>`, and a rule never fires o
 
 Names with a dot-separated prefix, such as `orders.table_empty`, match rules with `events: ["orders.*"]`.
 
-The prefixes `run.`, `task_run.`, `flow.`, `schedule.`, `resource.`, `rule.`, `expectation.` are the engine's. A name under one of them that is not in the catalogue above is rejected by `emit_event`, by `@app.rule`, and by the rules API, because nothing would ever emit it — a rule matching one could only ever sit silent. Every other name is yours and is never checked.
+The prefixes `run.`, `task_run.`, `flow.`, `schedule.`, `resource.`, `rule.`, `expectation.`, `backfill.` are the engine's. A name under one of them that is not in the catalogue above is rejected by `emit_event`, by `@app.rule`, and by the rules API, because nothing would ever emit it — a rule matching one could only ever sit silent. Every other name is yours and is never checked.
 
 ## Stream messages
 

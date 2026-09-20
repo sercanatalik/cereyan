@@ -41,7 +41,7 @@ def load_project_config(directory: str) -> dict:
 KNOWN_KEYS = {
     "server": {"host", "port", "base_path", "max_engines", "engine_max_runs", "cancel_grace_secs", "open_browser", "token",
                "socket", "enable_auth", "auth_cookie", "auth_scope", "login_url", "allowed_hosts",
-               "allow_unauthenticated", "mcp_read_only", "metrics_public"},
+               "allow_unauthenticated", "mcp_read_only", "metrics_public", "public_url"},
     "defaults": {"catchup", "crash_retries", "retain_days", "retain_runs_days", "retain_failed_runs_days",
                  "keep_last_runs_per_flow", "backup_every", "backup_keep"},
     "email": {"host", "port", "tls", "username", "password", "from"},

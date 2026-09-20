@@ -193,7 +193,7 @@ class App:
 
         directory = os.path.dirname(os.path.abspath(self.source_file)) if self.source_file else os.getcwd()
         keys = ("token", "socket", "base_path", "enable_auth", "auth_cookie", "auth_scope", "login_url",
-                "allowed_hosts", "allow_unauthenticated", "mcp_read_only", "metrics_public")
+                "allowed_hosts", "allow_unauthenticated", "mcp_read_only", "metrics_public", "public_url")
         app_options = {f"app_{key}": options.pop(key, None) for key in keys}
         return serve(directory, app_host=host, app_port=port, discover=False, **app_options, **options)
 

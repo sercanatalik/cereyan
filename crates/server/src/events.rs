@@ -46,7 +46,42 @@ pub fn emit_run_event(state: &AppState, run: &Run) {
             payload["reason"] = reason.clone();
         }
     }
+    if matches!(name, EventName::RunFailed | EventName::RunCrashed) {
+        payload["failures_in_a_row"] = json!(1 + failure_streak_before(state, run));
+    }
     let _ = state.record_engine_event(name, Some(run.id), Some(run.flow_id), payload);
+    if name == EventName::RunCompleted {
+        let ended = failure_streak_before(state, run);
+        if ended > 0 {
+            let _ = state.record_engine_event(
+                EventName::FlowRecovered,
+                Some(run.id),
+                Some(run.flow_id),
+                json!({"flow": run.flow_name, "project": run.project, "failures": ended, "run_id": run.id}),
+            );
+        }
+    }
+}
+
+/// Consecutive Failed or Crashed runs of the flow that ended before `run`,
+/// newest first, stopping at the first other terminal run. Non-terminal runs
+/// and runs newer than `run` are skipped; the count is capped by the window.
+fn failure_streak_before(state: &AppState, run: &Run) -> i64 {
+    let Ok(recent) = state.store.recent_run_states(run.flow_id, 50) else {
+        return 0;
+    };
+    let mut streak = 0;
+    for (id, state_type, _, _) in recent {
+        if id >= run.id {
+            continue;
+        }
+        match state_type.as_str() {
+            "Failed" | "Crashed" => streak += 1,
+            "Completed" | "Cancelled" => break,
+            _ => continue,
+        }
+    }
+    streak
 }
 
 pub fn task_run_event_name(t: &TaskRun) -> Option<EventName> {

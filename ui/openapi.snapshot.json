@@ -1797,6 +1797,14 @@
               "null"
             ]
           },
+          "chat_id": {
+            "default": null,
+            "description": "Telegram chat id.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "flow": {
             "default": null,
             "type": [
@@ -1829,6 +1837,30 @@
           "parameters": {
             "type": "object"
           },
+          "preset": {
+            "default": null,
+            "description": "Webhook body preset: `slack`, `teams`, `discord`, `ntfy`, `telegram`, or `pagerduty`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routing_key": {
+            "default": null,
+            "description": "PagerDuty Events API routing key.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "secret": {
+            "default": null,
+            "description": "Webhook signing secret (Standard Webhooks headers when set).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "state_type": {
             "default": null,
             "type": [
@@ -1849,6 +1881,14 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "topic": {
+            "default": null,
+            "description": "ntfy topic.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "url": {
             "default": null,
@@ -2117,6 +2157,12 @@
       },
       "RuleSpec": {
         "properties": {
+          "after_consecutive": {
+            "default": 0,
+            "description": "Fire only on an event whose `failures_in_a_row` is at least this; 0 is off.",
+            "format": "int64",
+            "type": "integer"
+          },
           "allow_self": {
             "default": false,
             "type": "boolean"

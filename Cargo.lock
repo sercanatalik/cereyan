@@ -221,6 +221,7 @@ name = "cereyan-server"
 version = "2.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "cereyan-core",
  "cereyan-rules",
  "cereyan-store",
@@ -234,6 +235,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror",
  "tokio",

@@ -214,6 +214,15 @@ impl Store {
         self.write(|reply| WriteCommand::CreateRunsBulk(cmds, reply))
     }
 
+    /// Replace the outcomes of a firing recorded by `record_firing`.
+    pub fn update_firing(&self, id: i64, outcomes: &str) -> Result<()> {
+        self.write(|reply| WriteCommand::UpdateFiring {
+            id,
+            outcomes: outcomes.to_string(),
+            reply,
+        })
+    }
+
     /// Merge a JSON object into a run's searchable attributes; false when the run is unknown.
     pub fn merge_run_attributes(&self, run_id: i64, patch: &str) -> Result<bool> {
         self.write(|reply| WriteCommand::MergeRunAttributes {

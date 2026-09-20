@@ -153,6 +153,9 @@ pub struct ServeConfig {
     /// Serve `/api/metrics` without a credential, as `/api/health`.
     #[serde(default)]
     pub metrics_public: bool,
+    /// The address people reach the UI at, for `{{ run.url }}` in rule templates.
+    #[serde(default)]
+    pub public_url: Option<String>,
 }
 
 fn default_auth_scope() -> String {

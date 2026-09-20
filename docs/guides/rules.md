@@ -83,6 +83,16 @@ An undefined variable is an error for that action only. **Test** on the rule pag
 
 Email needs `[email]` configured; see [Configuration](../reference/configuration.md).
 
+### Presets, signing, and links
+
+A webhook does not need a body for the common receivers: `"preset": "slack"`, `"teams"`, `"discord"`, `"ntfy"` (with `"topic"`), `"telegram"` (with `"chat_id"`; the URL is the bot's `sendMessage` endpoint), or `"pagerduty"` (with `"routing_key"`; the URL defaults to the Events API) sends that receiver's message: the flow, the event, the failure message, and a link to the run. A body of your own always wins over the preset. The PagerDuty preset triggers on a failure and resolves on `flow.recovered`, both under a `dedup_key` of `cereyan-<project>-<flow>`, so one rule on `["run.failed", "flow.recovered"]` opens and closes the incident.
+
+```json
+{"kind": "webhook", "url": "https://hooks.slack.com/services/...", "preset": "slack", "secret": "change-me"}
+```
+
+With `secret` set, every call carries `webhook-id`, `webhook-timestamp`, and `webhook-signature` (`v1,` and a base64 HMAC-SHA256 over `id.timestamp.body`), the [Standard Webhooks](https://github.com/standard-webhooks/standard-webhooks) form, so the receiver can verify it came from your server. Templates can link to a run with `{{ run.url }}`, which is `[server] public_url` (or `--public-url`, `CEREYAN_PUBLIC_URL`, `app.serve(public_url=)`) followed by `/runs/<id>`, or the server's own address when no public URL is set.
+
 ## Write a code rule
 
 ```python
@@ -106,6 +116,7 @@ The function receives the event and the run as dicts and its return value is rec
 
 - `once="per_run"` (the default) fires at most once per run, so a run that retries three times alerts once. `once="never"` lifts the limit and fires on every matching event.
 - `cooldown_seconds` and `max_per_minute` throttle noisy rules.
+- `after_consecutive=3` fires only on an event whose `failures_in_a_row` is at least three: `run.failed` and `run.crashed` carry that count for served runs, and `flow.recovered` reports how many failures a success ended, so "page on the third failure in a row, and again when it recovers" is two rules.
 - A rule never fires on events of runs it created, unless `allow_self` is set; this is what stops a `run_flow` rule looping.
 - Disabled rules never fire. Toggle them on the Rules page or with `PATCH /api/rules/{id}`.
 

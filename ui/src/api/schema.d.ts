@@ -1612,6 +1612,11 @@ export interface components {
              * @default null
              */
             callable: string | null;
+            /**
+             * @description Telegram chat id.
+             * @default null
+             */
+            chat_id: string | null;
             /** @default null */
             flow: string | null;
             headers?: Record<string, never>;
@@ -1625,12 +1630,32 @@ export interface components {
             /** @default null */
             method: string | null;
             parameters?: Record<string, never>;
+            /**
+             * @description Webhook body preset: `slack`, `teams`, `discord`, `ntfy`, `telegram`, or `pagerduty`.
+             * @default null
+             */
+            preset: string | null;
+            /**
+             * @description PagerDuty Events API routing key.
+             * @default null
+             */
+            routing_key: string | null;
+            /**
+             * @description Webhook signing secret (Standard Webhooks headers when set).
+             * @default null
+             */
+            secret: string | null;
             /** @default null */
             state_type: string | null;
             /** @default null */
             subject: string | null;
             /** @default [] */
             to: string[];
+            /**
+             * @description ntfy topic.
+             * @default null
+             */
+            topic: string | null;
             /** @default null */
             url: string | null;
         };
@@ -1705,6 +1730,12 @@ export interface components {
             updated_at: components["schemas"]["i64"];
         };
         RuleSpec: {
+            /**
+             * Format: int64
+             * @description Fire only on an event whose `failures_in_a_row` is at least this; 0 is off.
+             * @default 0
+             */
+            after_consecutive: number;
             /** @default false */
             allow_self: boolean;
             /** @default null */

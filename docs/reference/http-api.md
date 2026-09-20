@@ -1425,15 +1425,20 @@ One rule action. `kind` selects the variant; other fields are optional.
 |---|---|---|---|
 | `body` | string or null | no |  |
 | `callable` | string or null | no | Name of the Python callable for `call` actions (code rules). |
+| `chat_id` | string or null | no | Telegram chat id. |
 | `flow` | string or null | no |  |
 | `headers` | object | no |  |
 | `kind` | string | no | `run_flow`, `cancel_run`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`. |
 | `message` | string or null | no |  |
 | `method` | string or null | no |  |
 | `parameters` | object | no |  |
+| `preset` | string or null | no | Webhook body preset: `slack`, `teams`, `discord`, `ntfy`, `telegram`, or `pagerduty`. |
+| `routing_key` | string or null | no | PagerDuty Events API routing key. |
+| `secret` | string or null | no | Webhook signing secret (Standard Webhooks headers when set). |
 | `state_type` | string or null | no |  |
 | `subject` | string or null | no |  |
 | `to` | array of string | no |  |
+| `topic` | string or null | no | ntfy topic. |
 | `url` | string or null | no |  |
 
 ### `RuleBody`
@@ -1496,6 +1501,7 @@ Type: any.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `after_consecutive` | integer (int64) | no | Fire only on an event whose `failures_in_a_row` is at least this; 0 is off. |
 | `allow_self` | boolean | no |  |
 | `at` | null or [`RuleClock`](#ruleclock) | no |  |
 | `cooldown_seconds` | number (double) | no |  |

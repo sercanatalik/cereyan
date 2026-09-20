@@ -15,7 +15,7 @@ use crate::state::{StateName, StateType};
 /// Prefixes the engine owns. A name under one of these MUST be a catalogue
 /// entry; a name outside them is a custom event and is not checked, which is
 /// what keeps `emit_event` open to any vocabulary a pipeline wants.
-pub const RESERVED_PREFIXES: [&str; 7] = [
+pub const RESERVED_PREFIXES: [&str; 8] = [
     "run.",
     "task_run.",
     "flow.",
@@ -23,6 +23,7 @@ pub const RESERVED_PREFIXES: [&str; 7] = [
     "resource.",
     "rule.",
     "expectation.",
+    "backfill.",
 ];
 
 /// Every event the engine records.
@@ -51,6 +52,8 @@ pub enum EventName {
     FlowDisabled,
     FlowEnabled,
     FlowFanIn,
+    FlowRecovered,
+    BackfillCompleted,
     SchedulePaused,
     ScheduleResumed,
     ScheduleCatchup,
@@ -65,7 +68,7 @@ pub enum EventName {
 }
 
 impl EventName {
-    pub const ALL: [EventName; 34] = [
+    pub const ALL: [EventName; 36] = [
         EventName::RunScheduled,
         EventName::RunPending,
         EventName::RunRunning,
@@ -89,6 +92,8 @@ impl EventName {
         EventName::FlowDisabled,
         EventName::FlowEnabled,
         EventName::FlowFanIn,
+        EventName::FlowRecovered,
+        EventName::BackfillCompleted,
         EventName::SchedulePaused,
         EventName::ScheduleResumed,
         EventName::ScheduleCatchup,
@@ -127,6 +132,8 @@ impl EventName {
             EventName::FlowDisabled => "flow.disabled",
             EventName::FlowEnabled => "flow.enabled",
             EventName::FlowFanIn => "flow.fan_in",
+            EventName::FlowRecovered => "flow.recovered",
+            EventName::BackfillCompleted => "backfill.completed",
             EventName::SchedulePaused => "schedule.paused",
             EventName::ScheduleResumed => "schedule.resumed",
             EventName::ScheduleCatchup => "schedule.catchup",
@@ -167,7 +174,9 @@ impl EventName {
             EventName::FlowRegistered
             | EventName::FlowDisabled
             | EventName::FlowEnabled
-            | EventName::FlowFanIn => "flow",
+            | EventName::FlowFanIn
+            | EventName::FlowRecovered => "flow",
+            EventName::BackfillCompleted => "backfill",
             EventName::SchedulePaused
             | EventName::ScheduleResumed
             | EventName::ScheduleCatchup
@@ -209,6 +218,8 @@ impl EventName {
             EventName::FlowDisabled => "`disable_after` tripped; the flow's schedules are paused until `until`",
             EventName::FlowEnabled => "The disable window ended and the schedules resumed",
             EventName::FlowFanIn => "Every upstream completed a run for the key value and the downstream run was created",
+            EventName::FlowRecovered => "A run completed after the flow's previous terminal run had failed or crashed",
+            EventName::BackfillCompleted => "The last run of a backfill reached a terminal state",
             EventName::SchedulePaused => "A schedule was paused from the UI, the API, an MCP tool, a rule, or a disable window",
             EventName::ScheduleResumed => "A schedule was resumed",
             EventName::ScheduleCatchup => "The server started and applied the catch-up policy to fires missed while it was down",
@@ -242,8 +253,6 @@ impl EventName {
             | EventName::RunPending
             | EventName::RunRunning
             | EventName::RunCompleted
-            | EventName::RunFailed
-            | EventName::RunCrashed
             | EventName::RunCancelled
             | EventName::RunRetrying
             | EventName::RunPaused
@@ -277,7 +286,19 @@ impl EventName {
             EventName::FlowRegistered => &["flow", "project", "module"],
             EventName::FlowDisabled => &["failures", "window_seconds", "until"],
             EventName::FlowEnabled => &[],
+            EventName::RunFailed | EventName::RunCrashed => &[
+                "state",
+                "state_type",
+                "message",
+                "flow",
+                "project",
+                "parameters",
+                "created_by",
+                "failures_in_a_row",
+            ],
             EventName::FlowFanIn => &["key", "value", "upstream", "run_id"],
+            EventName::FlowRecovered => &["flow", "project", "failures", "run_id"],
+            EventName::BackfillCompleted => &["backfill_id", "counts"],
             EventName::SchedulePaused => &["schedule_id", "reason"],
             EventName::ScheduleResumed => &["schedule_id"],
             EventName::ScheduleCatchup => {
@@ -494,6 +515,8 @@ mod tests {
             "flow.disabled",
             "flow.enabled",
             "flow.fan_in",
+            "flow.recovered",
+            "backfill.completed",
             "schedule.paused",
             "schedule.resumed",
             "schedule.catchup",

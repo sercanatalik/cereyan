@@ -54,6 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--allow-unauthenticated", action="store_true", default=None, help="serve without a token when bound beyond loopback instead of generating one into <home>/token (also CEREYAN_ALLOW_UNAUTHENTICATED or [server] allow_unauthenticated)")
     serve.add_argument("--mcp-read-only", action="store_true", default=None, help="list and allow only MCP tools that change nothing (also CEREYAN_MCP_READ_ONLY or [server] mcp_read_only)")
     serve.add_argument("--metrics-public", action="store_true", default=None, help="serve /api/metrics without a token, as /api/health (also CEREYAN_METRICS_PUBLIC or [server] metrics_public)")
+    serve.add_argument("--public-url", help="the address people reach the UI at, used for run links in rule templates (also CEREYAN_PUBLIC_URL or [server] public_url)")
     serve.set_defaults(func=cmd_serve)
 
     check = sub.add_parser("check", help="import a directory as serve would and report problems, without touching the store")
@@ -195,6 +196,7 @@ def cmd_serve(args) -> int:
             allow_unauthenticated=args.allow_unauthenticated,
             mcp_read_only=args.mcp_read_only,
             metrics_public=args.metrics_public,
+            public_url=args.public_url,
         )
     except CereyanError as exc:
         print(f"error: {exc}", file=sys.stderr)

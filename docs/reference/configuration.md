@@ -59,6 +59,7 @@ title = "Data Platform"   # optional: shown in the top bar and the browser tab
 | `allow_unauthenticated` | boolean | `false` | Serve without a token when bound beyond loopback instead of generating one. The server warns at start, reports `exposed: true`, and the UI shows a banner. No effect with a token or `enable_auth`, or on loopback. |
 | `mcp_read_only` | boolean | `false` | List and allow only MCP tools that change nothing; every other tool call answers an error. The REST API and the UI are unaffected. |
 | `metrics_public` | boolean | `false` | Serve `GET /api/metrics` without a token, as `/api/health`. The host and origin checks still apply. |
+| `public_url` | string | unset | The address people reach the UI at, such as `https://cereyan.example.com`; the base of `{{ run.url }}` in rule templates and webhook presets. Unset, the server's own address is used. |
 | `max_engines` | integer | CPU count | Size of the warm engine pool. |
 | `engine_max_runs` | integer | `100` | Runs an engine executes before it is recycled. |
 | `cancel_grace_secs` | integer | `10` | Seconds between SIGTERM and SIGKILL when cancelling a run. |
@@ -115,6 +116,7 @@ The Settings page's Environment tab (`GET /api/settings/environment`) lists ever
 | `allow_unauthenticated` | `--allow-unauthenticated`, `CEREYAN_ALLOW_UNAUTHENTICATED`, `app.serve(allow_unauthenticated=)`, `[server] allow_unauthenticated`, `false` |
 | `mcp_read_only` | `--mcp-read-only`, `CEREYAN_MCP_READ_ONLY`, `app.serve(mcp_read_only=)`, `[server] mcp_read_only`, `false` |
 | `metrics_public` | `--metrics-public`, `CEREYAN_METRICS_PUBLIC`, `app.serve(metrics_public=)`, `[server] metrics_public`, `false` |
+| `public_url` | `--public-url`, `CEREYAN_PUBLIC_URL`, `app.serve(public_url=)`, `[server] public_url`, the server's own address |
 | `crash_retries` | the flow decorator, `[defaults]`, `--crash-retries`, `5` |
 
 ## Environment variables
@@ -132,6 +134,7 @@ The Settings page's Environment tab (`GET /api/settings/environment`) lists ever
 | `CEREYAN_ALLOW_UNAUTHENTICATED` | `true`, `false`, `1`, `0`, `yes`, or `no`: serve without a token beyond loopback; as `[server] allow_unauthenticated`. |
 | `CEREYAN_MCP_READ_ONLY` | `true`, `false`, `1`, `0`, `yes`, or `no`: hide and refuse MCP tools that change state; as `[server] mcp_read_only`. |
 | `CEREYAN_METRICS_PUBLIC` | `true`, `false`, `1`, `0`, `yes`, or `no`: serve `/api/metrics` without a token; as `[server] metrics_public`. |
+| `CEREYAN_PUBLIC_URL` | The address people reach the UI at; as `[server] public_url`. |
 | `CEREYAN_NO_BROWSER` | Do not open the UI on `serve`. |
 
 Set by the server for its engine children, not for users: `CEREYAN_ENGINE_ID`. An engine child finds the server through the `url` in `server.json`, base path included; `CEREYAN_SERVER` overrides that URL for an engine started by hand. Two knobs exist for the test suite and benchmarks only: `CEREYAN_RETENTION_INTERVAL` (seconds between retention passes, default hourly) and `CEREYAN_FAST_CRASH_RERUN`.

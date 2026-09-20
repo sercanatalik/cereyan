@@ -175,7 +175,16 @@ pub fn check_guards(
     if rule.spec.max_per_minute > 0 && recent >= rule.spec.max_per_minute {
         return GuardDecision::Skip("rate cap");
     }
-    let _ = event;
+    if rule.spec.after_consecutive > 0 {
+        let streak = event
+            .payload
+            .get("failures_in_a_row")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        if streak < rule.spec.after_consecutive {
+            return GuardDecision::Skip("consecutive");
+        }
+    }
     GuardDecision::Fire
 }
 
@@ -293,6 +302,44 @@ pub const DEFAULT_EMAIL_SUBJECT: &str =
     "[cereyan] {{ run.flow_name }} {{ state.name }}: {{ run.name }}";
 
 /// Render every template field of an action against the context.
+/// The webhook presets and the receivers they speak to.
+pub const PRESETS: [&str; 6] = ["slack", "teams", "discord", "ntfy", "telegram", "pagerduty"];
+
+/// PagerDuty's Events API v2 endpoint, the default url for that preset.
+pub const PAGERDUTY_URL: &str = "https://events.pagerduty.com/v2/enqueue";
+
+/// One line that every preset renders: flow, event, message, and the run's page.
+const PRESET_LINE: &str = "{% set line = (flow.name if flow.name else \"cereyan\") ~ \": \" ~ event.name ~ (\" — \" ~ state.message if state.message else \"\") ~ (\" \" ~ run.url if run.url else \"\") %}";
+
+/// The body template a preset stands for, with the action's own fields inlined
+/// as JSON literals. `None` for a webhook without a preset.
+pub fn preset_body(action: &RuleAction) -> Option<String> {
+    let literal = |v: Option<&String>| {
+        serde_json::to_string(v.map(|s| s.as_str()).unwrap_or("")).unwrap_or_default()
+    };
+    let body = match action.preset.as_deref()? {
+        "slack" => format!("{PRESET_LINE}{{\"text\": {{{{ line | tojson }}}}}}"),
+        "discord" => format!("{PRESET_LINE}{{\"content\": {{{{ line | tojson }}}}}}"),
+        "teams" => format!(
+            "{PRESET_LINE}{{\"type\": \"message\", \"attachments\": [{{\"contentType\": \"application/vnd.microsoft.card.adaptive\", \"content\": {{\"type\": \"AdaptiveCard\", \"version\": \"1.4\", \"body\": [{{\"type\": \"TextBlock\", \"wrap\": true, \"text\": {{{{ line | tojson }}}}}}]}}}}]}}"
+        ),
+        "ntfy" => format!(
+            "{PRESET_LINE}{{\"topic\": {}, \"title\": {{{{ ((flow.name if flow.name else \"cereyan\") ~ \": \" ~ event.name) | tojson }}}}, \"message\": {{{{ line | tojson }}}}, \"click\": {{{{ (run.url if run.url else \"\") | tojson }}}}}}",
+            literal(action.topic.as_ref())
+        ),
+        "telegram" => format!(
+            "{PRESET_LINE}{{\"chat_id\": {}, \"text\": {{{{ line | tojson }}}}}}",
+            literal(action.chat_id.as_ref())
+        ),
+        "pagerduty" => format!(
+            "{PRESET_LINE}{{\"routing_key\": {}, \"event_action\": \"{{% if event.name == 'flow.recovered' %}}resolve{{% else %}}trigger{{% endif %}}\", \"dedup_key\": {{{{ (\"cereyan-\" ~ (flow.project if flow.project else \"\") ~ \"-\" ~ (flow.name if flow.name else \"\")) | tojson }}}}, \"payload\": {{\"summary\": {{{{ line | tojson }}}}, \"severity\": \"error\", \"source\": \"cereyan\", \"custom_details\": {{\"run_url\": {{{{ (run.url if run.url else \"\") | tojson }}}}, \"event\": {{{{ event.name | tojson }}}}}}}}}}",
+            literal(action.routing_key.as_ref())
+        ),
+        _ => return None,
+    };
+    Some(body)
+}
+
 pub fn render_action(
     env: &Environment<'_>,
     action: &RuleAction,
@@ -325,6 +372,8 @@ pub fn render_action(
         let body = action
             .body
             .clone()
+            .filter(|b| !b.trim().is_empty())
+            .or_else(|| preset_body(action))
             .unwrap_or_else(|| "{{ event | tojson }}".into());
         out.body = Some(render(env, "body", &body, context)?);
     } else if action.kind == "email" {
@@ -486,8 +535,26 @@ pub fn validate_spec(spec: &RuleSpec) -> Result<(), String> {
                 }
             }
             "webhook" => {
-                if a.url.as_deref().unwrap_or("").is_empty() {
+                let preset = a.preset.as_deref().unwrap_or("");
+                if !PRESETS.contains(&preset) && !preset.is_empty() {
+                    return Err(format!(
+                        "action {i}: unknown webhook preset {preset:?}; one of {}",
+                        PRESETS.join(", ")
+                    ));
+                }
+                if a.url.as_deref().unwrap_or("").is_empty() && preset != "pagerduty" {
                     return Err(format!("action {i}: webhook needs a url"));
+                }
+                let needs = match preset {
+                    "ntfy" => Some(("topic", a.topic.as_deref())),
+                    "telegram" => Some(("chat_id", a.chat_id.as_deref())),
+                    "pagerduty" => Some(("routing_key", a.routing_key.as_deref())),
+                    _ => None,
+                };
+                if let Some((field, value)) = needs {
+                    if value.unwrap_or("").trim().is_empty() {
+                        return Err(format!("action {i}: the {preset} preset needs {field}"));
+                    }
                 }
             }
             "email" => {

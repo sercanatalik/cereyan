@@ -208,6 +208,56 @@ pub fn after_transition(state: &Arc<AppState>, run: &Run, previous: Option<&Stat
         }
         _ => {}
     }
+    if run.state.is_terminal() {
+        if let Some(backfill_id) = run.backfill_id {
+            backfill_completed(state, backfill_id, run.flow_id);
+        }
+    }
+}
+
+/// A state name (type or sub-state) that ends a run.
+fn name_is_terminal(name: &str) -> bool {
+    match StateType::parse(name) {
+        Some(t) => t.is_terminal(),
+        None => matches!(name, "Cached" | "Skipped" | "TimedOut"),
+    }
+}
+
+/// `backfill.completed`, once, when no run of the backfill is left to end.
+/// Two runs ending together both see an empty remainder, so the marker is
+/// claimed under a lock in this process and persisted for the next one.
+fn backfill_completed(state: &Arc<AppState>, backfill_id: i64, flow_id: i64) {
+    static EMITTED: std::sync::Mutex<Option<std::collections::HashSet<i64>>> =
+        std::sync::Mutex::new(None);
+    let Ok(counts) = state.store.backfill_counts(backfill_id) else {
+        return;
+    };
+    let pending = counts
+        .iter()
+        .filter(|(s, _)| !name_is_terminal(s))
+        .map(|(_, n)| *n)
+        .sum::<i64>();
+    if pending > 0 || counts.is_empty() {
+        return;
+    }
+    let marker = format!("backfill.completed:{backfill_id}");
+    {
+        let mut guard = EMITTED.lock().unwrap_or_else(|e| e.into_inner());
+        let set = guard.get_or_insert_with(Default::default);
+        if set.contains(&backfill_id) || matches!(state.store.kv_get(&marker), Ok(Some(_))) {
+            return;
+        }
+        set.insert(backfill_id);
+    }
+    let _ = state.store.kv_set(&marker, "1");
+    let by_state: serde_json::Map<String, serde_json::Value> =
+        counts.into_iter().map(|(s, n)| (s, json!(n))).collect();
+    let _ = state.record_engine_event(
+        EventName::BackfillCompleted,
+        None,
+        Some(flow_id),
+        json!({"backfill_id": backfill_id, "counts": by_state}),
+    );
 }
 
 /// A supervisor-detected crash: continue the chain or end it.

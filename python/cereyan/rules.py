@@ -15,7 +15,7 @@ _registry: dict[str, "CodeRule"] = {}
 
 #: Keyword guards `@app.rule` accepts. Anything else is a typo, and silently
 #: dropping it is how a rule ends up running with defaults nobody asked for.
-GUARD_NAMES = frozenset({"name", "once", "cooldown_seconds", "max_per_minute", "allow_self"})
+GUARD_NAMES = frozenset({"name", "once", "cooldown_seconds", "max_per_minute", "allow_self", "after_consecutive"})
 
 
 @dataclass
@@ -36,6 +36,7 @@ class CodeRule:
     cooldown_seconds: float = 0.0
     max_per_minute: int = 60
     allow_self: bool = False
+    after_consecutive: int = 0
     unless: list[str] = field(default_factory=list)
     within: float | None = None
     at: str | None = None
@@ -64,6 +65,7 @@ class CodeRule:
             "cooldown_seconds": self.cooldown_seconds,
             "max_per_minute": self.max_per_minute,
             "allow_self": self.allow_self,
+            "after_consecutive": int(self.after_consecutive),
         }
         if self.unless:
             spec["unless"] = {"events": self.unless, "flows": self.flows, "tags": self.tags, "states": [], "project": self.project}

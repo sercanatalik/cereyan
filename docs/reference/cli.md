@@ -33,7 +33,7 @@ cereyan run [-h] [--param NAME=VALUE] [--quiet] target
 ## `cereyan serve`
 
 ```text
-cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--engine-max-runs ENGINE_MAX_RUNS] [--no-open] [--crash-retries CRASH_RETRIES] [--token TOKEN] [--socket SOCKET] [--base-path BASE_PATH] [--enable-auth] [--auth-cookie AUTH_COOKIE] [--auth-scope AUTH_SCOPE] [--login-url LOGIN_URL] [--allowed-host HOST] [--allow-unauthenticated] [--mcp-read-only] [--metrics-public] [dir]
+cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--engine-max-runs ENGINE_MAX_RUNS] [--no-open] [--crash-retries CRASH_RETRIES] [--token TOKEN] [--socket SOCKET] [--base-path BASE_PATH] [--enable-auth] [--auth-cookie AUTH_COOKIE] [--auth-scope AUTH_SCOPE] [--login-url LOGIN_URL] [--allowed-host HOST] [--allow-unauthenticated] [--mcp-read-only] [--metrics-public] [--public-url PUBLIC_URL] [dir]
 ```
 
 | Argument | Meaning |
@@ -59,6 +59,7 @@ cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--en
 | `--allow-unauthenticated` | serve without a token when bound beyond loopback instead of generating one into <home>/token (also CEREYAN_ALLOW_UNAUTHENTICATED or [server] allow_unauthenticated). |
 | `--mcp-read-only` | list and allow only MCP tools that change nothing (also CEREYAN_MCP_READ_ONLY or [server] mcp_read_only). |
 | `--metrics-public` | serve /api/metrics without a token, as /api/health (also CEREYAN_METRICS_PUBLIC or [server] metrics_public). |
+| `--public-url` `PUBLIC_URL` | the address people reach the UI at, used for run links in rule templates (also CEREYAN_PUBLIC_URL or [server] public_url). |
 
 ## `cereyan check`
 
