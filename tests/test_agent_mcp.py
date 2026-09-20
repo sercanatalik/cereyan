@@ -508,3 +508,13 @@ def test_run_flow_for_later(agent):
     srv.client.cancel(out["data"]["run"]["id"])
     bad = call(srv, "run_flow", flow="etl", at="2099-01-01T00:00:00Z", delay_seconds=5)
     assert "not both" in json.dumps(bad)
+
+
+def test_rerun_run_from_failure(agent):
+    srv = agent
+    failed = call(srv, "run_flow", flow="boom")["data"]["run"]
+    srv.wait_run(failed["id"])
+    out = call(srv, "rerun_run", run_id=failed["id"], **{"from": "failure"})["data"]
+    assert out["rerun_of"] == failed["id"] and out["from"] == "failure" and "retry" in out["note"]
+    assert out["run"]["created_by"].startswith("mcp:") and out["run"]["parent_run_id"] == failed["id"]
+    srv.wait_run(out["run"]["id"])

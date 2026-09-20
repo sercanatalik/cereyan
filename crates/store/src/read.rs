@@ -82,6 +82,11 @@ pub struct EventsPage {
     pub next_cursor: Option<i64>,
 }
 
+/// kv key holding the checkpoints a run was seeded with, as a JSON list.
+pub fn checkpoint_seed_key(run_id: i64) -> String {
+    format!("run.checkpoints:{run_id}")
+}
+
 /// A completed task run's stored result, keyed for replay.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -702,9 +707,40 @@ impl Store {
                     })
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            // Later passes and later runs of the chain win: keep the last per key.
+            // A retry run is seeded with the checkpoints it may replay (kv
+            // `run.checkpoints:<id>`); seeds of the whole chain go first, oldest
+            // run first, so a run's own completed work wins over its seed.
+            let mut chain: Vec<i64> = Vec::new();
+            {
+                let mut walk = conn.prepare_cached(
+                    "WITH RECURSIVE chain(id) AS (
+                        SELECT ?1
+                        UNION ALL
+                        SELECT r.parent_run_id FROM run r JOIN chain ON r.id = chain.id
+                        WHERE r.parent_run_id IS NOT NULL AND r.created_by LIKE 'crash:%'
+                     ) SELECT id FROM chain",
+                )?;
+                for id in walk.query_map(rusqlite::params![run_id], |r| r.get::<_, i64>(0))? {
+                    chain.push(id?);
+                }
+            }
             let mut latest: std::collections::HashMap<String, Checkpoint> =
                 std::collections::HashMap::new();
+            for id in chain.iter().rev() {
+                let seed: Option<String> = conn
+                    .query_row(
+                        "SELECT value FROM kv WHERE key = ?1",
+                        [checkpoint_seed_key(*id)],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                if let Some(seed) = seed {
+                    for cp in serde_json::from_str::<Vec<Checkpoint>>(&seed).unwrap_or_default() {
+                        latest.insert(cp.dynamic_key.clone(), cp);
+                    }
+                }
+            }
+            // Later passes and later runs of the chain win: keep the last per key.
             for cp in rows {
                 latest.insert(cp.dynamic_key.clone(), cp);
             }

@@ -710,6 +710,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retry_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{id}/tasks": {
         parameters: {
             query?: never;
@@ -1203,7 +1219,7 @@ export interface components {
             path: string;
         };
         BulkBody: {
-            /** @description `cancel`, `rerun`, or `delete`. */
+            /** @description `cancel`, `rerun`, `retry` (from failure), or `delete`. */
             action: string;
             /** @description Count only; defaults to true. */
             dry_run?: boolean | null;
@@ -1754,6 +1770,23 @@ export interface components {
         ResumeBody: {
             /** @description The answer handed to `wait_for_input` on the resumed attempt (any JSON). */
             input: unknown;
+        };
+        RetryBody: {
+            /**
+             * @description `failure` (default), `start`, or a dynamic key such as `transform-0`.
+             * @default null
+             */
+            from: string | null;
+        };
+        RetryResponse: {
+            from: string;
+            /** @description Dynamic keys that will execute again. */
+            invalidated: string[];
+            /** @description Checkpoints the new run replays. */
+            replays: number;
+            /** Format: int64 */
+            retry_of: number;
+            run: components["schemas"]["Run"];
         };
         RouteSpec: {
             id: number;
@@ -3995,6 +4028,49 @@ export interface operations {
                 content?: never;
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    retry_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryBody"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetryResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -41,11 +41,14 @@ export function TaskRail({
   tasks,
   selectedId,
   onSelect,
+  onRerunFrom,
   className,
 }: {
   tasks: TaskRun[];
   selectedId?: number;
   onSelect: (id: number | undefined) => void;
+  /** Offered on a finished run: retry the run from this task onwards. */
+  onRerunFrom?: (task: TaskRun) => void;
   className?: string;
 }) {
   const now = useNow(tasks.some((t) => t.state.name === "AwaitingRetry" || t.state.type === "Running"));
@@ -96,7 +99,32 @@ export function TaskRail({
                   </span>
                 ) : null}
               </span>
-              <span className="text-xs tabular-nums text-muted-foreground">{duration}</span>
+              <span className="flex items-center gap-1 text-xs tabular-nums text-muted-foreground">
+                {duration}
+                {onRerunFrom ? (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    title={`Rerun from ${t.dynamic_key}`}
+                    aria-label={`Rerun from ${t.dynamic_key}`}
+                    data-testid="rerun-from"
+                    className="rounded px-1 hover:bg-accent hover:text-foreground"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRerunFrom(t);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onRerunFrom(t);
+                      }
+                    }}
+                  >
+                    ↻
+                  </span>
+                ) : null}
+              </span>
             </button>
           );
         })}

@@ -550,8 +550,8 @@ pub fn tool_list() -> Vec<Value> {
             json!({"flow": flow_prop, "project": {"type": "string"}}), &["flow"]),
         read_tool("check_flows", "Run `cereyan check --json` on the served directory in a child process and return its report: import failures, unknown upstreams, invalid schedules with previews, unlisted resources, and route conflicts. Takes a few seconds. Read-only.",
             json!({}), &[]),
-        write_tool("rerun_run", "Start a new run of the same flow with the original run's parameters and tags. Returns the new run; follow it with get_run. Rerunning from a failed task is not yet supported.",
-            json!({"run_id": {"type": "integer"}}), &["run_id"]),
+        write_tool("rerun_run", "Start a new run of the same flow with the original run's parameters and tags. With `from`, the new run is a retry linked to the original that replays its completed tasks from their checkpoints and executes from the failure, from the start, or from the named task and everything after it. Returns the new run; follow it with get_run.",
+            json!({"run_id": {"type": "integer"}, "from": {"type": "string", "description": "failure, start, or a task's dynamic key such as transform-0; omit for a fresh run"}}), &["run_id"]),
     ]
 }
 
@@ -655,6 +655,7 @@ async fn call_tool(
             None,
             Vec::new(),
             &crate::auth::run_creator(user, &format!("mcp:{client}")),
+            None,
             None,
         )
         .await?;
@@ -766,6 +767,20 @@ async fn call_tool(
                 .store
                 .get_run(id)?
                 .ok_or_else(|| ToolError::Failed(format!("run {id} not found")))?;
+            if let Some(from) = arg_str(args, "from").filter(|f| !f.trim().is_empty()) {
+                let out = runs::retry_inner(
+                    state,
+                    &original,
+                    from.trim(),
+                    &crate::auth::run_creator(user, &format!("mcp:{client}")),
+                )
+                .await?;
+                return Ok(json!({
+                    "run": out.run, "rerun_of": id, "from": out.from, "replays": out.replays,
+                    "invalidated": out.invalidated,
+                    "note": "created as a retry of the original: kept tasks replay from their checkpoints; follow it with get_run"
+                }));
+            }
             let flow = state
                 .store
                 .get_flow(original.flow_id)?
@@ -777,6 +792,7 @@ async fn call_tool(
                 None,
                 original.tags.clone(),
                 &crate::auth::run_creator(user, &format!("mcp:{client}")),
+                None,
                 None,
             )
             .await?;
@@ -974,6 +990,7 @@ async fn call_tool(
                 tags,
                 &crate::auth::run_creator(user, &format!("mcp:{client}")),
                 starts,
+                None,
             )
             .await?;
             let note = if starts.is_some_and(|t| t > now_micros()) {

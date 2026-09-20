@@ -43,6 +43,7 @@ export const Route = createFileRoute("/runs/$runId")({
 });
 
 const TERMINAL = new Set(["Completed", "Failed", "Cancelled", "Crashed"]);
+const RETRIABLE = new Set(["Failed", "Cancelled", "Crashed"]);
 
 function createdBy(run: Run): { label: string; to?: string; params?: Record<string, string> } {
   const by = run.created_by ?? "";
@@ -111,6 +112,11 @@ function RunDetail() {
       ),
     onSuccess: (created) => navigate({ to: "/runs/$runId", params: { runId: String(created.id) } }),
   });
+  const retry = useMutation({
+    mutationFn: async (from: string) =>
+      unwrap(await api.POST("/api/runs/{id}/retry", { params: { path: { id } }, body: { from } })),
+    onSuccess: (out) => navigate({ to: "/runs/$runId", params: { runId: String(out.run.id) } }),
+  });
   const cancel = useMutation({
     mutationFn: async () => unwrap(await api.POST("/api/runs/{id}/cancel", { params: { path: { id } } })),
     onSuccess: (r) => client.setQueryData(["run", id], r),
@@ -161,9 +167,20 @@ function RunDetail() {
             </Link>
             <Tags tags={r.tags} />
             <div className="ml-auto flex gap-2">
-              <Button variant="outline" onClick={() => again.mutate(r)} disabled={again.isPending}>
-                <RotateCcw /> Run again
-              </Button>
+              {RETRIABLE.has(r.state.type) ? (
+                <Button
+                  variant="outline"
+                  onClick={() => retry.mutate("failure")}
+                  disabled={retry.isPending}
+                  data-testid="retry-from-failure"
+                >
+                  <RotateCcw /> Retry from failure
+                </Button>
+              ) : (
+                <Button variant="outline" onClick={() => again.mutate(r)} disabled={again.isPending}>
+                  <RotateCcw /> Run again
+                </Button>
+              )}
               <Button
                 variant="outline"
                 disabled={!active || cancel.isPending}
@@ -178,6 +195,11 @@ function RunDetail() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  {RETRIABLE.has(r.state.type) ? (
+                    <DropdownMenuItem onSelect={() => again.mutate(r)}>
+                      Run again from scratch
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem
                     disabled={!previous}
                     onSelect={() =>
@@ -266,6 +288,7 @@ function RunDetail() {
             tasks={visibleTasks}
             selectedId={selectedTask}
             onSelect={setSelectedTask}
+            onRerunFrom={active ? undefined : (t) => retry.mutate(t.dynamic_key)}
             className="min-h-0 flex-1"
           />
         </div>

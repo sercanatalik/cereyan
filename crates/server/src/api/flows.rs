@@ -160,6 +160,7 @@ pub async fn create_run_for_flow(
         body.tags,
         &created_by,
         starts,
+        None,
     )
     .await?;
     Ok((StatusCode::CREATED, Json(run)))

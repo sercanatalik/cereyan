@@ -105,6 +105,21 @@ def read() -> None:
 
 The run fails on its first attempt with `abort` in its state details, so a refused retry is distinguishable from an exhausted one in the UI and in rules. `crash_retries` is unaffected: a crash has no exception to judge.
 
+## Retry a finished run from where it failed
+
+When a run has failed and the cause is fixed, retry it rather than run it again from scratch. `POST /api/runs/{id}/retry`, `Client.retry(run_id)`, `cereyan retry <run>`, the MCP `rerun_run` tool's `from`, and **Retry from failure** on the run page all create a new run of the same flow and parameters, linked to the original (`created_by = retry:<id>`, the next `attempt`), seeded with the original's [checkpoints](../concepts/runs-and-states.md#checkpoints). The new run replays every task that had completed as `Replayed` and executes from the task that failed, plus everything that waited on it. The original keeps its history.
+
+`from` picks the point: `failure` (the default), `start` for a clean rerun that is still linked, or a task's dynamic key such as `transform-0`, which the run page offers as **Rerun from here** on each task. That task executes, and so does everything after it, because replay ends at the first task that runs; `invalidated` in the response lists the point and the tasks recorded as waiting on it. The Runs page's **Retry** and the bulk action `retry` do this for every finished run a filter matches.
+
+```{.python fixture:served}
+run = served.client.run("etl", day="2026-03-03")
+served.wait_run(run["id"])
+out = served.client.retry(run["id"], from_="start")
+assert out["retry_of"] == run["id"] and out["run"]["parent_run_id"] == run["id"]
+```
+
+Automatic in-process retries can resume the same way: `@flow(retries=2, checkpoint=True)` replays the completed prefix on each retry instead of running it again.
+
 ## Time out
 
 `timeout_seconds` on a task fails the task run as `TimedOut` after the limit; on a flow it fails the run. A timed-out task still counts toward `retries`, so `retries=2, timeout_seconds=30` gives three attempts of thirty seconds each.

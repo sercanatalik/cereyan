@@ -15,7 +15,9 @@ pub use error::StoreError;
 pub use home::resolve_home;
 pub use manage::{ProjectCounts, ProjectRow, TableCounts, BACKUP_DIR};
 pub use migrations::latest_version as latest_schema_version;
-pub use read::{ArtifactFilter, ArtifactsPage, Checkpoint, EventFilter, EventsPage};
+pub use read::{
+    checkpoint_seed_key, ArtifactFilter, ArtifactsPage, Checkpoint, EventFilter, EventsPage,
+};
 pub use read::{ListRunsFilter, ListTaskRunsFilter, LogFilter, LogsPage, RunsPage, TaskRunsPage};
 pub use writer::{
     ArmExpectation, CreateBackfill, CreateRun, CreateTaskRun, DeletedCounts, FlowRows, NewEvent,

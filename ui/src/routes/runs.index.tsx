@@ -238,9 +238,11 @@ function RunsTab({
       ),
   });
   const bulk = useMutation({
-    mutationFn: async (action: "cancel" | "delete") => {
+    mutationFn: async (action: "cancel" | "retry" | "delete") => {
       for (const id of selected) {
         if (action === "cancel") await api.POST("/api/runs/{id}/cancel", { params: { path: { id } } });
+        else if (action === "retry")
+          await api.POST("/api/runs/{id}/retry", { params: { path: { id } }, body: { from: "failure" } });
         else await api.DELETE("/api/runs/{id}", { params: { path: { id } } });
       }
     },
@@ -261,11 +263,18 @@ function RunsTab({
     start_after: start,
   };
   const matchAll = useMutation({
-    mutationFn: async (action: "cancel" | "rerun" | "delete") => {
+    mutationFn: async (action: "cancel" | "rerun" | "retry" | "delete") => {
       const count = unwrap(
         await api.POST("/api/runs/bulk", { body: { filter: filterBody, action, dry_run: true } }),
       );
-      const verb = action === "cancel" ? "Cancel" : action === "rerun" ? "Rerun" : "Delete";
+      const verb =
+        action === "cancel"
+          ? "Cancel"
+          : action === "rerun"
+            ? "Rerun"
+            : action === "retry"
+              ? "Retry"
+              : "Delete";
       if (count.affected === 0) {
         window.alert(`${verb}: no runs to act on among the ${count.matched} matching the filters.`);
         return null;
@@ -300,6 +309,15 @@ function RunsTab({
             disabled={matchAll.isPending}
           >
             Rerun
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => matchAll.mutate("retry")}
+            disabled={matchAll.isPending}
+            title="A new run per finished run, replaying its completed tasks and executing from the failure"
+          >
+            Retry
           </Button>
           <Button
             size="sm"
@@ -374,6 +392,15 @@ function RunsTab({
             disabled={bulk.isPending}
           >
             Cancel
+          </Button>
+          <Button
+            size="sm"
+            className="bg-primary-foreground/15 text-primary-foreground hover:bg-primary-foreground/25"
+            onClick={() => bulk.mutate("retry")}
+            disabled={bulk.isPending}
+            data-testid="retry-selected"
+          >
+            Retry
           </Button>
           <Button
             size="sm"

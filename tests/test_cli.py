@@ -146,3 +146,8 @@ def test_run_later_needs_a_server(run_cli, write_module):
     result = run_cli("run", f"{path}:etl", "--param", "day=2026-09-06", "--in", "5m")
     assert result.returncode == 3 and "running server" in result.stderr
     assert "run completed" not in result.stdout
+
+
+def test_retry_needs_a_server(run_cli):
+    result = run_cli("retry", "1")
+    assert result.returncode == 3 and "running server" in result.stderr

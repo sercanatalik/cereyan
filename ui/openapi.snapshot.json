@@ -364,7 +364,7 @@
       "BulkBody": {
         "properties": {
           "action": {
-            "description": "`cancel`, `rerun`, or `delete`.",
+            "description": "`cancel`, `rerun`, `retry` (from failure), or `delete`.",
             "type": "string"
           },
           "dry_run": {
@@ -1976,6 +1976,53 @@
         },
         "required": [
           "input"
+        ],
+        "type": "object"
+      },
+      "RetryBody": {
+        "properties": {
+          "from": {
+            "default": null,
+            "description": "`failure` (default), `start`, or a dynamic key such as `transform-0`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RetryResponse": {
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "invalidated": {
+            "description": "Dynamic keys that will execute again.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "replays": {
+            "description": "Checkpoints the new run replays.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retry_of": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run": {
+            "$ref": "#/components/schemas/Run"
+          }
+        },
+        "required": [
+          "run",
+          "retry_of",
+          "from",
+          "replays",
+          "invalidated"
         ],
         "type": "object"
       },
@@ -6659,6 +6706,56 @@
             "description": ""
           },
           "409": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}/retry": {
+      "post": {
+        "operationId": "retry_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetryResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          },
+          "422": {
             "description": ""
           }
         },

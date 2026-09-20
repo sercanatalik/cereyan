@@ -365,6 +365,21 @@ Also served on POST, which is what the engine client speaks.
 | 404 | no body |
 | 409 | no body |
 
+### `POST /api/runs/{id}/retry`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+**Request body** (application/json): [`RetryBody`](#retrybody)
+
+| Status | Body |
+|---|---|
+| 201 | [`RetryResponse`](#retryresponse) (application/json) |
+| 404 | no body |
+| 409 | no body |
+| 422 | no body |
+
 ### `GET /api/runs/{id}/tasks`
 
 | Parameter | In | Type | Required | Description |
@@ -1040,7 +1055,7 @@ Type: any.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `action` | string | yes | `cancel`, `rerun`, or `delete`. |
+| `action` | string | yes | `cancel`, `rerun`, `retry` (from failure), or `delete`. |
 | `dry_run` | boolean or null | no | Count only; defaults to true. |
 | `filter` | any | no | The same filters as `GET /api/runs`, as an object; empty matches every run. |
 
@@ -1505,6 +1520,22 @@ What an event is about.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `input` | any | yes | The answer handed to `wait_for_input` on the resumed attempt (any JSON). |
+
+### `RetryBody`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | string or null | no | `failure` (default), `start`, or a dynamic key such as `transform-0`. |
+
+### `RetryResponse`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | string | yes |  |
+| `invalidated` | array of string | yes | Dynamic keys that will execute again. |
+| `replays` | integer | yes | Checkpoints the new run replays. |
+| `retry_of` | integer (int64) | yes |  |
+| `run` | [`Run`](#run) | yes |  |
 
 ### `RouteSpec`
 

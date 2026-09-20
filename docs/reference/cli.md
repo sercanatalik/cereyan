@@ -5,7 +5,7 @@
 The `cereyan` command. Every subcommand accepts the global options first, for example `cereyan --home /tmp/h run pipeline.py:etl`.
 
 ```text
-cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,check,backup,backfill,pause,resume,mcp,runs} ...
+cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,check,backup,backfill,retry,pause,resume,mcp,runs} ...
 ```
 
 ## Global options
@@ -110,6 +110,21 @@ cereyan backfill [-h] --param PARAM --start START --end END [--interval INTERVAL
 | `--reverse` | create the newest value first. |
 | `--extra` `NAME=VALUE` | fixed value for another flow parameter; repeatable. |
 | `--json` | print the backfill status as JSON. |
+
+## `cereyan retry`
+
+```text
+cereyan retry [-h] [--from POINT] [--json] run_id
+```
+
+| Argument | Meaning |
+|---|---|
+| `run_id` | the run to retry. |
+
+| Option | Meaning |
+|---|---|
+| `--from` `POINT` | failure (default), start, or a task's dynamic key such as transform-0. Default `failure`. |
+| `--json` | print the retry response as JSON. |
 
 ## `cereyan pause`
 

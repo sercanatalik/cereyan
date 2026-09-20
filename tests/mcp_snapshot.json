@@ -1465,10 +1465,14 @@
         "destructiveHint": false,
         "readOnlyHint": false
       },
-      "description": "Start a new run of the same flow with the original run's parameters and tags. Returns the new run; follow it with get_run. Rerunning from a failed task is not yet supported.",
+      "description": "Start a new run of the same flow with the original run's parameters and tags. With `from`, the new run is a retry linked to the original that replays its completed tasks from their checkpoints and executes from the failure, from the start, or from the named task and everything after it. Returns the new run; follow it with get_run.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "from": {
+            "description": "failure, start, or a task's dynamic key such as transform-0; omit for a fresh run",
+            "type": "string"
+          },
           "run_id": {
             "type": "integer"
           }

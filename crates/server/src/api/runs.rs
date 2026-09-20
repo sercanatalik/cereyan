@@ -139,6 +139,7 @@ fn generate_name(store: &cereyan_store::Store) -> String {
     format!("run-{}", cereyan_core::now_micros())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_run_inner(
     state: &Arc<AppState>,
     flow: &Flow,
@@ -147,6 +148,7 @@ pub async fn create_run_inner(
     tags: Vec<String>,
     created_by: &str,
     not_before: Option<i64>,
+    parent: Option<(i64, i64)>,
 ) -> ApiResult<Run> {
     if state
         .shutting_down
@@ -196,6 +198,8 @@ pub async fn create_run_inner(
             initial_state: Some(RunState::new(StateType::Scheduled)),
             priority,
             scheduled_time: not_before,
+            parent_run_id: parent.map(|(id, _)| id),
+            attempt: parent.map(|(_, attempt)| attempt).unwrap_or(0),
             ..Default::default()
         })
     })
@@ -330,6 +334,7 @@ pub async fn create_run(
         body.tags,
         &created_by,
         starts,
+        None,
     )
     .await?;
     Ok((StatusCode::CREATED, Json(run)))
@@ -479,7 +484,7 @@ pub struct BulkBody {
     #[serde(default)]
     #[schema(value_type = serde_json::Value)]
     pub filter: ListRunsFilter,
-    /// `cancel`, `rerun`, or `delete`.
+    /// `cancel`, `rerun`, `retry` (from failure), or `delete`.
     pub action: String,
     /// Count only; defaults to true.
     #[serde(default)]
@@ -505,9 +510,9 @@ pub async fn bulk_runs(
     Json(body): Json<BulkBody>,
 ) -> ApiResult<Json<BulkResult>> {
     let action = body.action.as_str();
-    if !matches!(action, "cancel" | "rerun" | "delete") {
+    if !matches!(action, "cancel" | "rerun" | "retry" | "delete") {
         return Err(ApiError::Unprocessable(
-            "action must be cancel, rerun, or delete".into(),
+            "action must be cancel, rerun, retry, or delete".into(),
         ));
     }
     let dry_run = body.dry_run.unwrap_or(true);
@@ -533,7 +538,7 @@ pub async fn bulk_runs(
         .iter()
         .filter(|r| match action {
             "cancel" => !r.state.is_terminal(),
-            "rerun" => r.state.is_terminal(),
+            "rerun" | "retry" => r.state.is_terminal(),
             _ => true,
         })
         .collect();
@@ -547,6 +552,13 @@ pub async fn bulk_runs(
                     cancel_inner(&state, run).await?;
                 }
                 "delete" => delete_inner(&state, run).await?,
+                "retry" => {
+                    let by = crate::auth::run_creator(
+                        user.as_ref().map(|Extension(u)| u),
+                        &format!("retry:{}", run.id),
+                    );
+                    retry_inner(&state, run, "failure", &by).await?;
+                }
                 _ => {
                     let Some(flow) = state.store.get_flow(run.flow_id)? else {
                         continue;
@@ -558,6 +570,7 @@ pub async fn bulk_runs(
                         None,
                         run.tags.clone(),
                         &creator,
+                        None,
                         None,
                     )
                     .await?;
@@ -571,6 +584,150 @@ pub async fn bulk_runs(
         matched,
         affected,
     }))
+}
+
+#[derive(Deserialize, utoipa::ToSchema, Default)]
+#[serde(default)]
+pub struct RetryBody {
+    /// `failure` (default), `start`, or a dynamic key such as `transform-0`.
+    pub from: Option<String>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct RetryResponse {
+    pub run: Run,
+    pub retry_of: i64,
+    pub from: String,
+    /// Checkpoints the new run replays.
+    pub replays: usize,
+    /// Dynamic keys that will execute again.
+    pub invalidated: Vec<String>,
+}
+
+/// Fork a terminal run: a new run seeded with the original's checkpoints
+/// except `from` and everything downstream of it.
+pub async fn retry_inner(
+    state: &Arc<AppState>,
+    original: &Run,
+    from: &str,
+    created_by: &str,
+) -> ApiResult<RetryResponse> {
+    if !original.state.is_terminal() {
+        return Err(ApiError::Conflict(serde_json::json!({
+            "error": format!("run is {}, not finished", original.state.state_type.as_str()),
+            "current": original.state,
+        })));
+    }
+    let flow = state
+        .store
+        .get_flow(original.flow_id)?
+        .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
+    let tasks = state.store.task_runs_by_run(original.id, None)?;
+    let last = tasks.iter().map(|t| t.pass).max().unwrap_or(0);
+    let latest: Vec<&TaskRun> = tasks.iter().filter(|t| t.pass == last).collect();
+    let key_of: std::collections::HashMap<String, &str> = latest
+        .iter()
+        .map(|t| (t.external_id.to_string(), t.dynamic_key.as_str()))
+        .collect();
+    // Everything that waited on a key, transitively, through the recorded parents.
+    let downstream = |roots: Vec<String>| -> std::collections::BTreeSet<String> {
+        let mut out: std::collections::BTreeSet<String> = roots.iter().cloned().collect();
+        loop {
+            let before = out.len();
+            for t in &latest {
+                if out.contains(&t.dynamic_key) {
+                    continue;
+                }
+                let waits_on_hit = t
+                    .parents
+                    .iter()
+                    .filter_map(|p| key_of.get(&p.to_string()))
+                    .any(|k| out.contains(*k));
+                if waits_on_hit {
+                    out.insert(t.dynamic_key.clone());
+                }
+            }
+            if out.len() == before {
+                break;
+            }
+        }
+        out
+    };
+    let invalidated: std::collections::BTreeSet<String> = match from {
+        "start" => latest.iter().map(|t| t.dynamic_key.clone()).collect(),
+        "failure" => downstream(
+            latest
+                .iter()
+                .filter(|t| t.state.state_type != StateType::Completed)
+                .map(|t| t.dynamic_key.clone())
+                .collect(),
+        ),
+        key => {
+            if !latest.iter().any(|t| t.dynamic_key == key) {
+                return Err(ApiError::Unprocessable(format!(
+                    "run {} recorded no task {key:?} in its last pass",
+                    original.id
+                )));
+            }
+            downstream(vec![key.to_string()])
+        }
+    };
+    let seed: Vec<cereyan_store::Checkpoint> = if from == "start" {
+        Vec::new()
+    } else {
+        state
+            .store
+            .checkpoints(original.id)?
+            .into_iter()
+            .filter(|c| !invalidated.contains(&c.dynamic_key))
+            .collect()
+    };
+    let run = create_run_inner(
+        state,
+        &flow,
+        original.parameters.clone(),
+        None,
+        original.tags.clone(),
+        created_by,
+        None,
+        Some((original.id, original.attempt + 1)),
+    )
+    .await?;
+    if !seed.is_empty() {
+        state.store.kv_set(
+            &cereyan_store::checkpoint_seed_key(run.id),
+            &serde_json::to_string(&seed).unwrap_or_else(|_| "[]".into()),
+        )?;
+    }
+    Ok(RetryResponse {
+        replays: seed.len(),
+        run,
+        retry_of: original.id,
+        from: from.to_string(),
+        invalidated: invalidated.into_iter().collect(),
+    })
+}
+
+#[utoipa::path(post, path = "/api/runs/{id}/retry", params(("id" = i64, Path)), request_body = RetryBody, responses((status = 201, body = RetryResponse), (status = 404), (status = 409), (status = 422)))]
+pub async fn retry_run(
+    State(state): State<Arc<AppState>>,
+    user: Option<Extension<crate::auth::AuthenticatedUser>>,
+    Path(id): Path<i64>,
+    body: Option<Json<RetryBody>>,
+) -> ApiResult<(StatusCode, Json<RetryResponse>)> {
+    let original = state
+        .store
+        .get_run(id)?
+        .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
+    let from = body
+        .and_then(|b| b.0.from)
+        .map(|f| f.trim().to_string())
+        .filter(|f| !f.is_empty())
+        .unwrap_or_else(|| "failure".into());
+    let created_by =
+        crate::auth::run_creator(user.as_ref().map(|Extension(u)| u), &format!("retry:{id}"));
+    let out = retry_inner(&state, &original, &from, &created_by).await?;
+    Ok((StatusCode::CREATED, Json(out)))
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]

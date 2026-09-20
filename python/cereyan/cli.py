@@ -83,6 +83,12 @@ def build_parser() -> argparse.ArgumentParser:
     backfill.add_argument("--json", action="store_true", help="print the backfill status as JSON")
     backfill.set_defaults(func=cmd_backfill)
 
+    retry = sub.add_parser("retry", help="retry a finished run from where it failed, from a task, or from the start (requires a running server)")
+    retry.add_argument("run_id", type=int, help="the run to retry")
+    retry.add_argument("--from", dest="from_", default="failure", metavar="POINT", help="failure (default), start, or a task's dynamic key such as transform-0")
+    retry.add_argument("--json", action="store_true", help="print the retry response as JSON")
+    retry.set_defaults(func=cmd_retry)
+
     pause = sub.add_parser("pause", help="pause every schedule at once (requires a running server); running runs continue")
     pause.add_argument("--reason", help="shown in the UI banner and recorded on the event")
     pause.add_argument("--until", help="resume on its own at this ISO 8601 time (naive means UTC)")
@@ -401,6 +407,28 @@ def _scheduler_status_line(status: dict) -> str:
     if held:
         parts.append(f"{held} run{'s' if held != 1 else ''} held")
     return " ".join(parts)
+
+
+def cmd_retry(args) -> int:
+    from . import client as client_module
+
+    server = client_module.find_server(engine.resolved_home())
+    if server is None:
+        print("error: retry needs a running server (start `cereyan serve`)", file=sys.stderr)
+        return EXIT_SCHEDULING
+    try:
+        out = server.retry(args.run_id, args.from_)
+    except client_module.ApiError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_SCHEDULING
+    if args.json:
+        print(json.dumps(out, indent=2))
+    else:
+        run = out["run"]
+        n = out["replays"]
+        print(f"run {run['id']} ({run['name']}) retries {out['retry_of']} from {out['from']}: "
+              f"{n} task{'s' if n != 1 else ''} replay, executing {', '.join(out['invalidated']) or 'nothing new'}")
+    return EXIT_OK
 
 
 def cmd_pause(args) -> int:

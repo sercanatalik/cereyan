@@ -214,6 +214,13 @@ class Client:
             "GET", f"/api/runs/{run_id}/logs", params={"after": after, "level": level, "search": search, "limit": limit}
         )
 
+    def retry(self, run_id: int, from_: str = "failure") -> dict:
+        """``POST /api/runs/{id}/retry``: a new run linked to a finished one that replays its
+        completed tasks from their checkpoints and executes from ``from_``: ``"failure"``
+        (the default), ``"start"``, or a task's dynamic key such as ``"transform-0"``.
+        Returns ``{run, retry_of, from, replays, invalidated}``."""
+        return self._request("POST", f"/api/runs/{run_id}/retry", body={"from": from_})
+
     def resume(self, run_id: int, input: Any) -> dict:
         """``POST /api/runs/{id}/resume``: answer a Paused run with ``input`` and schedule its next attempt."""
         return self._request("POST", f"/api/runs/{run_id}/resume", body={"input": input})
