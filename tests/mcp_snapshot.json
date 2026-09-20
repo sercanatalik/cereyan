@@ -385,6 +385,7 @@
         "items": {
           "runs": [
             "attempt",
+            "attributes",
             "backfill_id",
             "crash_count",
             "created_at",
@@ -587,6 +588,10 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "attributes": {
+            "description": "Comma-separated key=value pairs the run's attributes (set_attributes) must match",
+            "type": "string"
+          },
           "flow": {
             "type": "string"
           },
@@ -602,6 +607,10 @@
           },
           "name": {
             "description": "Exact run name",
+            "type": "string"
+          },
+          "params": {
+            "description": "Comma-separated key=value pairs the run's parameters must match, e.g. day=2026-09-01; searches the last 30 days unless start bounds are given",
             "type": "string"
           },
           "project": {

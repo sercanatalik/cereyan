@@ -42,6 +42,7 @@ pub const RUN_COLUMNS: &str =
     r.failure_count, r.crash_count, r.created_at, r.start_time, r.end_time, r.total_run_time, \
     r.engine_pid, r.engine_id, r.created_by, r.report_seq, \
     r.schedule_id, r.scheduled_time, r.priority, r.parent_run_id, r.attempt, r.backfill_id, \
+    r.attributes, \
     (SELECT json_group_object(st, n) FROM (SELECT COALESCE(t.state_type, 'Pending') AS st, COUNT(*) AS n \
      FROM task_run t WHERE t.run_id = r.id GROUP BY st)) AS task_counts, \
     COALESCE(f.flow_group, f.project) AS flow_group";
@@ -62,10 +63,11 @@ pub fn run_from_row(row: &Row<'_>) -> rusqlite::Result<Run> {
         flow_id: row.get(2)?,
         flow_name: row.get(3)?,
         project: row.get(4)?,
-        group: row.get(30)?,
+        group: row.get(31)?,
         name: row.get(5)?,
         parameters: json_map(row.get(6)?),
         tags: json_list(row.get(7)?),
+        attributes: json_map(row.get(29)?),
         state,
         failure_count: row.get::<_, i64>(13)? as u32,
         crash_count: row.get::<_, i64>(14)? as u32,
@@ -83,7 +85,7 @@ pub fn run_from_row(row: &Row<'_>) -> rusqlite::Result<Run> {
         parent_run_id: row.get(26)?,
         attempt: row.get(27)?,
         backfill_id: row.get(28)?,
-        task_counts: json_counts(row.get(29)?),
+        task_counts: json_counts(row.get(30)?),
     })
 }
 

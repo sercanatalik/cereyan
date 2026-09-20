@@ -65,6 +65,10 @@ pub struct Run {
     pub parameters: Map<String, Value>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Searchable key-values the run set on itself with `set_attributes`.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub attributes: Map<String, Value>,
     pub state: State,
     pub failure_count: u32,
     pub crash_count: u32,

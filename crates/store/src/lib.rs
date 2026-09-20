@@ -214,6 +214,15 @@ impl Store {
         self.write(|reply| WriteCommand::CreateRunsBulk(cmds, reply))
     }
 
+    /// Merge a JSON object into a run's searchable attributes; false when the run is unknown.
+    pub fn merge_run_attributes(&self, run_id: i64, patch: &str) -> Result<bool> {
+        self.write(|reply| WriteCommand::MergeRunAttributes {
+            run_id,
+            patch: patch.to_string(),
+            reply,
+        })
+    }
+
     pub fn set_run_priority(&self, run_id: i64, priority: i64) -> Result<()> {
         self.write(|reply| WriteCommand::SetRunPriority {
             run_id,

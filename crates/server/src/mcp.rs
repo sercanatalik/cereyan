@@ -459,6 +459,8 @@ pub fn tool_list() -> Vec<Value> {
                 "state_type": {"type": "string", "description": "Scheduled, Pending, Running, Completed, Failed, Cancelled, Crashed, Paused, Cancelling"},
                 "state_name": {"type": "string", "description": "A named sub-state such as Late or AwaitingRetry"},
                 "name": {"type": "string", "description": "Exact run name"},
+                "params": {"type": "string", "description": "Comma-separated key=value pairs the run's parameters must match, e.g. day=2026-09-01; searches the last 30 days unless start bounds are given"},
+                "attributes": {"type": "string", "description": "Comma-separated key=value pairs the run's attributes (set_attributes) must match"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20}
             }), &[]),
         read_tool("get_run", "One run with its state, parameters, timing, and task runs. Read-only.",
@@ -776,6 +778,22 @@ async fn call_tool(
                 state_type: arg_str(args, "state_type"),
                 state_name: arg_str(args, "state_name"),
                 name: arg_str(args, "name"),
+                params: arg_str(args, "params")
+                    .map(|s| {
+                        s.split(',')
+                            .map(|p| p.trim().to_string())
+                            .filter(|p| !p.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                attributes: arg_str(args, "attributes")
+                    .map(|s| {
+                        s.split(',')
+                            .map(|p| p.trim().to_string())
+                            .filter(|p| !p.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 limit: Some(arg_usize(args, "limit", 20, 200)),
                 ..Default::default()
             };

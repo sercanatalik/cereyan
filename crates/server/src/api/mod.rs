@@ -100,6 +100,8 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         runs::create_run,
         runs::get_run,
         runs::delete_run,
+        runs::patch_attributes,
+        runs::bulk_runs,
         runs::run_tasks,
         runs::run_graph,
         runs::transition_run,
@@ -184,6 +186,8 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         runs::CreateRunForFlowBody,
         runs::TransitionBody,
         runs::TransitionRejected,
+        runs::BulkBody,
+        runs::BulkResult,
         crate::index::Counts,
         engine::WorkRequest,
         engine::WorkResponse,
@@ -278,6 +282,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route(
             "/api/runs/{id}",
             get(runs::get_run).delete(runs::delete_run),
+        )
+        .route("/api/runs/bulk", post(runs::bulk_runs))
+        .route(
+            "/api/runs/{id}/attributes",
+            axum::routing::patch(runs::patch_attributes).post(runs::patch_attributes),
         )
         .route("/api/runs/{id}/tasks", get(runs::run_tasks))
         .route("/api/runs/{id}/graph", get(runs::run_graph))

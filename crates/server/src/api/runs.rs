@@ -317,18 +317,159 @@ pub async fn delete_run(
         .store
         .get_run(id)?
         .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
+    delete_inner(&state, &run).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Cancel a run that is still going, then delete it and everything it recorded.
+pub async fn delete_inner(state: &Arc<AppState>, run: &Run) -> ApiResult<()> {
     if !run.state.is_terminal() {
-        cancel_inner(&state, &run).await?;
+        cancel_inner(state, run).await?;
     }
-    state.supervisor.dequeue(id);
-    state.store.delete_run(id)?;
-    state.index.remove_run(id, Some(&run.state), run.flow_id);
+    state.supervisor.dequeue(run.id);
+    state.store.delete_run(run.id)?;
+    state
+        .index
+        .remove_run(run.id, Some(&run.state), run.flow_id);
+    state.stream.publish(
+        "run.updated",
+        run.id.to_string(),
+        serde_json::json!({"id": run.id, "deleted": true}),
+    );
+    Ok(())
+}
+
+/// Also served on POST, which is what the engine client speaks.
+#[utoipa::path(patch, path = "/api/runs/{id}/attributes", params(("id" = i64, Path)), request_body = Object, responses((status = 200, body = Run), (status = 404), (status = 422)))]
+pub async fn patch_attributes(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+    Json(body): Json<serde_json::Map<String, serde_json::Value>>,
+) -> ApiResult<Json<Run>> {
+    if body
+        .keys()
+        .any(|k| k.is_empty() || !k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+    {
+        return Err(ApiError::Unprocessable(
+            "attribute names are letters, digits, and underscores".into(),
+        ));
+    }
+    let patch = serde_json::Value::Object(body).to_string();
+    if patch.len() > 16 * 1024 {
+        return Err(ApiError::Unprocessable("attributes exceed 16 KB".into()));
+    }
+    if !state.store.merge_run_attributes(id, &patch)? {
+        return Err(ApiError::NotFound("run not found".into()));
+    }
+    let run = state
+        .store
+        .get_run(id)?
+        .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
     state.stream.publish(
         "run.updated",
         id.to_string(),
-        serde_json::json!({"id": id, "deleted": true}),
+        serde_json::to_value(&run).unwrap_or_default(),
     );
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(run))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct BulkBody {
+    /// The same filters as `GET /api/runs`, as an object; empty matches every run.
+    #[serde(default)]
+    #[schema(value_type = serde_json::Value)]
+    pub filter: ListRunsFilter,
+    /// `cancel`, `rerun`, or `delete`.
+    pub action: String,
+    /// Count only; defaults to true.
+    #[serde(default)]
+    pub dry_run: Option<bool>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct BulkResult {
+    pub action: String,
+    pub dry_run: bool,
+    /// Runs the filter matched, capped at 10,000.
+    pub matched: usize,
+    /// Runs the action applied to: every match for delete, non-terminal ones for cancel, terminal ones for rerun.
+    pub affected: usize,
+}
+
+const BULK_CAP: usize = 10_000;
+
+#[utoipa::path(post, path = "/api/runs/bulk", request_body = BulkBody, responses((status = 200, body = BulkResult), (status = 422)))]
+pub async fn bulk_runs(
+    State(state): State<Arc<AppState>>,
+    user: Option<Extension<crate::auth::AuthenticatedUser>>,
+    Json(body): Json<BulkBody>,
+) -> ApiResult<Json<BulkResult>> {
+    let action = body.action.as_str();
+    if !matches!(action, "cancel" | "rerun" | "delete") {
+        return Err(ApiError::Unprocessable(
+            "action must be cancel, rerun, or delete".into(),
+        ));
+    }
+    let dry_run = body.dry_run.unwrap_or(true);
+    let mut filter = body.filter.clone();
+    filter.sort = Some("created_asc".into());
+    filter.limit = Some(500);
+    filter.cursor = None;
+    let mut runs: Vec<Run> = Vec::new();
+    loop {
+        let st = state.clone();
+        let f = filter.clone();
+        let page = tokio::task::spawn_blocking(move || st.store.list_runs(&f))
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))??;
+        runs.extend(page.items);
+        match page.next_cursor {
+            Some(c) if runs.len() < BULK_CAP => filter.cursor = Some(c),
+            _ => break,
+        }
+    }
+    runs.truncate(BULK_CAP);
+    let targets: Vec<&Run> = runs
+        .iter()
+        .filter(|r| match action {
+            "cancel" => !r.state.is_terminal(),
+            "rerun" => r.state.is_terminal(),
+            _ => true,
+        })
+        .collect();
+    let matched = runs.len();
+    let affected = targets.len();
+    if !dry_run {
+        let creator = crate::auth::run_creator(user.as_ref().map(|Extension(u)| u), "bulk");
+        for run in targets {
+            match action {
+                "cancel" => {
+                    cancel_inner(&state, run).await?;
+                }
+                "delete" => delete_inner(&state, run).await?,
+                _ => {
+                    let Some(flow) = state.store.get_flow(run.flow_id)? else {
+                        continue;
+                    };
+                    create_run_inner(
+                        &state,
+                        &flow,
+                        run.parameters.clone(),
+                        None,
+                        run.tags.clone(),
+                        &creator,
+                    )
+                    .await?;
+                }
+            }
+        }
+    }
+    Ok(Json(BulkResult {
+        action: action.to_string(),
+        dry_run,
+        matched,
+        affected,
+    }))
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]

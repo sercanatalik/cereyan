@@ -62,8 +62,12 @@ A **crash rerun** is not a pass: the supervisor creates a new run linked to the 
 
 `GET /api/runs/{id}/tasks` returns every pass, and `?pass=` narrows it to one. The run page shows the latest pass and offers a switcher when there is more than one.
 
+## Attributes
+
+A run can describe itself while it runs: `set_attributes(region="eu", rows=n)` from a flow or task merges key-values into the run's `attributes`, offline and served, and later calls merge over earlier ones. Names are letters, digits, and underscores; values are any JSON. They are the run's own searchable notes, distinct from parameters (what it was asked to do) and tags (labels given at creation).
+
 ## Finding runs
 
-The Runs page, `cereyan runs ls`, `GET /api/runs`, `Client.runs()`, and the MCP `list_runs` tool all filter by flow, project, state type and name, tags, name, and time, and page by keyset cursor. Task runs have the same across `GET /api/task-runs`.
+The Runs page, `cereyan runs ls`, `GET /api/runs`, `Client.runs()`, and the MCP `list_runs` tool all filter by flow, project, state type and name, tags, name, and time, and page by keyset cursor. `GET /api/runs`, the Runs page, and `list_runs` also search parameters and attributes by exact value, `?params=day=2026-09-01` or `?attributes=region=eu`, comparing the stored value as text; such a search covers the last 30 days unless a start bound is given, because it reads the JSON rather than an index. `POST /api/runs/bulk` takes a `filter` object with the same fields and an `action` of `cancel`, `rerun`, or `delete` and counts what it would touch before doing it (`dry_run` defaults to true). Task runs have the same across `GET /api/task-runs`.
 
 Related: [Tasks](tasks.md), [Events and rules](events-and-rules.md), [Retry, time out and survive crashes](../guides/retries-timeouts-crashes.md).

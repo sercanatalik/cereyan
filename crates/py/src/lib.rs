@@ -572,6 +572,16 @@ impl Store {
             .map_err(to_py)
     }
 
+    /// Merge a JSON object into a run's searchable attributes.
+    fn set_run_attributes(&self, py: Python<'_>, run_id: i64, patch: &str) -> PyResult<bool> {
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(patch)
+            .map_err(|e| PyValueError::new_err(format!("attributes must be a JSON object: {e}")))?;
+        let store = self.inner.clone();
+        let patch = patch.to_string();
+        py.detach(move || store.merge_run_attributes(run_id, &patch))
+            .map_err(to_py)
+    }
+
     fn delete_run(&self, py: Python<'_>, run_id: i64) -> PyResult<bool> {
         let store = self.inner.clone();
         py.detach(move || store.delete_run(run_id)).map_err(to_py)

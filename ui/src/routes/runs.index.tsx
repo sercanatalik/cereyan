@@ -26,6 +26,7 @@ type Search = {
   group?: string;
   q?: string;
   tag?: string;
+  params?: string;
 };
 
 export const Route = createFileRoute("/runs/")({
@@ -37,6 +38,7 @@ export const Route = createFileRoute("/runs/")({
     group: typeof s.group === "string" ? s.group : undefined,
     q: typeof s.q === "string" ? s.q : undefined,
     tag: typeof s.tag === "string" ? s.tag : undefined,
+    params: typeof s.params === "string" ? s.params : undefined,
   }),
   component: RunsPage,
 });
@@ -100,6 +102,14 @@ function RunsPage() {
             aria-label="Search by name"
           />
         </div>
+        <Input
+          placeholder="param=value"
+          value={search.params ?? ""}
+          onChange={(e) => set({ params: e.target.value || undefined })}
+          className="w-44"
+          aria-label="Filter by parameter"
+          title="Comma-separated key=value pairs the run's parameters must match; searches the last 30 days unless a range is set"
+        />
         <FilterSelect
           label="State"
           value={search.state ?? ""}
@@ -199,6 +209,7 @@ function RunsTab({
       project,
       search.group,
       search.q,
+      search.params,
       tags,
       start,
       sort,
@@ -214,6 +225,7 @@ function RunsTab({
               project,
               group: search.group,
               name: search.q,
+              params: search.params || undefined,
               tags: tags.join(",") || undefined,
               start_after: start,
               sort,
@@ -237,13 +249,71 @@ function RunsTab({
     },
   });
   const runs = query.data?.items ?? [];
+  const filterBody = {
+    state_type: search.state,
+    flow: search.flow,
+    project,
+    group: search.group,
+    name: search.q,
+    params: search.params || undefined,
+    tags: tags.join(",") || undefined,
+    start_after: start,
+  };
+  const matchAll = useMutation({
+    mutationFn: async (action: "cancel" | "rerun" | "delete") => {
+      const count = unwrap(
+        await api.POST("/api/runs/bulk", { body: { filter: filterBody, action, dry_run: true } }),
+      );
+      const verb = action === "cancel" ? "Cancel" : action === "rerun" ? "Rerun" : "Delete";
+      if (count.affected === 0) {
+        window.alert(`${verb}: no runs to act on among the ${count.matched} matching the filters.`);
+        return null;
+      }
+      if (!window.confirm(`${verb} ${count.affected} run(s) matching the current filters?`)) return null;
+      return unwrap(
+        await api.POST("/api/runs/bulk", { body: { filter: filterBody, action, dry_run: false } }),
+      );
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: ["runs"] }),
+  });
   return (
     <>
       <Card className="gap-0 overflow-hidden py-0">
+        <div
+          className="flex items-center gap-2 border-b px-4 py-2 text-xs text-muted-foreground"
+          data-testid="match-all-bar"
+        >
+          <span>All runs matching the filters:</span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => matchAll.mutate("cancel")}
+            disabled={matchAll.isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => matchAll.mutate("rerun")}
+            disabled={matchAll.isPending}
+          >
+            Rerun
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => matchAll.mutate("delete")}
+            disabled={matchAll.isPending}
+          >
+            Delete
+          </Button>
+          {matchAll.data ? <span>{`${matchAll.data.action}: ${matchAll.data.affected} run(s)`}</span> : null}
+        </div>
         <RunTable
           runs={runs}
           grouped
-          searchActive={!!search.q}
+          searchActive={!!search.q || !!search.params}
           selected={selected}
           onSelect={(id, checked) =>
             setSelected((old) => {

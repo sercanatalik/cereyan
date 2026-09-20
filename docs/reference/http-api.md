@@ -209,6 +209,8 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | `state_name` | query | string or null | no |  |
 | `name` | query | string or null | no |  |
 | `tags` | query | string or null | no | Tags the run must carry; a query string may pass them comma-separated. |
+| `params` | query | string or null | no | `key=value` pairs the run's parameters must match (comma-separated in a query string). Without a start bound, the search covers the last 30 days. |
+| `attributes` | query | string or null | no | `key=value` pairs the run's attributes must match, as `params`. |
 | `start_after` | query | integer or null (int64) | no | Inclusive lower bound on the run's start time (or creation when never started), microseconds. |
 | `start_before` | query | integer or null (int64) | no |  |
 | `sort` | query | string or null | no | `created_desc` (default), `created_asc`, `start_desc`, `start_asc`, `duration_desc`, `duration_asc`, `name_asc`. |
@@ -230,6 +232,15 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 |---|---|
 | 201 | [`Run`](#run) (application/json) |
 | 404 | Unknown flow and no module given |
+| 422 | no body |
+
+### `POST /api/runs/bulk`
+
+**Request body** (application/json): [`BulkBody`](#bulkbody)
+
+| Status | Body |
+|---|---|
+| 200 | [`BulkResult`](#bulkresult) (application/json) |
 | 422 | no body |
 
 ### `GET /api/runs/{id}`
@@ -263,6 +274,22 @@ The MCP endpoint (`POST /mcp`) is not part of the OpenAPI document; see [MCP too
 | Status | Body |
 |---|---|
 | 200 | [`ArtifactRow`](#artifactrow)[] (application/json) |
+
+### `PATCH /api/runs/{id}/attributes`
+
+Also served on POST, which is what the engine client speaks.
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+**Request body** (application/json): object
+
+| Status | Body |
+|---|---|
+| 200 | [`Run`](#run) (application/json) |
+| 404 | no body |
+| 422 | no body |
 
 ### `POST /api/runs/{id}/cancel`
 
@@ -966,6 +993,23 @@ Type: any.
 | `backups` | integer | yes | `db-*.sqlite` copies after pruning. |
 | `path` | string | yes | The copy just written. |
 
+### `BulkBody`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `action` | string | yes | `cancel`, `rerun`, or `delete`. |
+| `dry_run` | boolean or null | no | Count only; defaults to true. |
+| `filter` | any | no | The same filters as `GET /api/runs`, as an object; empty matches every run. |
+
+### `BulkResult`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `action` | string | yes |  |
+| `affected` | integer | yes | Runs the action applied to: every match for delete, non-terminal ones for cancel, terminal ones for rerun. |
+| `dry_run` | boolean | yes |  |
+| `matched` | integer | yes | Runs the filter matched, capped at 10,000. |
+
 ### `CatchupPolicy`
 
 One of: `skip`, `latest`, `all`.
@@ -1467,6 +1511,7 @@ Type: any.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `attempt` | integer (int64) | no |  |
+| `attributes` | object | no | Searchable key-values the run set on itself with `set_attributes`. |
 | `backfill_id` | integer or null (int64) | no |  |
 | `crash_count` | integer (int32) | yes |  |
 | `created_at` | [`i64`](#i64) | yes |  |

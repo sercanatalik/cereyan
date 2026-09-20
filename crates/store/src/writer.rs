@@ -303,6 +303,12 @@ pub enum WriteCommand {
         priority: i64,
         reply: Reply<()>,
     },
+    /// Merge a JSON object into the run's searchable attributes.
+    MergeRunAttributes {
+        run_id: i64,
+        patch: String,
+        reply: Reply<bool>,
+    },
     UpsertSchedule(ScheduleWrite, Reply<i64>),
     PatchSchedule {
         schedule_id: i64,
@@ -668,6 +674,19 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
                 None => Ok(out),
             }
         }),
+        WriteCommand::MergeRunAttributes {
+            run_id,
+            patch,
+            reply,
+        } => ack(
+            reply,
+            conn.execute(
+                "UPDATE run SET attributes = json_patch(attributes, ?1) WHERE id = ?2",
+                params![patch, run_id],
+            )
+            .map(|n| n > 0)
+            .map_err(Into::into),
+        ),
         WriteCommand::SetRunPriority {
             run_id,
             priority,

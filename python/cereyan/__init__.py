@@ -10,6 +10,7 @@ from .flows import Flow, flow
 from .logging import get_run_logger
 from . import artifacts, events, states
 from .events import emit_event
+from .attributes import set_attributes
 from .inputs import wait_for_input
 from .results import INPUTS, SOURCE, CachePolicy
 from .routes import HTTPError, Request, Response
@@ -23,6 +24,7 @@ __version__ = "2.1.0"
 
 __all__ = [
     "wait_for_input",
+    "set_attributes",
     "App",
     "CachePolicy",
     "Abort",

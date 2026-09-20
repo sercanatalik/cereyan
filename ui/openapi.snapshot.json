@@ -325,6 +325,55 @@
         ],
         "type": "object"
       },
+      "BulkBody": {
+        "properties": {
+          "action": {
+            "description": "`cancel`, `rerun`, or `delete`.",
+            "type": "string"
+          },
+          "dry_run": {
+            "description": "Count only; defaults to true.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "filter": {
+            "description": "The same filters as `GET /api/runs`, as an object; empty matches every run."
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "BulkResult": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "affected": {
+            "description": "Runs the action applied to: every match for delete, non-terminal ones for cancel, terminal ones for rerun.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "matched": {
+            "description": "Runs the filter matched, capped at 10,000.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action",
+          "dry_run",
+          "matched",
+          "affected"
+        ],
+        "type": "object"
+      },
       "CatchupPolicy": {
         "enum": [
           "skip",
@@ -2149,6 +2198,10 @@
           "attempt": {
             "format": "int64",
             "type": "integer"
+          },
+          "attributes": {
+            "description": "Searchable key-values the run set on itself with `set_attributes`.",
+            "type": "object"
           },
           "backfill_id": {
             "format": "int64",
@@ -5447,6 +5500,30 @@
             }
           },
           {
+            "description": "`key=value` pairs the run's parameters must match (comma-separated in a query string).\nWithout a start bound, the search covers the last 30 days.",
+            "in": "query",
+            "name": "params",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "`key=value` pairs the run's attributes must match, as `params`.",
+            "in": "query",
+            "name": "attributes",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
             "description": "Inclusive lower bound on the run's start time (or creation when never started), microseconds.",
             "in": "query",
             "name": "start_after",
@@ -5597,6 +5674,39 @@
         ]
       }
     },
+    "/api/runs/bulk": {
+      "post": {
+        "operationId": "bulk_runs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BulkResult"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
     "/api/runs/{id}": {
       "delete": {
         "operationId": "delete_run",
@@ -5687,6 +5797,54 @@
         },
         "tags": [
           "observability"
+        ]
+      }
+    },
+    "/api/runs/{id}/attributes": {
+      "patch": {
+        "operationId": "patch_attributes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "summary": "Also served on POST, which is what the engine client speaks.",
+        "tags": [
+          "runs"
         ]
       }
     },

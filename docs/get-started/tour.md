@@ -18,7 +18,7 @@ Counts for the selected range (Running, Completed, Failed, Crashed, Waiting for 
 
 ![Runs list beside the scope sidebar, in collapsible sections by project and group, each header rolling up its runs' states, over rows with state, name, flow, a task-state bar, start, duration, and tags, under popover filters](../images/runs.png)
 
-Every run in the sidebar's scope, newest first, in collapsible sections nested project then group. Filters are popover buttons for state and flow, a tag field, range, a name search, and a sort; the flow options narrow to the flows in scope. The **Tasks** column is a bar of the run's task runs by state. The **Task runs** tab lists task runs across runs the same way. Selecting rows raises a bar at the bottom of the window with **Cancel** and **Delete** for the selection; a selection may span sections.
+Every run in the sidebar's scope, newest first, in collapsible sections nested project then group. Filters are popover buttons for state and flow, a tag field, range, a name search, a `param=value` search over run parameters, and a sort; a row above the table cancels, reruns, or deletes every run the filters match, after showing how many; the flow options narrow to the flows in scope. The **Tasks** column is a bar of the run's task runs by state. The **Task runs** tab lists task runs across runs the same way. Selecting rows raises a bar at the bottom of the window with **Cancel** and **Delete** for the selection; a selection may span sections.
 
 ## Run detail
 

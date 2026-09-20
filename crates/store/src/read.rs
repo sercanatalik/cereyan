@@ -104,6 +104,15 @@ pub struct ListRunsFilter {
     #[serde(default, deserialize_with = "list_or_csv")]
     #[cfg_attr(feature = "openapi", param(value_type = Option<String>))]
     pub tags: Vec<String>,
+    /// `key=value` pairs the run's parameters must match (comma-separated in a query string).
+    /// Without a start bound, the search covers the last 30 days.
+    #[serde(default, deserialize_with = "list_or_csv")]
+    #[cfg_attr(feature = "openapi", param(value_type = Option<String>))]
+    pub params: Vec<String>,
+    /// `key=value` pairs the run's attributes must match, as `params`.
+    #[serde(default, deserialize_with = "list_or_csv")]
+    #[cfg_attr(feature = "openapi", param(value_type = Option<String>))]
+    pub attributes: Vec<String>,
     /// Inclusive lower bound on the run's start time (or creation when never started), microseconds.
     #[serde(default)]
     pub start_after: Option<i64>,
@@ -295,10 +304,36 @@ impl Store {
             let encoded = serde_json::to_string(tag).unwrap_or_default();
             q.push("r.tags LIKE ?", SqlValue::Text(format!("%{encoded}%")));
         }
+        // JSON searches walk rows, so they are bounded to a month unless the caller bounds them.
+        let mut searched = false;
+        for (column, entries) in [
+            ("parameters", &filter.params),
+            ("attributes", &filter.attributes),
+        ] {
+            for entry in entries {
+                let Some((key, value)) = entry.split_once('=') else {
+                    continue;
+                };
+                let key = key.trim();
+                if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    continue;
+                }
+                searched = true;
+                q.push(
+                    &format!("CAST(json_extract(r.{column}, '$.{key}') AS TEXT) = ?"),
+                    SqlValue::Text(value.trim().to_string()),
+                );
+            }
+        }
         if let Some(t) = filter.start_after {
             q.push(
                 "COALESCE(r.start_time, r.created_at) >= ?",
                 SqlValue::Integer(t),
+            );
+        } else if searched {
+            q.push(
+                "COALESCE(r.start_time, r.created_at) >= ?",
+                SqlValue::Integer(cereyan_core::now_micros() - 30 * 86_400 * 1_000_000),
             );
         }
         if let Some(t) = filter.start_before {

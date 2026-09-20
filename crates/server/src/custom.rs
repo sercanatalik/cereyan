@@ -89,6 +89,8 @@ pub const BUILTIN_PATHS: &[&str] = &[
     "/api/database",
     "/api/database/reset",
     "/api/database/backup",
+    "/api/runs/bulk",
+    "/api/runs/{id}/attributes",
     "/api/metrics",
     "/api/metrics/history",
     "/api/events",

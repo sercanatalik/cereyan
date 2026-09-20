@@ -867,6 +867,7 @@ fn flows_written_before_the_group_column_read_as_their_project() {
              ALTER TABLE schedule DROP COLUMN catchup_window; \
              ALTER TABLE schedule DROP COLUMN jitter; \
              ALTER TABLE schedule DROP COLUMN start_deadline; \
+             ALTER TABLE run DROP COLUMN attributes; \
              PRAGMA user_version = 6;",
         )
         .unwrap();

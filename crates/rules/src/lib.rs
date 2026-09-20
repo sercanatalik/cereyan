@@ -560,6 +560,7 @@ mod tests {
             name: "run-1".into(),
             parameters: serde_json::from_value(json!({"day": "2026-09-06"})).unwrap(),
             tags: vec!["prod".into()],
+            attributes: Default::default(),
             state: State::new(StateType::Failed).with_message("boom"),
             failure_count: 1,
             crash_count: 0,

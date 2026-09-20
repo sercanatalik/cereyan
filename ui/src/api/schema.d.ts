@@ -613,6 +613,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{id}/attributes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Also served on POST, which is what the engine client speaks. */
+        patch: operations["patch_attributes"];
+        trace?: never;
+    };
     "/api/runs/{id}/cancel": {
         parameters: {
             query?: never;
@@ -719,6 +736,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["transition_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["bulk_runs"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1094,6 +1127,22 @@ export interface components {
             backups: number;
             /** @description The copy just written. */
             path: string;
+        };
+        BulkBody: {
+            /** @description `cancel`, `rerun`, or `delete`. */
+            action: string;
+            /** @description Count only; defaults to true. */
+            dry_run?: boolean | null;
+            /** @description The same filters as `GET /api/runs`, as an object; empty matches every run. */
+            filter?: unknown;
+        };
+        BulkResult: {
+            action: string;
+            /** @description Runs the action applied to: every match for delete, non-terminal ones for cancel, terminal ones for rerun. */
+            affected: number;
+            dry_run: boolean;
+            /** @description Runs the filter matched, capped at 10,000. */
+            matched: number;
         };
         /** @enum {string} */
         CatchupPolicy: "skip" | "latest" | "all";
@@ -1699,6 +1748,8 @@ export interface components {
         Run: {
             /** Format: int64 */
             attempt?: number;
+            /** @description Searchable key-values the run set on itself with `set_attributes`. */
+            attributes?: Record<string, never>;
             /** Format: int64 */
             backfill_id?: number | null;
             /** Format: int32 */
@@ -3335,6 +3386,8 @@ export interface operations {
     list_runs: {
         parameters: {
             query?: {
+                /** @description `key=value` pairs the run's attributes must match, as `params`. */
+                attributes?: string | null;
                 backfill_id?: number | null;
                 /** @description Keyset cursor: the id of the last run of the previous page (id-ordered sorts only). */
                 cursor?: number | null;
@@ -3344,6 +3397,11 @@ export interface operations {
                 group?: string | null;
                 limit?: number | null;
                 name?: string | null;
+                /**
+                 * @description `key=value` pairs the run's parameters must match (comma-separated in a query string).
+                 *     Without a start bound, the search covers the last 30 days.
+                 */
+                params?: string | null;
                 project?: string | null;
                 schedule_id?: number | null;
                 /** @description Only runs with a scheduled time after this (upcoming lists). */
@@ -3480,6 +3538,43 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ArtifactRow"][];
                 };
+            };
+        };
+    };
+    patch_attributes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3694,6 +3789,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TransitionRejected"];
                 };
+            };
+        };
+    };
+    bulk_runs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkResult"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

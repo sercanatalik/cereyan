@@ -39,6 +39,10 @@ class Backend:
     def emit_event(self, name: str, payload_json: str, task_run_external_id: str | None, resource: dict | None) -> None:
         raise NotImplementedError
 
+    def set_attributes(self, patch_json: str) -> None:
+        """Merge a JSON object into the run's searchable attributes."""
+        raise NotImplementedError
+
     def artifact(self, kind: str, data_json: str, key: str | None, task_run_external_id: str | None) -> str:
         raise NotImplementedError
 
@@ -162,6 +166,9 @@ class StoreBackend(Backend):
 
         evaluate_offline(self.store, name)
 
+    def set_attributes(self, patch_json):
+        self.store.set_run_attributes(self.run_id, patch_json)
+
     def artifact(self, kind, data_json, key, task_run_external_id):
         row_id = self._rows.get(task_run_external_id) if task_run_external_id else None
         aid = self.store.upsert_artifact(self.run_id, kind, data_json, key, row_id)
@@ -228,6 +235,11 @@ class ReporterBackend(Backend):
 
     def emit_event(self, name, payload_json, task_run_external_id, resource):
         self.client.emit_event(self.run_id, name, payload_json, task_run_external_id)
+
+    def set_attributes(self, patch_json):
+        status, text = self.client.post(f"/api/runs/{self.run_id}/attributes", patch_json)
+        if status >= 300:
+            raise CereyanError(f"set_attributes was refused ({status}): {text}")
 
     def artifact(self, kind, data_json, key, task_run_external_id):
         ext = self._artifact_ids.get((key, task_run_external_id)) if key else None
