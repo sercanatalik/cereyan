@@ -4,6 +4,7 @@ import { ChevronRight, Moon, Search, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { CommandPalette } from "@/components/command-palette";
+import { PauseBanner } from "@/components/pause-banner";
 import { ScopeSidebar } from "@/components/scope-sidebar";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -182,6 +183,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
       <ExposedBanner />
+      <PauseBanner />
       {scoped ? (
         <div className="grid min-h-0 flex-1 grid-cols-[248px_minmax(0,1fr)]">
           <ScopeSidebar />

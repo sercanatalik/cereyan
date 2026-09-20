@@ -309,6 +309,6 @@ def _execute_offline(store: _core.Store, action: dict, event: dict, run: dict | 
         req = urllib.request.Request(action["url"], data=body, method=(action.get("method") or "POST").upper(), headers=headers)
         with urllib.request.urlopen(req, timeout=5) as resp:
             return {"status": resp.status}
-    if kind == "run_flow":
-        return {"deferred": "run_flow actions execute when a server is running"}
+    if kind in ("run_flow", "cancel_runs"):
+        return {"deferred": f"{kind} actions execute when a server is running"}
     return None

@@ -76,6 +76,20 @@ class _UnixConnection(http.client.HTTPConnection):
         self.sock = sock
 
 
+def _micros(when) -> int | None:
+    """A datetime or ISO 8601 string as microseconds since the epoch; naive means UTC."""
+    if when is None:
+        return None
+    from datetime import datetime, timezone
+
+    if isinstance(when, str):
+        text = when.strip()
+        when = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return int(when.timestamp() * 1_000_000)
+
+
 class Client:
     """HTTP client for a running server, on the standard library only.
 
@@ -237,6 +251,26 @@ class Client:
     def cancel_backfill(self, backfill_id: int) -> dict:
         """``POST /api/backfills/{id}/cancel``: cancel the backfill's remaining runs."""
         return self._request("POST", f"/api/backfills/{backfill_id}/cancel")
+
+    def scheduler(self) -> dict:
+        """``GET /api/scheduler``: whether every schedule is paused, since when, why, until when, and how many runs are held."""
+        return self._request("GET", "/api/scheduler")
+
+    def pause_scheduler(self, reason: str | None = None, until: "datetime | str | None" = None,
+                        suppress_rules: bool = False) -> dict:
+        """``POST /api/scheduler/pause``: hold every schedule until `resume_scheduler` or ``until``.
+
+        Running runs, manual runs and backfills continue. ``until`` is a datetime
+        (naive means UTC) or an ISO 8601 string. With ``suppress_rules`` the rules
+        that would fire meanwhile are recorded as suppressed instead of acting.
+        """
+        return self._request("POST", "/api/scheduler/pause", body={
+            "reason": reason, "until": _micros(until), "suppress_rules": suppress_rules,
+        })
+
+    def resume_scheduler(self) -> dict:
+        """``POST /api/scheduler/resume``: end the global pause; held runs start and schedules catch up."""
+        return self._request("POST", "/api/scheduler/resume")
 
     def schedules(self, flow_id: int) -> list[dict]:
         """``GET /api/flows/{id}/schedules``: the flow's schedules with their next fire times."""

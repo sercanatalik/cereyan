@@ -73,6 +73,15 @@ def loop_a():
 def reads_secret():
     return Variable.get("api_token")
 
+@app.flow
+def fulfil(order: str = "A1", seconds: float = 20.0):
+    time.sleep(seconds)
+
+@app.flow
+def cancel_order(order: str = "A1"):
+    emit_event("orders.cancelled", {"order": order})
+    time.sleep(1.0)
+
 HOOK = os.environ.get("RULE_HOOK_FILE")
 
 @app.rule(on="run.failed", flow="fail")
@@ -538,3 +547,60 @@ def test_run_url_uses_public_url(isolated_home, obs_dir, webhook):
         assert env["server", "public_url"]["value"] == "https://cereyan.example.com"
     finally:
         srv.stop()
+
+
+def test_cancel_runs_selects_by_parameter_and_spares_the_events_run(obs):
+    c = obs.client
+    rule = c._request("POST", "/api/rules", body={
+        "name": "stop the order", "when": {"events": ["orders.cancelled"]},
+        "do": [
+            {"kind": "cancel_runs", "flow": "fulfil", "parameters": {"order": "{{ payload.order }}"}},
+            {"kind": "cancel_runs"},
+        ],
+        "once": "never",
+    })
+    with pytest.raises(Exception):
+        c._request("POST", "/api/rules", body={
+            "name": "bad states", "when": {"events": ["orders.cancelled"]},
+            "do": [{"kind": "cancel_runs", "states": ["Completed"]}],
+        })
+    a1 = [start(obs, "fulfil", order="A1") for _ in range(2)]
+    b2 = start(obs, "fulfil", order="B2")
+    for r in a1 + [b2]:
+        obs.wait_run(r["id"], until=lambda run: run["state"]["type"] == "Running")
+    announce = start(obs, "cancel_order", order="A1")
+    for r in a1:
+        obs.wait_run(r["id"])
+    assert {c.get_run(r["id"])["state"]["type"] for r in a1} == {"Cancelled"}
+    assert c.get_run(b2["id"])["state"]["type"] == "Running"
+    # The second action had no flow: it selects the event's own flow but never the event's own run.
+    assert obs.wait_run(announce["id"])["state"]["type"] == "Completed"
+    firing = wait_until(lambda: (f := c._request("GET", f"/api/rules/{rule['id']}/firings")) and f[0])
+    outcomes = {o["index"]: o for o in firing["outcomes"]}
+    assert sorted(outcomes[0]["detail"]["cancelled"]) == sorted(r["id"] for r in a1)
+    assert outcomes[1]["detail"]["cancelled"] == []
+    c.cancel(b2["id"])
+    obs.wait_run(b2["id"])
+
+
+def test_maintenance_window_suppresses_rule_actions(obs, webhook):
+    c = obs.client
+    rule = c._request("POST", "/api/rules", body={
+        "name": "page", "when": {"events": ["run.failed"], "flows": ["fail"]},
+        "do": [{"kind": "webhook", "url": webhook}],
+        "once": "never",
+    })
+    status = c.pause_scheduler(reason="db upgrade", suppress_rules=True)
+    assert status["paused"] and status["reason"] == "db upgrade" and status["suppress_rules"]
+    quiet = start(obs, "fail")
+    obs.wait_run(quiet["id"])
+    firing = wait_until(lambda: (f := c._request("GET", f"/api/rules/{rule['id']}/firings")) and f[0])
+    assert firing["outcomes"] == [{"index": 0, "kind": "webhook", "status": "suppressed"}]
+    assert not any(e["run_id"] == quiet["id"] for e in c.events(kind="rule.fired"))
+    assert Hook.calls == []
+    assert c.resume_scheduler()["paused"] is False
+    loud = start(obs, "fail")
+    obs.wait_run(loud["id"])
+    wait_until(lambda: len(Hook.calls) == 1)
+    firings = c._request("GET", f"/api/rules/{rule['id']}/firings")
+    assert {f["run_id"] for f in firings} == {quiet["id"], loud["id"]}

@@ -1429,6 +1429,66 @@
         ],
         "type": "object"
       },
+      "Pause": {
+        "description": "The global pause: every schedule held at once, with a reason and an end.",
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "since": {
+            "description": "When the pause began, microseconds.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "suppress_rules": {
+            "description": "Rules that would fire are recorded as suppressed instead of acting.",
+            "type": "boolean"
+          },
+          "until": {
+            "description": "When the scheduler resumes on its own, microseconds; none means until resumed.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "since",
+          "suppress_rules"
+        ],
+        "type": "object"
+      },
+      "PauseBody": {
+        "properties": {
+          "reason": {
+            "default": null,
+            "description": "Why, shown in the UI banner and recorded on the event.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "suppress_rules": {
+            "default": false,
+            "description": "Record rules that would fire as suppressed instead of acting.",
+            "type": "boolean"
+          },
+          "until": {
+            "default": null,
+            "description": "When to resume on its own, microseconds; absent means until resumed.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "PrefilterBody": {
         "properties": {
           "skip": {
@@ -1817,7 +1877,7 @@
           },
           "kind": {
             "default": "",
-            "description": "`run_flow`, `cancel_run`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`.",
+            "description": "`run_flow`, `cancel_run`, `cancel_runs`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`.",
             "type": "string"
           },
           "message": {
@@ -1867,6 +1927,14 @@
               "string",
               "null"
             ]
+          },
+          "states": {
+            "default": [],
+            "description": "`cancel_runs` selector: non-terminal state types; empty means all of them.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "subject": {
             "default": null,
@@ -2918,6 +2986,49 @@
         ],
         "type": "object"
       },
+      "SchedulerStatus": {
+        "properties": {
+          "held": {
+            "description": "Scheduled runs whose time has passed and that the pause is holding.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "since": {
+            "description": "When the pause began, microseconds; null when running.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "suppress_rules": {
+            "type": "boolean"
+          },
+          "until": {
+            "description": "When the scheduler resumes on its own, microseconds.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "paused",
+          "suppress_rules",
+          "held"
+        ],
+        "type": "object"
+      },
       "ServerInfo": {
         "properties": {
           "auth": {
@@ -2938,6 +3049,17 @@
           },
           "home": {
             "type": "string"
+          },
+          "paused": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Pause",
+                "description": "The global pause while the scheduler is paused."
+              }
+            ]
           },
           "pid": {
             "format": "int32",
@@ -6236,6 +6358,79 @@
         },
         "tags": [
           "runs"
+        ]
+      }
+    },
+    "/api/scheduler": {
+      "get": {
+        "operationId": "get_scheduler",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerStatus"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "pause"
+        ]
+      }
+    },
+    "/api/scheduler/pause": {
+      "post": {
+        "operationId": "pause_scheduler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerStatus"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "pause"
+        ]
+      }
+    },
+    "/api/scheduler/resume": {
+      "post": {
+        "operationId": "resume_scheduler",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerStatus"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "pause"
         ]
       }
     },

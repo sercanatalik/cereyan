@@ -23,6 +23,133 @@ pub const LOOKAHEAD_MAX: usize = 100;
 pub const LATE_AFTER_SECS: i64 = 15;
 pub const PERSIST_EVERY_SECS: i64 = 60;
 pub const LAST_WAKEUP_KEY: &str = "scheduler.last_wakeup";
+/// kv key holding the global pause as JSON while the scheduler is paused.
+pub const PAUSE_KEY: &str = "scheduler.paused";
+
+/// The global pause: every schedule held at once, with a reason and an end.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct Pause {
+    /// When the pause began, microseconds.
+    pub since: i64,
+    pub reason: Option<String>,
+    /// When the scheduler resumes on its own, microseconds; none means until resumed.
+    pub until: Option<i64>,
+    /// Rules that would fire are recorded as suppressed instead of acting.
+    pub suppress_rules: bool,
+}
+
+/// Pause every schedule: nothing materialises or starts until `resume_all`.
+/// Pausing again replaces the reason and the end.
+pub fn pause_all(
+    state: &Arc<AppState>,
+    reason: Option<String>,
+    until: Option<i64>,
+    suppress_rules: bool,
+) -> Pause {
+    let now = now_micros();
+    let since = state.pause().map(|p| p.since).unwrap_or(now);
+    let pause = Pause {
+        since,
+        reason,
+        until,
+        suppress_rules,
+    };
+    *state.pause.write().unwrap_or_else(|e| e.into_inner()) = Some(pause.clone());
+    let _ = state.store.kv_set(
+        PAUSE_KEY,
+        &serde_json::to_string(&pause).unwrap_or_else(|_| "{}".into()),
+    );
+    if let Some(at) = until {
+        state
+            .timer
+            .push(at.max(now), TimerEvent::SchedulerResume(since));
+    }
+    let _ = state.record_engine_event(
+        EventName::SchedulerPaused,
+        None,
+        None,
+        json!({"reason": pause.reason, "until": pause.until, "suppress_rules": pause.suppress_rules}),
+    );
+    pause
+}
+
+/// End the global pause: each schedule catches up the fires it missed under
+/// its own policy and materialises again, and every held run starts. Returns
+/// the runs started and the schedules re-armed, or none when not paused.
+pub fn resume_all(state: &Arc<AppState>) -> Option<(usize, usize)> {
+    let pause = state
+        .pause
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()?;
+    let _ = state.store.kv_delete(PAUSE_KEY);
+    let now = now_micros();
+    let rows = state.store.list_schedules(None).unwrap_or_default();
+    let mut schedules = 0;
+    for row in rows.into_iter().filter(|r| r.active) {
+        state.scheduler.put(row.clone());
+        catch_up(state, &row, pause.since, now);
+        materialize(state, row.id);
+        schedules += 1;
+    }
+    let mut held = 0;
+    for run in state.index.active_runs() {
+        if run.state.state_type != StateType::Scheduled || run.engine_pid.is_some() {
+            continue;
+        }
+        let Some(stored) = state.store.get_run(run.id).ok().flatten() else {
+            continue;
+        };
+        if is_marked(&stored) {
+            continue;
+        }
+        if stored.scheduled_time.is_some_and(|t| t <= now) {
+            state.timer.push(now, TimerEvent::Due(run.id));
+            held += 1;
+        }
+    }
+    let _ = state.record_engine_event(
+        EventName::SchedulerResumed,
+        None,
+        None,
+        json!({"held": held, "schedules": schedules}),
+    );
+    Some((held, schedules))
+}
+
+/// Scheduled runs whose time has passed and that the pause is holding.
+pub fn held_runs(state: &Arc<AppState>) -> usize {
+    if !state.is_paused() {
+        return 0;
+    }
+    let now = now_micros();
+    state
+        .index
+        .active_runs()
+        .into_iter()
+        .filter(|r| r.state.state_type == StateType::Scheduled && r.engine_pid.is_none())
+        .filter_map(|r| state.store.get_run(r.id).ok().flatten())
+        .filter(|r| !is_marked(r) && r.scheduled_time.is_some_and(|t| t <= now))
+        .count()
+}
+
+fn restore_pause(state: &Arc<AppState>) -> Option<Pause> {
+    let pause: Option<Pause> = state
+        .store
+        .kv_get(PAUSE_KEY)
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_str(&v).ok());
+    *state.pause.write().unwrap_or_else(|e| e.into_inner()) = pause.clone();
+    if let Some(p) = &pause {
+        if let Some(at) = p.until {
+            state
+                .timer
+                .push(at.max(now_micros()), TimerEvent::SchedulerResume(p.since));
+        }
+    }
+    pause
+}
 /// Engines are warmed this long before a scheduled run is due.
 pub const PREWARM_SECS: i64 = 5;
 /// The mark a waiting run carries in its state details when a person skipped
@@ -203,13 +330,15 @@ fn start_inner(state: &Arc<AppState>, with_catch_up: bool) {
             return;
         }
     };
+    // A restart inside a global pause keeps holding: no catch-up until resumed.
+    let paused = restore_pause(state).is_some();
     let last_wakeup: Option<i64> = state
         .store
         .kv_get(LAST_WAKEUP_KEY)
         .ok()
         .flatten()
         .and_then(|v| v.parse().ok())
-        .filter(|_| with_catch_up);
+        .filter(|_| with_catch_up && !paused);
     let now = now_micros();
     // A disable window's resume timer lives only in memory, so it is derived
     // again from `paused_until`: ended windows resume now, open ones re-arm.
@@ -413,7 +542,7 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
     let Some(row) = state.scheduler.get(schedule_id) else {
         return;
     };
-    if !row.active {
+    if !row.active || state.is_paused() {
         return;
     }
     let Some(flow) = state.store.get_flow(row.flow_id).ok().flatten() else {
@@ -868,6 +997,10 @@ fn handle(state: &Arc<AppState>, event: TimerEvent) {
                 end_skipped(state, &run);
                 return;
             }
+            // Held by the global pause: it stays Scheduled and resume_all re-arms it.
+            if state.is_paused() {
+                return;
+            }
             let Some(flow) = state.store.get_flow(run.flow_id).ok().flatten() else {
                 return;
             };
@@ -948,6 +1081,11 @@ fn handle(state: &Arc<AppState>, event: TimerEvent) {
         }
         TimerEvent::Expectation(id) => crate::rules::expectation_due(state, id),
         TimerEvent::RuleClock(rule_id) => crate::rules::clock_tick(state, rule_id),
+        TimerEvent::SchedulerResume(since) => {
+            if state.pause().is_some_and(|p| p.since == since) {
+                resume_all(state);
+            }
+        }
     }
 }
 

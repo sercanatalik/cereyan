@@ -33,6 +33,8 @@ pub enum TimerEvent {
     Expectation(i64),
     /// A clock-armed proactive rule's cron tick.
     RuleClock(i64),
+    /// The global pause's `until` arrived; the value is the pause's `since`.
+    SchedulerResume(i64),
 }
 
 #[derive(Default)]

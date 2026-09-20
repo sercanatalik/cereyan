@@ -758,6 +758,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/scheduler": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_scheduler"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scheduler/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["pause_scheduler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/scheduler/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resume_scheduler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/schedules/{sid}": {
         parameters: {
             query?: never;
@@ -1495,6 +1543,40 @@ export interface components {
             interval_secs: number;
             samples: components["schemas"]["Sample"][];
         };
+        /** @description The global pause: every schedule held at once, with a reason and an end. */
+        Pause: {
+            reason?: string | null;
+            /**
+             * Format: int64
+             * @description When the pause began, microseconds.
+             */
+            since: number;
+            /** @description Rules that would fire are recorded as suppressed instead of acting. */
+            suppress_rules: boolean;
+            /**
+             * Format: int64
+             * @description When the scheduler resumes on its own, microseconds; none means until resumed.
+             */
+            until?: number | null;
+        };
+        PauseBody: {
+            /**
+             * @description Why, shown in the UI banner and recorded on the event.
+             * @default null
+             */
+            reason: string | null;
+            /**
+             * @description Record rules that would fire as suppressed instead of acting.
+             * @default false
+             */
+            suppress_rules: boolean;
+            /**
+             * Format: int64
+             * @description When to resume on its own, microseconds; absent means until resumed.
+             * @default null
+             */
+            until: number | null;
+        };
         PrefilterBody: {
             skip: string[];
         };
@@ -1621,7 +1703,7 @@ export interface components {
             flow: string | null;
             headers?: Record<string, never>;
             /**
-             * @description `run_flow`, `cancel_run`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`.
+             * @description `run_flow`, `cancel_run`, `cancel_runs`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`.
              * @default
              */
             kind: string;
@@ -1647,6 +1729,11 @@ export interface components {
             secret: string | null;
             /** @default null */
             state_type: string | null;
+            /**
+             * @description `cancel_runs` selector: non-terminal state types; empty means all of them.
+             * @default []
+             */
+            states: string[];
             /** @default null */
             subject: string | null;
             /** @default [] */
@@ -1979,6 +2066,23 @@ export interface components {
             start_deadline?: number | null;
             updated_at: components["schemas"]["i64"];
         };
+        SchedulerStatus: {
+            /** @description Scheduled runs whose time has passed and that the pause is holding. */
+            held: number;
+            paused: boolean;
+            reason?: string | null;
+            /**
+             * Format: int64
+             * @description When the pause began, microseconds; null when running.
+             */
+            since?: number | null;
+            suppress_rules: boolean;
+            /**
+             * Format: int64
+             * @description When the scheduler resumes on its own, microseconds.
+             */
+            until?: number | null;
+        };
         ServerInfo: {
             /** @description Whether a token is required. */
             auth: boolean;
@@ -1988,6 +2092,7 @@ export interface components {
             /** @description Bound beyond loopback with no token required. */
             exposed: boolean;
             home: string;
+            paused?: null | components["schemas"]["Pause"];
             /** Format: int32 */
             pid: number;
             queued: number;
@@ -3849,6 +3954,73 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_scheduler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulerStatus"];
+                };
+            };
+        };
+    };
+    pause_scheduler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PauseBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulerStatus"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    resume_scheduler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulerStatus"];
+                };
             };
         };
     };

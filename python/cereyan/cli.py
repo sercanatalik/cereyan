@@ -80,6 +80,17 @@ def build_parser() -> argparse.ArgumentParser:
     backfill.add_argument("--json", action="store_true", help="print the backfill status as JSON")
     backfill.set_defaults(func=cmd_backfill)
 
+    pause = sub.add_parser("pause", help="pause every schedule at once (requires a running server); running runs continue")
+    pause.add_argument("--reason", help="shown in the UI banner and recorded on the event")
+    pause.add_argument("--until", help="resume on its own at this ISO 8601 time (naive means UTC)")
+    pause.add_argument("--suppress-rules", action="store_true", help="record rules that would fire as suppressed instead of acting")
+    pause.add_argument("--json", action="store_true", help="print the scheduler status as JSON")
+    pause.set_defaults(func=cmd_pause)
+
+    resume = sub.add_parser("resume", help="end the global pause: held runs start and schedules catch up (requires a running server)")
+    resume.add_argument("--json", action="store_true", help="print the scheduler status as JSON")
+    resume.set_defaults(func=cmd_resume)
+
     mcp = sub.add_parser("mcp", help="MCP server over stdio for agent hosts (proxies to the running server)")
     mcp.add_argument("--url", help="server URL (default: from server.json)")
     mcp.add_argument("--socket", help="Unix socket path of the server")
@@ -319,6 +330,59 @@ def cmd_mcp(args) -> int:
     from .mcp import main as mcp_main
 
     return mcp_main(url=args.url, token=args.client_token, socket_path=args.socket)
+
+
+def _scheduler_status_line(status: dict) -> str:
+    if not status.get("paused"):
+        return "scheduler running"
+    parts = ["scheduler paused"]
+    if status.get("reason"):
+        parts.append(f"({status['reason']})")
+    if status.get("until"):
+        from datetime import datetime, timezone
+
+        parts.append("until " + datetime.fromtimestamp(status["until"] / 1_000_000, tz=timezone.utc).isoformat())
+    if status.get("suppress_rules"):
+        parts.append("rules suppressed")
+    held = status.get("held") or 0
+    if held:
+        parts.append(f"{held} run{'s' if held != 1 else ''} held")
+    return " ".join(parts)
+
+
+def cmd_pause(args) -> int:
+    from . import client as client_module
+
+    server = client_module.find_server(engine.resolved_home())
+    if server is None:
+        print("error: pause needs a running server (start `cereyan serve`)", file=sys.stderr)
+        return EXIT_SCHEDULING
+    try:
+        status = server.pause_scheduler(reason=args.reason, until=args.until, suppress_rules=args.suppress_rules)
+    except ValueError as exc:
+        print(f"error: --until: {exc}", file=sys.stderr)
+        return EXIT_SCHEDULING
+    except client_module.ApiError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_SCHEDULING
+    print(json.dumps(status) if args.json else _scheduler_status_line(status))
+    return EXIT_OK
+
+
+def cmd_resume(args) -> int:
+    from . import client as client_module
+
+    server = client_module.find_server(engine.resolved_home())
+    if server is None:
+        print("error: resume needs a running server (start `cereyan serve`)", file=sys.stderr)
+        return EXIT_SCHEDULING
+    try:
+        status = server.resume_scheduler()
+    except client_module.ApiError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_SCHEDULING
+    print(json.dumps(status) if args.json else _scheduler_status_line(status))
+    return EXIT_OK
 
 
 def cmd_backfill(args) -> int:

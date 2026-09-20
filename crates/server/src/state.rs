@@ -55,6 +55,8 @@ pub struct AppState {
     pub sources: RwLock<std::collections::HashMap<String, crate::SettingSource>>,
     /// Set while `POST /api/database/reset` runs; run creation answers 503.
     pub resetting: AtomicBool,
+    /// The global pause while the scheduler is paused (`scheduler.paused` in kv).
+    pub pause: RwLock<Option<crate::scheduler::Pause>>,
 }
 
 /// Outcome of a transition request: the run after the change, or the current
@@ -126,6 +128,7 @@ impl AppState {
             title: RwLock::new(title),
             sources: RwLock::new(sources),
             resetting: AtomicBool::new(false),
+            pause: RwLock::new(None),
         };
         Ok(state)
     }
@@ -165,6 +168,18 @@ impl AppState {
     }
 
     /// Bound beyond loopback with no token required: the operator opted out.
+    /// The global pause, if the scheduler is paused.
+    pub fn pause(&self) -> Option<crate::scheduler::Pause> {
+        self.pause.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.pause
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
+    }
+
     pub fn exposed(&self) -> bool {
         !self.addr.ip().is_loopback() && self.config.token.is_none()
     }

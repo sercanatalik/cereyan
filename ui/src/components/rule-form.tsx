@@ -12,6 +12,7 @@ export type RuleAction = components["schemas"]["RuleAction"];
 export const ACTION_KINDS = [
   "run_flow",
   "cancel_run",
+  "cancel_runs",
   "set_state",
   "pause_schedule",
   "resume_schedule",
@@ -38,6 +39,8 @@ export function summarizeDo(actions: RuleAction[]): string {
           return `webhook ${a.url}`;
         case "email":
           return `email ${(a.to ?? []).join(", ")}`;
+        case "cancel_runs":
+          return `cancel runs${a.flow ? ` of ${a.flow}` : ""}`;
         case "set_state":
           return `set ${a.state_type}`;
         case "call":
@@ -316,6 +319,33 @@ export function RuleForm({
                       } catch {}
                     }}
                     aria-label="Parameters"
+                  />
+                </>
+              ) : null}
+              {a.kind === "cancel_runs" ? (
+                <>
+                  <Input
+                    placeholder="flow (templated; defaults to the event's flow)"
+                    value={a.flow ?? ""}
+                    onChange={(e) => setAction(i, { flow: e.target.value })}
+                    aria-label="Flow"
+                  />
+                  <Textarea
+                    rows={2}
+                    placeholder='parameters the runs must match, e.g. {"order": "{{ payload.order }}"}'
+                    value={JSON.stringify(a.parameters ?? {})}
+                    onChange={(e) => {
+                      try {
+                        setAction(i, { parameters: JSON.parse(e.target.value) });
+                      } catch {}
+                    }}
+                    aria-label="Selector parameters"
+                  />
+                  <Input
+                    placeholder="states, comma separated (default: Scheduled, Pending, Running, Paused)"
+                    value={(a.states ?? []).join(", ")}
+                    onChange={(e) => setAction(i, { states: list(e.target.value) })}
+                    aria-label="States to cancel"
                   />
                 </>
               ) : null}

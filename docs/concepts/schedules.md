@@ -70,6 +70,10 @@ When the server starts after downtime, each schedule's `catchup` policy decides 
 
 A scheduled run gets the flow's default parameter values, and the schedule editor can set overrides. Use `run_name` templates over parameters, or the default scheduled name `flow-YYYYMMDDTHHMMSS`, to tell runs apart.
 
+## Pausing everything
+
+`POST /api/scheduler/pause` holds every schedule at once, for a database upgrade or an incident: nothing materialises and no scheduled run starts until `POST /api/scheduler/resume` or the optional `until`. A run whose time arrives meanwhile stays `Scheduled` (it may be renamed `Late`) and starts on resume; running runs, manual runs, backfills and rule-created runs are not affected, because the pause is about schedules, not engines. On resume each schedule applies its own [catch-up policy](#catch-up) to the fires it missed, so a `skip` schedule drops them and a `latest` one runs the newest. The pause survives a restart, and a server that comes up paused runs no catch-up until it is resumed. `reason` shows in the banner every page carries while paused, and `suppress_rules` makes [rules](../guides/rules.md) record their firings as suppressed instead of acting. `GET /api/scheduler` reports the state and how many runs are held; `cereyan pause --reason "db upgrade" --until 2026-09-21T03:00:00Z` and `cereyan resume` do the same from a shell, the Settings page has a Scheduler card, and an agent has `pause_scheduler` and `resume_scheduler`. `scheduler.paused` and `scheduler.resumed` events record both moments.
+
 ## Editing at runtime
 
 Schedules declared in code can be edited on the flow page or with **Reschedule…** (`PATCH /api/schedules/{id}`). The edit lasts until the server restarts, when the code declaration applies again; send `persist: true` to keep it and detach the schedule from its declaration for good. Skips whose fire time the edited schedule no longer produces are dropped and recorded as a `schedule.skips_dropped` event, as are those a restored declaration no longer produces. `POST /api/schedules/preview` returns the next fire times for a declaration, which the editors use to show them before saving.

@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api, unwrap } from "@/api/client";
+import { pauseTime } from "@/components/pause-banner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHead } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 
 /** What you edit (title, resources, defaults) and what is running (custom routes, engines). */
@@ -26,6 +28,32 @@ export function GeneralTab() {
   const [backupKeep, setBackupKeep] = useState("");
   const [crash, setCrash] = useState("");
   const [title, setTitle] = useState("");
+  const [pauseReason, setPauseReason] = useState("");
+  const [pauseUntil, setPauseUntil] = useState("");
+  const [suppressRules, setSuppressRules] = useState(false);
+  const pauseScheduler = useMutation({
+    mutationFn: async () =>
+      unwrap(
+        await api.POST("/api/scheduler/pause", {
+          body: {
+            reason: pauseReason.trim() || null,
+            until: pauseUntil ? new Date(pauseUntil).getTime() * 1000 : null,
+            suppress_rules: suppressRules,
+          },
+        }),
+      ),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["server"] });
+      client.invalidateQueries({ queryKey: ["scheduler"] });
+    },
+  });
+  const resumeScheduler = useMutation({
+    mutationFn: async () => unwrap(await api.POST("/api/scheduler/resume")),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ["server"] });
+      client.invalidateQueries({ queryKey: ["scheduler"] });
+    },
+  });
   useEffect(() => {
     const s = settings.data;
     if (!s) return;
@@ -250,6 +278,80 @@ export function GeneralTab() {
           ) : (
             <span className="text-muted-foreground">No custom routes registered.</span>
           )}
+        </CardContent>
+      </Card>
+      <Card className="col-span-2 gap-0 py-0" data-testid="scheduler-card">
+        <CardHead title="Scheduler" />
+        <CardContent className="p-4">
+          {srv?.paused ? (
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <span>
+                <span className="font-medium">Paused since {pauseTime(srv.paused.since)}</span>
+                {srv.paused.reason ? `: ${srv.paused.reason}` : ""}
+                {srv.paused.until ? `, until ${pauseTime(srv.paused.until)}` : ""}
+                {srv.paused.suppress_rules ? "; rule actions suppressed" : ""}.
+              </span>
+              <Button
+                size="sm"
+                onClick={() => resumeScheduler.mutate()}
+                disabled={resumeScheduler.isPending}
+                data-testid="resume-scheduler-card"
+              >
+                Resume
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+              <label className="block text-xs text-muted-foreground" htmlFor="pause-reason">
+                Reason
+                <Input
+                  id="pause-reason"
+                  className="mt-1 w-64"
+                  value={pauseReason}
+                  placeholder="db upgrade"
+                  onChange={(e) => setPauseReason(e.target.value)}
+                />
+              </label>
+              <label className="block text-xs text-muted-foreground" htmlFor="pause-until">
+                Resume at (optional)
+                <Input
+                  id="pause-until"
+                  type="datetime-local"
+                  className="mt-1"
+                  value={pauseUntil}
+                  onChange={(e) => setPauseUntil(e.target.value)}
+                />
+              </label>
+              <label
+                className="flex items-center gap-2 pb-2 text-xs text-muted-foreground"
+                htmlFor="pause-suppress"
+              >
+                <Checkbox
+                  id="pause-suppress"
+                  checked={suppressRules}
+                  onCheckedChange={(c) => setSuppressRules(c === true)}
+                  aria-label="suppress rule actions"
+                />
+                suppress rule actions
+              </label>
+              <Button
+                size="sm"
+                className="mb-0.5"
+                onClick={() => pauseScheduler.mutate()}
+                disabled={pauseScheduler.isPending}
+                data-testid="pause-scheduler"
+              >
+                Pause every schedule
+              </Button>
+              <p className="min-w-72 flex-1 pb-1.5 text-xs text-muted-foreground">
+                Holds every schedule at once; running runs, manual runs and backfills continue. Held runs
+                start on resume and each schedule catches up under its own policy.
+              </p>
+            </div>
+          )}
+          {pauseScheduler.isError ? (
+            <p className="mt-2 text-xs text-destructive">{String(pauseScheduler.error)}</p>
+          ) : null}
         </CardContent>
       </Card>
       <Card className="col-span-2 gap-0 py-0">

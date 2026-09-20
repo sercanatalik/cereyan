@@ -455,6 +455,25 @@ pub fn on_event(state: &Arc<AppState>, event: Event) {
     if to_fire.is_empty() {
         return;
     }
+    // A maintenance window: the firing is recorded, nothing acts, no rule.* event.
+    if state.pause().is_some_and(|p| p.suppress_rules) {
+        for rule in &to_fire {
+            let outcomes: Vec<Value> = rule
+                .spec
+                .actions
+                .iter()
+                .enumerate()
+                .map(|(i, a)| json!({"index": i, "kind": a.kind, "status": "suppressed"}))
+                .collect();
+            let _ = state.store.record_firing(
+                rule.id,
+                Some(event.id),
+                ctx.run.as_ref().map(|r| r.id),
+                &serde_json::to_string(&outcomes).unwrap_or_else(|_| "[]".into()),
+            );
+        }
+        return;
+    }
     let st = state.clone();
     std::thread::Builder::new()
         .name("cereyan-rules".into())
@@ -680,6 +699,48 @@ pub fn execute(
                 }
             }
         }
+        "cancel_runs" => {
+            let project = ctx.flow.as_ref().map(|f| f.project.clone());
+            let flow_id = match action.flow.as_deref().filter(|f| !f.trim().is_empty()) {
+                Some(name) => Some(find_flow(state, name, project.as_deref())?.id),
+                None => ctx.flow.as_ref().map(|f| f.id),
+            };
+            let states: Vec<StateType> = action
+                .states
+                .iter()
+                .filter_map(|s| StateType::parse(s))
+                .collect();
+            let own = ctx.run.as_ref().map(|r| r.id);
+            let mut cancelled = Vec::new();
+            let mut skipped = Vec::new();
+            for active in state.index.active_runs() {
+                if Some(active.id) == own
+                    || flow_id.is_some_and(|id| id != active.flow_id)
+                    || active.state.is_terminal()
+                    || (!states.is_empty() && !states.contains(&active.state.state_type))
+                {
+                    continue;
+                }
+                let Some(run) = state.store.get_run(active.id).ok().flatten() else {
+                    continue;
+                };
+                if !parameters_match(&action.parameters, &run.parameters) {
+                    continue;
+                }
+                let immediate = state.supervisor.dequeue(run.id) || run.engine_pid.is_none();
+                let next = if immediate {
+                    State::new(StateType::Cancelled)
+                        .with_message(format!("cancelled by rule {}", rule.name))
+                } else {
+                    State::new(StateType::Cancelling)
+                };
+                match state.transition_run(run.id, next, false) {
+                    Ok(TransitionResult::Accepted(_)) => cancelled.push(run.id),
+                    _ => skipped.push(run.id),
+                }
+            }
+            Ok(json!({"cancelled": cancelled, "count": cancelled.len(), "skipped": skipped}))
+        }
         "set_state" => {
             let run = ctx.run.as_ref().ok_or("event has no run")?;
             let t = StateType::parse(action.state_type.as_deref().unwrap_or(""))
@@ -890,6 +951,22 @@ fn test_proactive_rule(state: &Arc<AppState>, rule: &RuleRow) -> Result<Value, S
         )
         .collect();
     Ok(json!({"event": event, "actions": actions, "note": "synthetic lapse; nothing was armed"}))
+}
+
+/// Every selector pair equals the run's parameter; a string selector also
+/// matches a parameter of another type with the same JSON text, so a
+/// `{{ payload.order_id }}` template matches whatever type the flow declared.
+fn parameters_match(
+    selector: &serde_json::Map<String, Value>,
+    parameters: &serde_json::Map<String, Value>,
+) -> bool {
+    selector.iter().all(|(k, want)| match parameters.get(k) {
+        Some(have) => {
+            have == want
+                || matches!(want, Value::String(s) if !have.is_string() && *have.to_string() == *s)
+        }
+        None => false,
+    })
 }
 
 pub(crate) fn find_flow(

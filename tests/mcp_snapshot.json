@@ -538,6 +538,7 @@
           "auth",
           "engines",
           "exposed",
+          "paused",
           "queued",
           "read_only",
           "resources",
@@ -1143,6 +1144,47 @@
     },
     {
       "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Pause every schedule at once, for maintenance or an incident. Nothing scheduled starts until resume_scheduler or `until`; running runs, manual runs and backfills continue. With suppress_rules, rules that would fire are recorded as suppressed instead of acting.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "Shown in the UI banner and recorded on the scheduler.paused event",
+            "type": "string"
+          },
+          "suppress_rules": {
+            "default": false,
+            "type": "boolean"
+          },
+          "until": {
+            "description": "When to resume on its own, ISO 8601; omit to hold until resume_scheduler",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "pause_scheduler"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
+      "description": "End the global pause: held runs start and each schedule catches up the fires it missed under its own policy.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "resume_scheduler"
+    },
+    {
+      "annotations": {
         "destructiveHint": true,
         "readOnlyHint": false
       },
@@ -1266,7 +1308,7 @@
         "destructiveHint": false,
         "readOnlyHint": true
       },
-      "description": "The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, and whether a token is required or the server is exposed. Read-only.",
+      "description": "The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},

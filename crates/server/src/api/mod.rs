@@ -11,6 +11,7 @@ pub mod flows;
 pub mod logs;
 pub mod metrics;
 pub mod observability;
+pub mod pause;
 pub mod projects;
 pub mod runs;
 pub mod schedules;
@@ -52,6 +53,8 @@ pub struct ServerInfo {
     pub exposed: bool,
     /// The file holding the generated token when the server generated one.
     pub token_file: Option<String>,
+    /// The global pause while the scheduler is paused.
+    pub paused: Option<crate::scheduler::Pause>,
 }
 
 #[utoipa::path(get, path = "/api/health", responses((status = 200, description = "Server is up")))]
@@ -80,6 +83,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         auth: state.config.token.is_some(),
         exposed: state.exposed(),
         token_file: state.token_file(),
+        paused: state.pause(),
     })
 }
 
@@ -132,6 +136,9 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         schedules::pause_flow,
         schedules::resume_flow,
         schedules::preview_schedule,
+        pause::get_scheduler,
+        pause::pause_scheduler,
+        pause::resume_scheduler,
         backfills::create_backfill,
         backfills::get_backfill,
         backfills::list_backfills,
@@ -172,6 +179,9 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
     ),
     components(schemas(
         ServerInfo,
+        crate::scheduler::Pause,
+        pause::SchedulerStatus,
+        pause::PauseBody,
         cereyan_core::Flow,
         cereyan_core::Run,
         cereyan_core::TaskRun,
@@ -300,6 +310,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/flows/{id}/backfill", post(backfills::create_backfill))
         .route("/api/flows/{id}/backfills", get(backfills::list_backfills))
         .route("/api/schedules/preview", post(schedules::preview_schedule))
+        .route("/api/scheduler", get(pause::get_scheduler))
+        .route("/api/scheduler/pause", post(pause::pause_scheduler))
+        .route("/api/scheduler/resume", post(pause::resume_scheduler))
         .route(
             "/api/schedules/{sid}",
             axum::routing::patch(schedules::patch_schedule).delete(schedules::delete_schedule),

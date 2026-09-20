@@ -15,11 +15,12 @@ use crate::state::{StateName, StateType};
 /// Prefixes the engine owns. A name under one of these MUST be a catalogue
 /// entry; a name outside them is a custom event and is not checked, which is
 /// what keeps `emit_event` open to any vocabulary a pipeline wants.
-pub const RESERVED_PREFIXES: [&str; 8] = [
+pub const RESERVED_PREFIXES: [&str; 9] = [
     "run.",
     "task_run.",
     "flow.",
     "schedule.",
+    "scheduler.",
     "resource.",
     "rule.",
     "expectation.",
@@ -56,6 +57,8 @@ pub enum EventName {
     BackfillCompleted,
     SchedulePaused,
     ScheduleResumed,
+    SchedulerPaused,
+    SchedulerResumed,
     ScheduleCatchup,
     ScheduleSkipsDropped,
     ResourceExhausted,
@@ -68,7 +71,7 @@ pub enum EventName {
 }
 
 impl EventName {
-    pub const ALL: [EventName; 36] = [
+    pub const ALL: [EventName; 38] = [
         EventName::RunScheduled,
         EventName::RunPending,
         EventName::RunRunning,
@@ -96,6 +99,8 @@ impl EventName {
         EventName::BackfillCompleted,
         EventName::SchedulePaused,
         EventName::ScheduleResumed,
+        EventName::SchedulerPaused,
+        EventName::SchedulerResumed,
         EventName::ScheduleCatchup,
         EventName::ScheduleSkipsDropped,
         EventName::ResourceExhausted,
@@ -136,6 +141,8 @@ impl EventName {
             EventName::BackfillCompleted => "backfill.completed",
             EventName::SchedulePaused => "schedule.paused",
             EventName::ScheduleResumed => "schedule.resumed",
+            EventName::SchedulerPaused => "scheduler.paused",
+            EventName::SchedulerResumed => "scheduler.resumed",
             EventName::ScheduleCatchup => "schedule.catchup",
             EventName::ScheduleSkipsDropped => "schedule.skips_dropped",
             EventName::ResourceExhausted => "resource.exhausted",
@@ -181,6 +188,7 @@ impl EventName {
             | EventName::ScheduleResumed
             | EventName::ScheduleCatchup
             | EventName::ScheduleSkipsDropped => "schedule",
+            EventName::SchedulerPaused | EventName::SchedulerResumed => "scheduler",
             EventName::ResourceExhausted => "resource",
             EventName::RuleFired
             | EventName::RuleActionCompleted
@@ -222,6 +230,8 @@ impl EventName {
             EventName::BackfillCompleted => "The last run of a backfill reached a terminal state",
             EventName::SchedulePaused => "A schedule was paused from the UI, the API, an MCP tool, a rule, or a disable window",
             EventName::ScheduleResumed => "A schedule was resumed",
+            EventName::SchedulerPaused => "Every schedule was paused at once, for maintenance or an incident; running runs continue",
+            EventName::SchedulerResumed => "The global pause ended: held runs started and each schedule caught up under its own policy",
             EventName::ScheduleCatchup => "The server started and applied the catch-up policy to fires missed while it was down",
             EventName::ScheduleSkipsDropped => "An edit, or a restart that restored a code declaration, left skipped fires the schedule no longer produces, and they were forgotten",
             EventName::ResourceExhausted => "A run waited for a resource that had no capacity; recorded once per wait",
@@ -301,6 +311,8 @@ impl EventName {
             EventName::BackfillCompleted => &["backfill_id", "counts"],
             EventName::SchedulePaused => &["schedule_id", "reason"],
             EventName::ScheduleResumed => &["schedule_id"],
+            EventName::SchedulerPaused => &["reason", "until", "suppress_rules"],
+            EventName::SchedulerResumed => &["held", "schedules"],
             EventName::ScheduleCatchup => {
                 &["schedule_id", "policy", "missed", "created", "dropped"]
             }
@@ -519,6 +531,8 @@ mod tests {
             "backfill.completed",
             "schedule.paused",
             "schedule.resumed",
+            "scheduler.paused",
+            "scheduler.resumed",
             "schedule.catchup",
             "schedule.skips_dropped",
             "resource.exhausted",

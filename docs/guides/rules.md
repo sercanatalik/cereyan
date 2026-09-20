@@ -45,13 +45,16 @@ Any name outside those prefixes is a custom event of yours and is accepted as ty
 |---|---|---|
 | `run_flow` | `flow`, `parameters` (templated) | Create a run; it records `created_by = rule:<id>` |
 | `cancel_run` | | Cancel the run the event is about |
+| `cancel_runs` | `flow` (templated, defaults to the event's flow), `parameters` (templated), `states` | Cancel every active run of the flow whose parameters equal the rendered values, in the given state types (all non-terminal ones by default), never the event's own run; the outcome lists the ids |
 | `set_state` | `state_type`, `message` | Force the run into a state |
 | `pause_schedule`, `resume_schedule` | `schedule_id` | Stop or restart a schedule |
 | `webhook` | `url`, `method`, `headers`, `body` (templated) | HTTP request; three attempts with backoff |
 | `email` | `to`, `subject`, `body` (templated) | Sent through `[email]` in `cereyan.toml` |
 | `call` | `callable` | A code rule's function |
 
-Actions run in order; a failing action is recorded as `rule.action.failed` and the rest still run.
+Actions run in order; a failing action is recorded as `rule.action.failed` and the rest still run. A rule on a custom event can stop work that has become pointless: on `orders.cancelled`, `cancel_runs` with `flow: fulfil` and `parameters: {"order": "{{ payload.order }}"}` cancels the `fulfil` runs of that order and leaves the others alone. A string in the selector also matches a parameter of another type with the same text, so `{{ payload.id }}` matches an integer parameter.
+
+While the scheduler is [paused for maintenance](../concepts/schedules.md#pausing-everything) with `suppress_rules`, a rule that would fire is recorded as a firing whose actions are `suppressed`, nothing runs, and nobody is paged about the failures the maintenance itself causes.
 
 ## Templates
 

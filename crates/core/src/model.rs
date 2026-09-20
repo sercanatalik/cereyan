@@ -392,7 +392,7 @@ pub struct RuleMatch {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(default)]
 pub struct RuleAction {
-    /// `run_flow`, `cancel_run`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`.
+    /// `run_flow`, `cancel_run`, `cancel_runs`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`.
     pub kind: String,
     pub flow: Option<String>,
     #[cfg_attr(feature = "openapi", schema(value_type = Object))]
@@ -418,6 +418,8 @@ pub struct RuleAction {
     pub chat_id: Option<String>,
     /// PagerDuty Events API routing key.
     pub routing_key: Option<String>,
+    /// `cancel_runs` selector: non-terminal state types; empty means all of them.
+    pub states: Vec<String>,
 }
 
 /// Clock of a clock-armed proactive rule: a cron expression in a timezone.

@@ -895,6 +895,27 @@ Also served on POST, which is what the engine client speaks.
 | 409 | The project is served, or a run of it is in progress |
 | 503 | The database is being reset |
 
+### `GET /api/scheduler`
+
+| Status | Body |
+|---|---|
+| 200 | [`SchedulerStatus`](#schedulerstatus) (application/json) |
+
+### `POST /api/scheduler/pause`
+
+**Request body** (application/json): [`PauseBody`](#pausebody)
+
+| Status | Body |
+|---|---|
+| 200 | [`SchedulerStatus`](#schedulerstatus) (application/json) |
+| 422 | no body |
+
+### `POST /api/scheduler/resume`
+
+| Status | Body |
+|---|---|
+| 200 | [`SchedulerStatus`](#schedulerstatus) (application/json) |
+
 ## Schemas
 
 ### `AcquireRequest`
@@ -1298,6 +1319,25 @@ Type: string.
 | `interval_secs` | integer (int64) | yes |  |
 | `samples` | [`Sample`](#sample)[] | yes |  |
 
+### `Pause`
+
+The global pause: every schedule held at once, with a reason and an end.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reason` | string or null | no |  |
+| `since` | integer (int64) | yes | When the pause began, microseconds. |
+| `suppress_rules` | boolean | yes | Rules that would fire are recorded as suppressed instead of acting. |
+| `until` | integer or null (int64) | no | When the scheduler resumes on its own, microseconds; none means until resumed. |
+
+### `PauseBody`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reason` | string or null | no | Why, shown in the UI banner and recorded on the event. |
+| `suppress_rules` | boolean | no | Record rules that would fire as suppressed instead of acting. |
+| `until` | integer or null (int64) | no | When to resume on its own, microseconds; absent means until resumed. |
+
 ### `PrefilterBody`
 
 | Field | Type | Required | Description |
@@ -1428,7 +1468,7 @@ One rule action. `kind` selects the variant; other fields are optional.
 | `chat_id` | string or null | no | Telegram chat id. |
 | `flow` | string or null | no |  |
 | `headers` | object | no |  |
-| `kind` | string | no | `run_flow`, `cancel_run`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`. |
+| `kind` | string | no | `run_flow`, `cancel_run`, `cancel_runs`, `set_state`, `pause_schedule`, `resume_schedule`, `webhook`, `email`, `call`. |
 | `message` | string or null | no |  |
 | `method` | string or null | no |  |
 | `parameters` | object | no |  |
@@ -1436,6 +1476,7 @@ One rule action. `kind` selects the variant; other fields are optional.
 | `routing_key` | string or null | no | PagerDuty Events API routing key. |
 | `secret` | string or null | no | Webhook signing secret (Standard Webhooks headers when set). |
 | `state_type` | string or null | no |  |
+| `states` | array of string | no | `cancel_runs` selector: non-terminal state types; empty means all of them. |
 | `subject` | string or null | no |  |
 | `to` | array of string | no |  |
 | `topic` | string or null | no | ntfy topic. |
@@ -1637,6 +1678,17 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `start_deadline` | integer or null (int64) | no | Seconds: a run that has not started this long after it was due is skipped. |
 | `updated_at` | [`i64`](#i64) | yes |  |
 
+### `SchedulerStatus`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `held` | integer | yes | Scheduled runs whose time has passed and that the pause is holding. |
+| `paused` | boolean | yes |  |
+| `reason` | string or null | no |  |
+| `since` | integer or null (int64) | no | When the pause began, microseconds; null when running. |
+| `suppress_rules` | boolean | yes |  |
+| `until` | integer or null (int64) | no | When the scheduler resumes on its own, microseconds. |
+
 ### `ServerInfo`
 
 | Field | Type | Required | Description |
@@ -1646,6 +1698,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `engines` | array of any | yes |  |
 | `exposed` | boolean | yes | Bound beyond loopback with no token required. |
 | `home` | string | yes |  |
+| `paused` | null or [`Pause`](#pause) | no |  |
 | `pid` | integer (int32) | yes |  |
 | `queued` | integer | yes |  |
 | `served_dir` | string or null | no |  |

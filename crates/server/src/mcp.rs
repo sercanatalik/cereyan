@@ -518,6 +518,14 @@ pub fn tool_list() -> Vec<Value> {
             json!({"schedule_id": {"type": "integer"}}), &["schedule_id"]),
         write_tool("resume_schedule", "Resume a paused schedule.",
             json!({"schedule_id": {"type": "integer"}}), &["schedule_id"]),
+        write_tool("pause_scheduler", "Pause every schedule at once, for maintenance or an incident. Nothing scheduled starts until resume_scheduler or `until`; running runs, manual runs and backfills continue. With suppress_rules, rules that would fire are recorded as suppressed instead of acting.",
+            json!({
+                "reason": {"type": "string", "description": "Shown in the UI banner and recorded on the scheduler.paused event"},
+                "until": {"type": "string", "description": "When to resume on its own, ISO 8601; omit to hold until resume_scheduler"},
+                "suppress_rules": {"type": "boolean", "default": false}
+            }), &[]),
+        write_tool("resume_scheduler", "End the global pause: held runs start and each schedule catches up the fires it missed under its own policy.",
+            json!({}), &[]),
         destructive_tool("set_variable", "Create or overwrite a variable. Secrets are encrypted at rest and never returned in plain text.",
             json!({"name": {"type": "string"}, "value": {"description": "Any JSON"}, "tags": {"type": "array", "items": {"type": "string"}}, "secret": {"type": "boolean", "default": false}}), &["name", "value"]),
         read_tool("list_backfills", "Backfills, newest first, each with its counts of runs by state. Read-only.",
@@ -528,7 +536,7 @@ pub fn tool_list() -> Vec<Value> {
             json!({"backfill_id": {"type": "integer"}}), &["backfill_id"]),
         read_tool("get_flow_source", "The Python source of the module that registered a flow, read from the flow's own source directory and cut at 64 KB. Read-only.",
             json!({"flow": flow_prop, "project": {"type": "string"}}), &["flow"]),
-        read_tool("server_health", "The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, and whether a token is required or the server is exposed. Read-only.",
+        read_tool("server_health", "The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Read-only.",
             json!({}), &[]),
         read_tool("list_variables", "Every variable's name, tags, and timestamps; the value only when it is not a secret. Read-only.",
             json!({}), &[]),
@@ -550,6 +558,23 @@ fn arg_i64(args: &Map<String, Value>, key: &str) -> Result<i64, ToolError> {
                 .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
         })
         .ok_or_else(|| ToolError::Failed(format!("{key} must be an integer")))
+}
+
+/// An ISO 8601 instant (`2026-09-20T03:00:00Z`, an offset, or naive UTC) as microseconds.
+fn parse_instant(text: &str) -> Result<i64, ToolError> {
+    let t = text.trim();
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(t) {
+        return Ok(dt.timestamp_micros());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S") {
+        return Ok(dt.and_utc().timestamp_micros());
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M") {
+        return Ok(dt.and_utc().timestamp_micros());
+    }
+    Err(ToolError::Failed(format!(
+        "until: cannot parse {text:?} as ISO 8601"
+    )))
 }
 
 fn arg_str(args: &Map<String, Value>, key: &str) -> Option<String> {
@@ -669,6 +694,7 @@ async fn call_tool(
             "schedules": state.store.list_schedules(None)?.len(),
             "auth": state.config.token.is_some(),
             "exposed": state.exposed(),
+            "paused": state.pause(),
             "read_only": state.config.mcp_read_only,
             "served_dir": state.config.served_dir.as_ref().map(|p| p.display().to_string()),
             "as_of": now_micros(),
@@ -1078,6 +1104,38 @@ async fn call_tool(
             .map_err(|e| ToolError::Failed(e.to_string()))?;
             let row = state.store.get_schedule(sid)?;
             Ok(json!({"schedule": row}))
+        }
+        "pause_scheduler" => {
+            let reason = arg_str(args, "reason").filter(|r| !r.trim().is_empty());
+            let until = match arg_str(args, "until").filter(|u| !u.trim().is_empty()) {
+                Some(text) => Some(parse_instant(&text)?),
+                None => None,
+            };
+            let suppress = args
+                .get("suppress_rules")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let st = state.clone();
+            let pause = tokio::task::spawn_blocking(move || {
+                crate::scheduler::pause_all(&st, reason, until, suppress)
+            })
+            .await
+            .map_err(|e| ToolError::Failed(e.to_string()))?;
+            Ok(
+                json!({"paused": true, "since": pause.since, "reason": pause.reason, "until": pause.until, "suppress_rules": pause.suppress_rules}),
+            )
+        }
+        "resume_scheduler" => {
+            let st = state.clone();
+            let resumed = tokio::task::spawn_blocking(move || crate::scheduler::resume_all(&st))
+                .await
+                .map_err(|e| ToolError::Failed(e.to_string()))?;
+            Ok(match resumed {
+                Some((held, schedules)) => {
+                    json!({"paused": false, "held": held, "schedules": schedules})
+                }
+                None => json!({"paused": false, "already": "the scheduler was not paused"}),
+            })
         }
         "set_variable" => {
             let vname = arg_str(args, "name")

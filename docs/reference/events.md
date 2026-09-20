@@ -91,7 +91,7 @@ Runs created by a rule record `created_by = rule:<id>`, and a rule never fires o
 
 Names with a dot-separated prefix, such as `orders.table_empty`, match rules with `events: ["orders.*"]`.
 
-The prefixes `run.`, `task_run.`, `flow.`, `schedule.`, `resource.`, `rule.`, `expectation.`, `backfill.` are the engine's. A name under one of them that is not in the catalogue above is rejected by `emit_event`, by `@app.rule`, and by the rules API, because nothing would ever emit it — a rule matching one could only ever sit silent. Every other name is yours and is never checked.
+The prefixes `run.`, `task_run.`, `flow.`, `schedule.`, `scheduler.`, `resource.`, `rule.`, `expectation.`, `backfill.` are the engine's. A name under one of them that is not in the catalogue above is rejected by `emit_event`, by `@app.rule`, and by the rules API, because nothing would ever emit it — a rule matching one could only ever sit silent. Every other name is yours and is never checked.
 
 ## Stream messages
 

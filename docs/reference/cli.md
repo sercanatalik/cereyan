@@ -5,7 +5,7 @@
 The `cereyan` command. Every subcommand accepts the global options first, for example `cereyan --home /tmp/h run pipeline.py:etl`.
 
 ```text
-cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,check,backup,backfill,mcp,runs} ...
+cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,check,backup,backfill,pause,resume,mcp,runs} ...
 ```
 
 ## Global options
@@ -107,6 +107,29 @@ cereyan backfill [-h] --param PARAM --start START --end END [--interval INTERVAL
 | `--reverse` | create the newest value first. |
 | `--extra` `NAME=VALUE` | fixed value for another flow parameter; repeatable. |
 | `--json` | print the backfill status as JSON. |
+
+## `cereyan pause`
+
+```text
+cereyan pause [-h] [--reason REASON] [--until UNTIL] [--suppress-rules] [--json]
+```
+
+| Option | Meaning |
+|---|---|
+| `--reason` `REASON` | shown in the UI banner and recorded on the event. |
+| `--until` `UNTIL` | resume on its own at this ISO 8601 time (naive means UTC). |
+| `--suppress-rules` | record rules that would fire as suppressed instead of acting. |
+| `--json` | print the scheduler status as JSON. |
+
+## `cereyan resume`
+
+```text
+cereyan resume [-h] [--json]
+```
+
+| Option | Meaning |
+|---|---|
+| `--json` | print the scheduler status as JSON. |
 
 ## `cereyan mcp`
 

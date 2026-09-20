@@ -360,6 +360,11 @@ pub fn render_action(
     if let Some(u) = &action.url {
         out.url = Some(render(env, "url", u, context)?);
     }
+    if action.kind == "cancel_runs" {
+        if let Some(f) = &action.flow {
+            out.flow = Some(render(env, "flow", f, context)?);
+        }
+    }
     if let Value::Object(map) = render_value(
         env,
         "headers",
@@ -474,6 +479,9 @@ fn validate_match(m: &RuleMatch, clause: &str) -> Result<(), String> {
 }
 
 /// Validate a spec before storing it.
+/// State types a `cancel_runs` selector may name: the ones a cancel can still reach.
+pub const CANCELLABLE_STATES: [&str; 4] = ["Scheduled", "Pending", "Running", "Paused"];
+
 pub fn validate_spec(spec: &RuleSpec) -> Result<(), String> {
     if spec.actions.is_empty() {
         return Err("a rule needs at least one action".into());
@@ -529,6 +537,16 @@ pub fn validate_spec(spec: &RuleSpec) -> Result<(), String> {
                 }
             }
             "cancel_run" | "pause_schedule" | "resume_schedule" => {}
+            "cancel_runs" => {
+                for st in &a.states {
+                    if !CANCELLABLE_STATES.contains(&st.as_str()) {
+                        return Err(format!(
+                            "action {i}: cancel_runs states must be one of {}; got {st:?}",
+                            CANCELLABLE_STATES.join(", ")
+                        ));
+                    }
+                }
+            }
             "set_state" => {
                 if a.state_type.as_deref().unwrap_or("").is_empty() {
                     return Err(format!("action {i}: set_state needs a state_type"));
@@ -751,6 +769,31 @@ mod tests {
         let mut unrelated = event("run.completed");
         unrelated.payload.insert("state".into(), json!("Completed"));
         assert!(!matches(&m, &unrelated, &ctx));
+    }
+
+    #[test]
+    fn cancel_runs_validates_states_and_renders_flow() {
+        let mut spec = RuleSpec {
+            when: RuleMatch {
+                events: vec!["orders.cancelled".into()],
+                ..Default::default()
+            },
+            actions: vec![RuleAction {
+                kind: "cancel_runs".into(),
+                flow: Some("fulfil-{{ payload.region }}".into()),
+                states: vec!["Completed".into()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let err = validate_spec(&spec).unwrap_err();
+        assert!(err.contains("cancel_runs states"), "{err}");
+        spec.actions[0].states = vec!["Running".into()];
+        validate_spec(&spec).unwrap();
+        let env = environment();
+        let ctx = serde_json::json!({"payload": {"region": "eu"}});
+        let rendered = render_action(&env, &spec.actions[0], &ctx).unwrap();
+        assert_eq!(rendered.flow.as_deref(), Some("fulfil-eu"));
     }
 
     #[test]

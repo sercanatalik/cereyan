@@ -39,13 +39,13 @@ Every tool description states its effect so a model can decide before calling. A
 | `list_backfills` | `flow` (string) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) | Backfills, newest first, each with its counts of runs by state. Response keys: `backfills` |
 | `get_backfill` | `backfill_id` (integer, required) | One backfill with its counts of runs by state. Response keys: `backfill` |
 | `get_flow_source` | `flow` (string, required) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) | The Python source of the module that registered a flow, read from the flow's own source directory and cut at 64 KB. Response keys: `bytes`, `flow`, `module`, `path`, `project`, `source`, `truncated` |
-| `server_health` | none | The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, and whether a token is required or the server is exposed. Response keys: `as_of`, `auth`, `engines`, `exposed`, `queued`, `read_only`, `resources`, `schedules`, `served_dir`, `version` |
+| `server_health` | none | The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Response keys: `as_of`, `auth`, `engines`, `exposed`, `paused`, `queued`, `read_only`, `resources`, `schedules`, `served_dir`, `version` |
 | `list_variables` | none | Every variable's name, tags, and timestamps; the value only when it is not a secret. Response keys: `variables` |
 | `list_resources` | none | Resource totals from [resources] and what is in use. Response keys: `resources` |
 | `flow_dependencies` | `flow` (string, required) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) | What a flow runs after (its upstreams and batch key) and which flows run after it. Response keys: `batch_key`, `flow`, `project`, `triggers`, `upstreams` |
 | `check_flows` | none | Run `cereyan check --json` on the served directory in a child process and return its report: import failures, unknown upstreams, invalid schedules with previews, unlisted resources, and route conflicts. Takes a few seconds. Response keys: `directory`, `errors`, `findings`, `flows`, `modules`, `now`, `ok`, `routes`, `rules`, `warnings` |
 
-### Tools that change state (13)
+### Tools that change state (15)
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -58,6 +58,8 @@ Every tool description states its effect so a model can decide before calling. A
 | `delete_schedule` | `schedule_id` (integer, required) | Remove a schedule that was created in the interface or by an agent. A schedule declared in the flow's code cannot be removed this way, because the next restart recreates it from the declaration; pause_schedule stops that one durably. Response keys: `deleted`, `schedule_id` |
 | `pause_schedule` | `schedule_id` (integer, required) | Pause a schedule so it stops creating runs until resumed. Response keys: `schedule` |
 | `resume_schedule` | `schedule_id` (integer, required) | Resume a paused schedule. Response keys: `schedule` |
+| `pause_scheduler` | `reason` (string) — Shown in the UI banner and recorded on the scheduler.paused event<br>`suppress_rules` (boolean, default `false`)<br>`until` (string) — When to resume on its own, ISO 8601; omit to hold until resume_scheduler | Pause every schedule at once, for maintenance or an incident. Nothing scheduled starts until resume_scheduler or `until`; running runs, manual runs and backfills continue. With suppress_rules, rules that would fire are recorded as suppressed instead of acting. Response keys: — |
+| `resume_scheduler` | none | End the global pause: held runs start and each schedule catches up the fires it missed under its own policy. Response keys: — |
 | `set_variable` | `name` (string, required)<br>`secret` (boolean, default `false`)<br>`tags` (array of string)<br>`value` (any JSON, required) — Any JSON | Create or overwrite a variable. Secrets are encrypted at rest and never returned in plain text. Response keys: `variable` |
 | `cancel_backfill` | `backfill_id` (integer, required) | Cancel a backfill: its queued runs are cancelled at once and its running runs are asked to stop. Response keys: `backfill`, `note` |
 | `rerun_run` | `run_id` (integer, required) | Start a new run of the same flow with the original run's parameters and tags. Returns the new run; follow it with get_run. Rerunning from a failed task is not yet supported. Response keys: `note`, `rerun_of`, `run` |
