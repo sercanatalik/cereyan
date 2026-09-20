@@ -35,7 +35,7 @@ Cereyan is built for one machine, one wheel, and pipelines that can always be re
 | TLS | The server is loopback-only by default and a reverse proxy does TLS better. | nginx ([Secure the server](../guides/secure-the-server.md#put-it-behind-nginx-at-a-sub-path) has a configuration), Caddy, or an SSH tunnel. |
 | Versioned flows, code storage, image builds | The code in the served directory is the version; engines reload it when it changes. | Git. |
 | Real-time or streaming pipelines | Runs are units of work with a beginning and an end; the scheduler is a timer heap, not an event loop over streams. | A long-running flow per stream partition, or another tool. |
-| Preemption, priority-based killing | A running run is never interrupted to make room; priority only orders the queue. | Resources and caps to keep heavy work from starting. |
+| Preemption, priority-based killing | A running run is never interrupted to make room for a higher-priority one; priority only orders the queue. The one exception is a flow that declares `on_overlap="cancel_old"`, which asks its own older runs to stop. | Resources and caps to keep heavy work from starting; `cancel_old` for latest-wins flows. |
 
 ## Limits worth knowing
 

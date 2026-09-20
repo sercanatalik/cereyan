@@ -162,6 +162,15 @@ pub struct ScheduleRow {
     pub schedule: crate::schedule::Schedule,
     pub catchup: crate::schedule::CatchupPolicy,
     pub catchup_max: i64,
+    /// Seconds: missed fires older than this are not caught up. None is off.
+    #[serde(default)]
+    pub catchup_window: Option<i64>,
+    /// Seconds: each run becomes due up to this long after its fire time.
+    #[serde(default)]
+    pub jitter: i64,
+    /// Seconds: a run that has not started this long after it was due is skipped.
+    #[serde(default)]
+    pub start_deadline: Option<i64>,
     pub active: bool,
     #[serde(default)]
     pub paused_reason: Option<String>,
@@ -225,6 +234,8 @@ pub struct FlowOptions {
     pub schedules: Vec<ScheduleDecl>,
     pub has_bulk_complete: bool,
     pub has_crash_hooks: bool,
+    /// Seconds a run may wait to start before it is skipped; a schedule's own value wins.
+    pub start_deadline: Option<f64>,
 }
 
 impl FlowOptions {
@@ -280,6 +291,12 @@ pub struct ScheduleDecl {
     pub catchup: crate::schedule::CatchupPolicy,
     #[serde(default = "default_catchup_max")]
     pub catchup_max: i64,
+    #[serde(default)]
+    pub catchup_window: Option<i64>,
+    #[serde(default)]
+    pub jitter: i64,
+    #[serde(default)]
+    pub start_deadline: Option<i64>,
     #[serde(default)]
     pub key: Option<String>,
 }

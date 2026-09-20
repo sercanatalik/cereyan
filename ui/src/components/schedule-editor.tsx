@@ -8,10 +8,26 @@ import { Switch } from "@/components/ui/switch";
 import { UnderlineTabs } from "@/components/ui/underline-tabs";
 import { formatTime } from "@/lib/utils";
 
+/** Catch-up window, jitter, and start deadline in seconds; null or 0 is off. */
+type Policies = { catchup_window: number | null; jitter: number; start_deadline: number | null };
+
 export type ScheduleDraft =
-  | { kind: "cron"; cron: string; timezone: string; day_or: boolean; catchup: string; catchup_max: number }
-  | { kind: "interval"; interval: number; timezone: string; catchup: string; catchup_max: number }
-  | { kind: "rrule"; rrule: string; timezone: string; catchup: string; catchup_max: number };
+  | ({
+      kind: "cron";
+      cron: string;
+      timezone: string;
+      day_or: boolean;
+      catchup: string;
+      catchup_max: number;
+    } & Policies)
+  | ({
+      kind: "interval";
+      interval: number;
+      timezone: string;
+      catchup: string;
+      catchup_max: number;
+    } & Policies)
+  | ({ kind: "rrule"; rrule: string; timezone: string; catchup: string; catchup_max: number } & Policies);
 
 export const TIMEZONES = [
   "local",
@@ -53,7 +69,14 @@ export function scheduleParts(s: ScheduleRow): { what: string; zone: string | nu
 
 export function rowToDraft(s: ScheduleRow): ScheduleDraft {
   const sc = s.schedule as any;
-  const common = { timezone: sc.timezone ?? "local", catchup: s.catchup, catchup_max: s.catchup_max };
+  const common = {
+    timezone: sc.timezone ?? "local",
+    catchup: s.catchup,
+    catchup_max: s.catchup_max,
+    catchup_window: s.catchup_window ?? null,
+    jitter: s.jitter ?? 0,
+    start_deadline: s.start_deadline ?? null,
+  };
   if (sc.kind === "cron") return { kind: "cron", cron: sc.cron, day_or: sc.day_or ?? true, ...common };
   if (sc.kind === "interval") return { kind: "interval", interval: sc.interval, ...common };
   return { kind: "rrule", rrule: sc.rrule, ...common };
@@ -61,7 +84,14 @@ export function rowToDraft(s: ScheduleRow): ScheduleDraft {
 
 export function draftToBody(d: ScheduleDraft): Record<string, unknown> {
   const tz = d.timezone === "local" ? null : d.timezone;
-  const base = { catchup: d.catchup, catchup_max: d.catchup_max, timezone: tz };
+  const base = {
+    catchup: d.catchup,
+    catchup_max: d.catchup_max,
+    timezone: tz,
+    catchup_window: d.catchup_window ?? 0,
+    jitter: d.jitter ?? 0,
+    start_deadline: d.start_deadline ?? 0,
+  };
   if (d.kind === "cron") return { kind: "cron", cron: d.cron, day_or: d.day_or, ...base };
   if (d.kind === "interval") return { kind: "interval", interval: d.interval, ...base };
   return { kind: "rrule", rrule: d.rrule, ...base };
@@ -101,6 +131,9 @@ export function ScheduleEditor({
       day_or: true,
       catchup: "skip",
       catchup_max: 100,
+      catchup_window: null,
+      jitter: 0,
+      start_deadline: null,
     },
   );
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +160,14 @@ export function ScheduleEditor({
   }, [draft, preview]);
 
   const setKind = (kind: string) => {
-    const common = { timezone: draft.timezone, catchup: draft.catchup, catchup_max: draft.catchup_max };
+    const common = {
+      timezone: draft.timezone,
+      catchup: draft.catchup,
+      catchup_max: draft.catchup_max,
+      catchup_window: draft.catchup_window,
+      jitter: draft.jitter,
+      start_deadline: draft.start_deadline,
+    };
     if (kind === "cron") setDraft({ kind: "cron", cron: "0 9 * * *", day_or: true, ...common });
     else if (kind === "interval") setDraft({ kind: "interval", interval: 3600, ...common });
     else
@@ -263,6 +303,45 @@ export function ScheduleEditor({
             className="mt-1"
             value={draft.catchup_max}
             onChange={(e) => setDraft({ ...draft, catchup_max: Number(e.target.value) })}
+          />
+        </label>
+        <label className="text-xs text-muted-foreground" htmlFor="sched-window">
+          Catch-up window (s)
+          <Input
+            id="sched-window"
+            type="number"
+            min={0}
+            className="mt-1"
+            placeholder="off"
+            value={draft.catchup_window ?? ""}
+            onChange={(e) =>
+              setDraft({ ...draft, catchup_window: e.target.value === "" ? null : Number(e.target.value) })
+            }
+          />
+        </label>
+        <label className="text-xs text-muted-foreground" htmlFor="sched-jitter">
+          Jitter (s)
+          <Input
+            id="sched-jitter"
+            type="number"
+            min={0}
+            className="mt-1"
+            value={draft.jitter}
+            onChange={(e) => setDraft({ ...draft, jitter: Number(e.target.value) || 0 })}
+          />
+        </label>
+        <label className="text-xs text-muted-foreground" htmlFor="sched-deadline">
+          Start deadline (s)
+          <Input
+            id="sched-deadline"
+            type="number"
+            min={0}
+            className="mt-1"
+            placeholder="off"
+            value={draft.start_deadline ?? ""}
+            onChange={(e) =>
+              setDraft({ ...draft, start_deadline: e.target.value === "" ? null : Number(e.target.value) })
+            }
           />
         </label>
       </div>

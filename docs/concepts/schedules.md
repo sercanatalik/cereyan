@@ -58,7 +58,13 @@ One fire has at most one run. A fire the look-ahead already materialised is not 
 
 ## Catch-up
 
-When the server starts after downtime, each schedule's `catchup` policy decides what happens to the fires it missed: `skip` (default) drops them, `latest` creates the most recent one, and `all` creates every one up to `catchup_max` (default 100). A skipped fire is never caught up. Catch-up runs carry `created_by = catchup` and the decision is recorded as a `schedule.catchup` event.
+When the server starts after downtime, each schedule's `catchup` policy decides what happens to the fires it missed: `skip` (default) drops them, `latest` creates the most recent one, and `all` creates every one up to `catchup_max` (default 100). `catchup_window`, in seconds, drops missed fires older than that before the policy applies: a nightly report is worth catching up a day later, not a month later. A skipped fire is never caught up. Catch-up runs carry `created_by = catchup` and the decision is recorded as a `schedule.catchup` event with `missed`, `created`, `dropped`, and `expired` counts.
+
+## Jitter and start deadlines
+
+`jitter`, in seconds, spreads a schedule's runs: each run becomes due at its fire time plus an offset in `[0, jitter)` computed from the schedule and the fire time, so the offset is the same after a restart and the run's `scheduled_time` stays the nominal fire. Ten flows on `0 * * * *` with `jitter=300` start across five minutes instead of together. An interval schedule's jitter must be shorter than its interval.
+
+`start_deadline`, in seconds, skips a run that has not started that long after it was due, with reason `missed_start_deadline`: useful for a poll whose value is gone once the next one is due. It can also be set on the flow for every run, including ones started by hand; the schedule's value wins. Both are set in Python (`Cron("0 * * * *", jitter=300, start_deadline=900)`), in the schedule editor, through the API, and by an agent.
 
 ## Parameters and names
 

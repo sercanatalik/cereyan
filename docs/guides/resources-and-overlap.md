@@ -18,7 +18,9 @@ def exports() -> None:
 assert every_ten_minutes.options["on_overlap"] == "skip"
 ```
 
-`max_concurrent` limits how many runs of the flow are Pending or Running at once. When the cap is reached, `on_overlap` decides: `enqueue` (default) waits as `AwaitingResource`, `skip` ends the new run `Skipped`, `cancel_new` ends it `Cancelled`. Pick `skip` for polling flows where a missed tick does not matter and `enqueue` for flows that must not lose work.
+`max_concurrent` limits how many runs of the flow are Pending or Running at once. When the cap is reached, `on_overlap` decides: `enqueue` (default) waits as `AwaitingResource`, `skip` ends the new run `Skipped`, `cancel_new` ends it `Cancelled`, `cancel_old` cancels the flow's other runs (a queued one at once, a running one as a user cancel would, grace period included) and lets the new run take the slot they free, and `buffer_one` waits unless another run is already waiting, in which case the new one ends `Skipped` with reason `buffered`. Pick `skip` for polling flows where a missed tick does not matter, `enqueue` for flows that must not lose work, `cancel_old` when only the latest request matters, and `buffer_one` when one pending refresh is all that is ever needed.
+
+A run can also give up on waiting: `start_deadline=300` on the flow, or on a schedule, skips a run that has not started five minutes after it was due (or, for a run started by hand, after it was created) with reason `missed_start_deadline`. A schedule's deadline wins over the flow's.
 
 A run that finds no slot is still created for its tick, so every scheduled time appears in history. Under `skip` and `cancel_new` it ends at once with the message "previous run still active" (and a `run.skipped` event for `skip`); under `enqueue` it stays Scheduled, turns Late once its time passes, and starts in scheduled-time order as soon as a run of the flow ends. The reference for this behaviour is the overlap soak, `just soak` in [Contributing](../contributing.md), which runs fifteen such flows for an hour and checks that caps hold, controls never skip, and queues drain in order.
 

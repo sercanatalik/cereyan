@@ -9,6 +9,19 @@ from typing import Any
 CATCHUP_POLICIES = ("skip", "latest", "all")
 
 
+def _policy_json(catchup_window: int | None, jitter: int, start_deadline: int | None) -> dict[str, Any]:
+    """The catch-up window, jitter, and start deadline as the server stores them; negatives are refused."""
+    out: dict[str, Any] = {}
+    for name, value in (("catchup_window", catchup_window), ("jitter", jitter), ("start_deadline", start_deadline)):
+        if value is None:
+            continue
+        seconds = int(value)
+        if seconds < 0:
+            raise ValueError(f"{name} must be zero or more seconds")
+        out[name] = seconds
+    return out
+
+
 def _check_catchup(value: str) -> str:
     if value not in CATCHUP_POLICIES:
         raise ValueError(f"catchup must be one of {CATCHUP_POLICIES}, got {value!r}")
@@ -24,6 +37,9 @@ class Cron:
     day_or: bool = True
     catchup: str = "skip"
     catchup_max: int = 100
+    catchup_window: int | None = None
+    jitter: int = 0
+    start_deadline: int | None = None
     key: str | None = None
 
     def to_json(self) -> dict[str, Any]:
@@ -35,6 +51,7 @@ class Cron:
             "day_or": self.day_or,
             "catchup": _check_catchup(self.catchup),
             "catchup_max": int(self.catchup_max),
+            **_policy_json(self.catchup_window, self.jitter, self.start_deadline),
             "key": self.key,
         }
 
@@ -52,6 +69,9 @@ class Interval:
     timezone: str | None = None
     catchup: str = "skip"
     catchup_max: int = 100
+    catchup_window: int | None = None
+    jitter: int = 0
+    start_deadline: int | None = None
     key: str | None = None
 
     def to_json(self) -> dict[str, Any]:
@@ -70,6 +90,7 @@ class Interval:
             "timezone": self.timezone,
             "catchup": _check_catchup(self.catchup),
             "catchup_max": int(self.catchup_max),
+            **_policy_json(self.catchup_window, self.jitter, self.start_deadline),
             "key": self.key,
         }
 
@@ -82,6 +103,9 @@ class RRule:
     timezone: str | None = None
     catchup: str = "skip"
     catchup_max: int = 100
+    catchup_window: int | None = None
+    jitter: int = 0
+    start_deadline: int | None = None
     key: str | None = None
 
     def to_json(self) -> dict[str, Any]:
@@ -92,6 +116,7 @@ class RRule:
             "timezone": self.timezone,
             "catchup": _check_catchup(self.catchup),
             "catchup_max": int(self.catchup_max),
+            **_policy_json(self.catchup_window, self.jitter, self.start_deadline),
             "key": self.key,
         }
 

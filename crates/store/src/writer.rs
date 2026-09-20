@@ -59,6 +59,9 @@ pub struct ScheduleWrite {
     pub spec: String,
     pub catchup: String,
     pub catchup_max: i64,
+    pub catchup_window: Option<i64>,
+    pub jitter: i64,
+    pub start_deadline: Option<i64>,
     pub active: bool,
     pub source: String,
     pub code_key: Option<String>,
@@ -70,6 +73,9 @@ pub struct SchedulePatch {
     pub spec: Option<String>,
     pub catchup: Option<String>,
     pub catchup_max: Option<i64>,
+    pub catchup_window: Option<Option<i64>>,
+    pub jitter: Option<i64>,
+    pub start_deadline: Option<Option<i64>>,
     pub active: Option<bool>,
     pub paused_reason: Option<Option<String>>,
     pub paused_until: Option<Option<i64>>,
@@ -1694,15 +1700,15 @@ fn upsert_schedule(conn: &Connection, sw: &ScheduleWrite) -> Result<i64> {
     let now = now_micros();
     if let Some(id) = sw.id {
         conn.execute(
-            "UPDATE schedule SET spec = ?1, catchup = ?2, catchup_max = ?3, active = ?4, source = ?5, code_key = ?6, persist = ?7, updated_at = ?8 WHERE id = ?9",
-            params![sw.spec, sw.catchup, sw.catchup_max, sw.active as i64, sw.source, sw.code_key, sw.persist as i64, now, id],
+            "UPDATE schedule SET spec = ?1, catchup = ?2, catchup_max = ?3, active = ?4, source = ?5, code_key = ?6, persist = ?7, updated_at = ?8, catchup_window = ?10, jitter = ?11, start_deadline = ?12 WHERE id = ?9",
+            params![sw.spec, sw.catchup, sw.catchup_max, sw.active as i64, sw.source, sw.code_key, sw.persist as i64, now, id, sw.catchup_window, sw.jitter, sw.start_deadline],
         )?;
         return Ok(id);
     }
     let ext = new_id();
     conn.execute(
-        "INSERT INTO schedule (external_id, flow_id, spec, catchup, catchup_max, active, source, code_key, persist, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+        "INSERT INTO schedule (external_id, flow_id, spec, catchup, catchup_max, active, source, code_key, persist, created_at, updated_at, catchup_window, jitter, start_deadline)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?11, ?12, ?13)",
         params![
             ext.as_bytes().as_slice(),
             sw.flow_id,
@@ -1713,7 +1719,10 @@ fn upsert_schedule(conn: &Connection, sw: &ScheduleWrite) -> Result<i64> {
             sw.source,
             sw.code_key,
             sw.persist as i64,
-            now
+            now,
+            sw.catchup_window,
+            sw.jitter,
+            sw.start_deadline
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -1760,6 +1769,26 @@ fn patch_schedule(conn: &Connection, id: i64, p: &SchedulePatch) -> Result<bool>
             &mut sets,
             &mut args,
         );
+    }
+    if let Some(v) = p.jitter {
+        push(
+            "jitter",
+            rusqlite::types::Value::Integer(v),
+            &mut sets,
+            &mut args,
+        );
+    }
+    for (col, v) in [
+        ("catchup_window", &p.catchup_window),
+        ("start_deadline", &p.start_deadline),
+    ] {
+        if let Some(v) = v {
+            let val = match v {
+                Some(n) => rusqlite::types::Value::Integer(*n),
+                None => rusqlite::types::Value::Null,
+            };
+            push(col, val, &mut sets, &mut args);
+        }
     }
     if let Some(v) = &p.paused_reason {
         let val = match v {

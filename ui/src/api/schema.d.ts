@@ -1364,6 +1364,12 @@ export interface components {
             schedules: components["schemas"]["ScheduleDecl"][];
             /**
              * Format: double
+             * @description Seconds a run may wait to start before it is skipped; a schedule's own value wins.
+             * @default null
+             */
+            start_deadline: number | null;
+            /**
+             * Format: double
              * @default null
              */
             timeout_seconds: number | null;
@@ -1792,13 +1798,34 @@ export interface components {
             catchup?: null | components["schemas"]["CatchupPolicy"];
             /** Format: int64 */
             catchup_max?: number | null;
+            /**
+             * Format: int64
+             * @description Seconds; missed fires older than this are not caught up. 0 or absent is off.
+             */
+            catchup_window?: number | null;
+            /**
+             * Format: int64
+             * @description Seconds; each run is due up to this long after its fire time.
+             */
+            jitter?: number | null;
             persist?: boolean | null;
+            /**
+             * Format: int64
+             * @description Seconds; a run not started this long after it was due is skipped. 0 or absent is off.
+             */
+            start_deadline?: number | null;
         };
         ScheduleDecl: components["schemas"]["Schedule"] & {
             catchup?: components["schemas"]["CatchupPolicy"];
             /** Format: int64 */
             catchup_max?: number;
+            /** Format: int64 */
+            catchup_window?: number | null;
+            /** Format: int64 */
+            jitter?: number;
             key?: string | null;
+            /** Format: int64 */
+            start_deadline?: number | null;
         };
         SchedulePatchBody: {
             /** Format: int64 */
@@ -1806,12 +1833,18 @@ export interface components {
             catchup?: null | components["schemas"]["CatchupPolicy"];
             /** Format: int64 */
             catchup_max?: number | null;
+            /** Format: int64 */
+            catchup_window?: number | null;
             cron?: string | null;
             day_or?: boolean | null;
             /** Format: double */
             interval?: number | null;
+            /** Format: int64 */
+            jitter?: number | null;
             persist?: boolean | null;
             rrule?: string | null;
+            /** Format: int64 */
+            start_deadline?: number | null;
             timezone?: string | null;
         };
         /**
@@ -1824,6 +1857,11 @@ export interface components {
             catchup: components["schemas"]["CatchupPolicy"];
             /** Format: int64 */
             catchup_max: number;
+            /**
+             * Format: int64
+             * @description Seconds: missed fires older than this are not caught up. None is off.
+             */
+            catchup_window?: number | null;
             code_key?: string | null;
             created_at: components["schemas"]["i64"];
             external_id: components["schemas"]["Id"];
@@ -1831,6 +1869,11 @@ export interface components {
             flow_id: number;
             /** Format: int64 */
             id: number;
+            /**
+             * Format: int64
+             * @description Seconds: each run becomes due up to this long after its fire time.
+             */
+            jitter?: number;
             next_fire?: null | components["schemas"]["i64"];
             paused_reason?: string | null;
             paused_until?: null | components["schemas"]["i64"];
@@ -1847,6 +1890,11 @@ export interface components {
              *     singles out `code` alone; every other value is left as it is.
              */
             source: string;
+            /**
+             * Format: int64
+             * @description Seconds: a run that has not started this long after it was due is skipped.
+             */
+            start_deadline?: number | null;
             updated_at: components["schemas"]["i64"];
         };
         ServerInfo: {

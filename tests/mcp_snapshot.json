@@ -954,6 +954,10 @@
             "default": 100,
             "type": "integer"
           },
+          "catchup_window": {
+            "description": "Seconds; missed fires older than this are not caught up (0 is off)",
+            "type": "integer"
+          },
           "cron": {
             "description": "Five-field cron expression, for kind cron",
             "type": "string"
@@ -970,6 +974,10 @@
             "description": "Seconds between fires, for kind interval",
             "type": "number"
           },
+          "jitter": {
+            "description": "Seconds; each run is due up to this long after its fire time, deterministically (0 is off)",
+            "type": "integer"
+          },
           "kind": {
             "description": "Which kind of schedule",
             "enum": [
@@ -985,6 +993,10 @@
           "rrule": {
             "description": "RFC 5545 RRULE, for kind rrule",
             "type": "string"
+          },
+          "start_deadline": {
+            "description": "Seconds; a run not started this long after it was due is skipped (0 is off)",
+            "type": "integer"
           },
           "timezone": {
             "description": "IANA name such as Europe/Istanbul; UTC when unset",
@@ -1022,6 +1034,10 @@
           "catchup_max": {
             "type": "integer"
           },
+          "catchup_window": {
+            "description": "Seconds; 0 turns it off",
+            "type": "integer"
+          },
           "cron": {
             "type": "string"
           },
@@ -1031,10 +1047,18 @@
           "interval": {
             "type": "number"
           },
+          "jitter": {
+            "description": "Seconds; 0 turns it off",
+            "type": "integer"
+          },
           "rrule": {
             "type": "string"
           },
           "schedule_id": {
+            "type": "integer"
+          },
+          "start_deadline": {
+            "description": "Seconds; 0 turns it off",
             "type": "integer"
           },
           "timezone": {

@@ -43,6 +43,9 @@ test("cron preview reads a human description", () => {
       day_or: true,
       catchup: "skip",
       catchup_max: 100,
+      catchup_window: null,
+      jitter: 0,
+      start_deadline: null,
     }),
   ).toMatchObject({ kind: "cron", timezone: null });
 });

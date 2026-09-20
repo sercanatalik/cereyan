@@ -1117,6 +1117,15 @@
             },
             "type": "array"
           },
+          "start_deadline": {
+            "default": null,
+            "description": "Seconds a run may wait to start before it is skipped; a schedule's own value wins.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "timeout_seconds": {
             "default": null,
             "format": "double",
@@ -2530,9 +2539,33 @@
                   "null"
                 ]
               },
+              "catchup_window": {
+                "description": "Seconds; missed fires older than this are not caught up. 0 or absent is off.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "jitter": {
+                "description": "Seconds; each run is due up to this long after its fire time.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "persist": {
                 "type": [
                   "boolean",
+                  "null"
+                ]
+              },
+              "start_deadline": {
+                "description": "Seconds; a run not started this long after it was due is skipped. 0 or absent is off.",
+                "format": "int64",
+                "type": [
+                  "integer",
                   "null"
                 ]
               }
@@ -2555,9 +2588,27 @@
                 "format": "int64",
                 "type": "integer"
               },
+              "catchup_window": {
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "jitter": {
+                "format": "int64",
+                "type": "integer"
+              },
               "key": {
                 "type": [
                   "string",
+                  "null"
+                ]
+              },
+              "start_deadline": {
+                "format": "int64",
+                "type": [
+                  "integer",
                   "null"
                 ]
               }
@@ -2592,6 +2643,13 @@
               "null"
             ]
           },
+          "catchup_window": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "cron": {
             "type": [
               "string",
@@ -2611,6 +2669,13 @@
               "null"
             ]
           },
+          "jitter": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "persist": {
             "type": [
               "boolean",
@@ -2620,6 +2685,13 @@
           "rrule": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "start_deadline": {
+            "format": "int64",
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -2645,6 +2717,14 @@
             "format": "int64",
             "type": "integer"
           },
+          "catchup_window": {
+            "description": "Seconds: missed fires older than this are not caught up. None is off.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "code_key": {
             "type": [
               "string",
@@ -2662,6 +2742,11 @@
             "type": "integer"
           },
           "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "jitter": {
+            "description": "Seconds: each run becomes due up to this long after its fire time.",
             "format": "int64",
             "type": "integer"
           },
@@ -2706,6 +2791,14 @@
           "source": {
             "description": "`code` for schedules declared on the flow, `ui` for ones created in the\ninterface, `mcp` for ones created by an agent. Startup reconciliation\nsingles out `code` alone; every other value is left as it is.",
             "type": "string"
+          },
+          "start_deadline": {
+            "description": "Seconds: a run that has not started this long after it was due is skipped.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "updated_at": {
             "$ref": "#/components/schemas/i64"

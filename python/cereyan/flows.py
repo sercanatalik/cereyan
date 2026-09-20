@@ -82,6 +82,7 @@ class Flow:
         on_crashed: Iterable[Callable] = (),
         on_cancellation: Iterable[Callable] = (),
         mcp_tool: bool = False,
+        start_deadline: float | None = None,
     ) -> None:
         if not callable(fn):
             raise TypeError("@flow must decorate a callable")
@@ -105,9 +106,12 @@ class Flow:
         if max_concurrent is not None and int(max_concurrent) < 1:
             raise ValueError("max_concurrent must be at least 1")
         self.max_concurrent = int(max_concurrent) if max_concurrent is not None else None
-        if on_overlap not in ("enqueue", "skip", "cancel_new"):
-            raise ValueError("on_overlap must be 'enqueue', 'skip', or 'cancel_new'")
+        if on_overlap not in ("enqueue", "skip", "cancel_new", "cancel_old", "buffer_one"):
+            raise ValueError("on_overlap must be 'enqueue', 'skip', 'cancel_new', 'cancel_old', or 'buffer_one'")
         self.on_overlap = on_overlap
+        if start_deadline is not None and float(start_deadline) < 0:
+            raise ValueError("start_deadline must be zero or more seconds")
+        self.start_deadline = float(start_deadline) if start_deadline is not None else None
         self.resources = dict(resources or {})
         self.after = _parse_after(after, batch_key)
         if disable_after is not None:
@@ -188,6 +192,7 @@ class Flow:
             "has_bulk_complete": self.bulk_complete is not None,
             "has_crash_hooks": bool(self.on_crashed),
             "mcp_tool": self.mcp_tool,
+            "start_deadline": self.start_deadline,
         }
 
     # -- parameters -------------------------------------------------------
@@ -287,7 +292,11 @@ def flow(
             implemented as a resource named after the flow; unlimited by default.
         on_overlap (str): What a new run does when ``max_concurrent`` is reached:
             ``"enqueue"`` (wait as AwaitingResource, the default), ``"skip"`` (end
-            Skipped), or ``"cancel_new"`` (end Cancelled).
+            Skipped), ``"cancel_new"`` (end Cancelled), ``"cancel_old"`` (cancel the
+            flow's other runs and take their slot), or ``"buffer_one"`` (wait, unless a
+            run is already waiting, in which case end Skipped).
+        start_deadline (float | None): Seconds a run may wait to start before it is
+            skipped with reason ``missed_start_deadline``; a schedule's own value wins.
         resources (dict[str, float] | None): Named resources and the amount each run holds, for example
             ``{"db": 1}``; a run waits as AwaitingResource until they are free.
         after (str | tuple | list[str] | None): Upstream dependency: a flow name, ``(name, {param: template})`` to map
@@ -309,6 +318,7 @@ def flow(
         on_cancellation (Iterable[Callable]): Hooks called after a run is cancelled.
         mcp_tool (bool): Publish the flow as an MCP tool named ``flow__<project>__<name>`` whose
             arguments are its parameters, so an agent can start it directly.
+        start_deadline (float | None): Seconds a run may wait to start before it is skipped.
 
     Returns:
         Flow: The flow wrapping ``fn``; call it like the original function.

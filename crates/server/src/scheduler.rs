@@ -139,6 +139,9 @@ pub fn sync_code_schedules(
                         spec,
                         catchup: decl.catchup.as_str().into(),
                         catchup_max: decl.catchup_max,
+                        catchup_window: decl.catchup_window,
+                        jitter: decl.jitter,
+                        start_deadline: decl.start_deadline,
                         active: row.active,
                         source: "code".into(),
                         code_key: Some(key),
@@ -155,6 +158,9 @@ pub fn sync_code_schedules(
                         spec,
                         catchup: decl.catchup.as_str().into(),
                         catchup_max: decl.catchup_max,
+                        catchup_window: decl.catchup_window,
+                        jitter: decl.jitter,
+                        start_deadline: decl.start_deadline,
                         active: true,
                         source: "code".into(),
                         code_key: Some(key),
@@ -295,7 +301,22 @@ fn catch_up(state: &Arc<AppState>, row: &ScheduleRow, last: i64, now: i64) {
             !skips.contains(&at) && !taken.contains(&at)
         })
         .collect();
-    if fires.is_empty() {
+    // A fire older than the window is not worth running any more.
+    let mut expired = 0usize;
+    let fires: Vec<_> = match row.catchup_window {
+        Some(window) if window > 0 => {
+            let cutoff = now - window * 1_000_000;
+            let before = fires.len();
+            let kept: Vec<_> = fires
+                .into_iter()
+                .filter(|f| to_micros(*f) >= cutoff)
+                .collect();
+            expired = before - kept.len();
+            kept
+        }
+        _ => fires,
+    };
+    if fires.is_empty() && expired == 0 {
         return;
     }
     let (chosen, dropped): (Vec<_>, usize) = match row.catchup {
@@ -321,8 +342,8 @@ fn catch_up(state: &Arc<AppState>, row: &ScheduleRow, last: i64, now: i64) {
         None,
         Some(row.flow_id),
         json!({
-            "schedule_id": row.id, "policy": row.catchup.as_str(), "missed": fires.len(),
-            "created": chosen.len(), "dropped": dropped,
+            "schedule_id": row.id, "policy": row.catchup.as_str(), "missed": fires.len() + expired,
+            "created": chosen.len(), "dropped": dropped, "expired": expired,
         }),
     );
 }
@@ -444,9 +465,21 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
             break;
         }
     }
+    let flow_deadline = FlowOptions::from_map(&flow.options).start_deadline;
     for run in &existing {
-        if let Some(due) = run.scheduled_time {
+        if let Some(fire) = run.scheduled_time {
+            let due = fire + jitter_offset(row.id, fire, row.jitter);
             arm_run(state, run.id, due, is_marked(run));
+            let deadline = row
+                .start_deadline
+                .or_else(|| flow_deadline.map(|d| d.round() as i64));
+            if let Some(seconds) = deadline.filter(|d| *d > 0) {
+                if !is_marked(run) {
+                    state
+                        .timer
+                        .push(due + seconds * 1_000_000, TimerEvent::StartDeadline(run.id));
+                }
+            }
         }
     }
     // Wake again when the earliest future run fires so the look-ahead is kept.
@@ -463,6 +496,25 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
     updated.next_fire = next_fire;
     updated.skipped = skips.len() as i64;
     state.scheduler.put(updated);
+}
+
+/// A deterministic offset in `[0, jitter)` seconds, as microseconds, from the
+/// schedule id and the fire time (FNV-1a), so a run keeps its due time across
+/// restarts. Zero jitter is zero offset.
+pub fn jitter_offset(schedule_id: i64, fire: i64, jitter_secs: i64) -> i64 {
+    if jitter_secs <= 0 {
+        return 0;
+    }
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in schedule_id
+        .to_le_bytes()
+        .into_iter()
+        .chain(fire.to_le_bytes())
+    {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    (hash % (jitter_secs as u64 * 1_000_000)) as i64
 }
 
 fn arm_run(state: &Arc<AppState>, run_id: i64, due: i64, skipped: bool) {
@@ -844,6 +896,35 @@ fn handle(state: &Arc<AppState>, event: TimerEvent) {
                 }
             }
         }
+        TimerEvent::StartDeadline(run_id) => {
+            let Some(run) = state.store.get_run(run_id).ok().flatten() else {
+                return;
+            };
+            let unstarted = matches!(
+                run.state.state_type,
+                StateType::Scheduled | StateType::Pending
+            ) && run.engine_pid.is_none()
+                && !is_marked(&run);
+            if !unstarted {
+                return;
+            }
+            state.supervisor.dequeue(run_id);
+            let mut skipped = State::named(cereyan_core::StateName::Skipped);
+            skipped.message = Some("missed start deadline".into());
+            skipped
+                .details
+                .insert("reason".into(), json!("missed_start_deadline"));
+            if let Ok(crate::state::TransitionResult::Accepted(_)) =
+                state.transition_run(run_id, skipped, false)
+            {
+                let _ = state.record_engine_event(
+                    EventName::RunSkipped,
+                    Some(run_id),
+                    Some(run.flow_id),
+                    json!({"reason": "missed_start_deadline", "scheduled_time": run.scheduled_time}),
+                );
+            }
+        }
         TimerEvent::CrashRerun(run_id) => crate::dispatch::crash_rerun(state, run_id),
         TimerEvent::FlowTimeout(run_id) => crate::dispatch::flow_timeout(state, run_id),
         TimerEvent::ResumeFlow(flow_id) => {
@@ -867,5 +948,27 @@ fn handle(state: &Arc<AppState>, event: TimerEvent) {
         }
         TimerEvent::Expectation(id) => crate::rules::expectation_due(state, id),
         TimerEvent::RuleClock(rule_id) => crate::rules::clock_tick(state, rule_id),
+    }
+}
+
+#[cfg(test)]
+mod jitter_tests {
+    use super::jitter_offset;
+
+    #[test]
+    fn offset_is_deterministic_and_bounded() {
+        assert_eq!(jitter_offset(7, 1_000_000, 0), 0);
+        let a = jitter_offset(7, 1_000_000, 60);
+        let b = jitter_offset(7, 1_000_000, 60);
+        assert_eq!(a, b);
+        assert!((0..60_000_000).contains(&a));
+        assert_ne!(
+            jitter_offset(8, 1_000_000, 60),
+            jitter_offset(7, 2_000_000, 60)
+        );
+        let spread: std::collections::HashSet<i64> = (0..50)
+            .map(|i| jitter_offset(1, i * 300_000_000, 60) / 1_000_000)
+            .collect();
+        assert!(spread.len() > 10, "offsets should spread across the window");
     }
 }

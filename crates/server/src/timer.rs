@@ -17,6 +17,8 @@ pub enum TimerEvent {
     Due(i64),
     /// Check whether a run started; otherwise mark it Late.
     LateCheck(i64),
+    /// A run that has still not started is skipped: its start deadline passed.
+    StartDeadline(i64),
     /// Create the follow-up run of a crash chain.
     CrashRerun(i64),
     /// A Running flow exceeded its timeout.
@@ -112,7 +114,7 @@ impl Timer {
         let kept: Vec<_> = inner
             .heap
             .drain()
-            .filter(|Reverse((_, _, e))| !matches!(e, TimerEvent::Due(r) | TimerEvent::LateCheck(r) | TimerEvent::FlowTimeout(r) if *r == run_id))
+            .filter(|Reverse((_, _, e))| !matches!(e, TimerEvent::Due(r) | TimerEvent::LateCheck(r) | TimerEvent::StartDeadline(r) | TimerEvent::FlowTimeout(r) if *r == run_id))
             .collect();
         inner.heap = kept.into_iter().collect();
     }

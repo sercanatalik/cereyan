@@ -23,10 +23,52 @@ pub struct ScheduleBody {
     pub catchup: Option<CatchupPolicy>,
     #[serde(default)]
     pub catchup_max: Option<i64>,
+    /// Seconds; missed fires older than this are not caught up. 0 or absent is off.
+    #[serde(default)]
+    pub catchup_window: Option<i64>,
+    /// Seconds; each run is due up to this long after its fire time.
+    #[serde(default)]
+    pub jitter: Option<i64>,
+    /// Seconds; a run not started this long after it was due is skipped. 0 or absent is off.
+    #[serde(default)]
+    pub start_deadline: Option<i64>,
     #[serde(default)]
     pub active: Option<bool>,
     #[serde(default)]
     pub persist: Option<bool>,
+}
+
+/// Reject a negative policy value, and a jitter that reaches an interval's period.
+fn check_policy(
+    schedule: &Schedule,
+    window: Option<i64>,
+    jitter: Option<i64>,
+    deadline: Option<i64>,
+) -> ApiResult<()> {
+    for (name, value) in [
+        ("catchup_window", window),
+        ("jitter", jitter),
+        ("start_deadline", deadline),
+    ] {
+        if value.is_some_and(|v| v < 0) {
+            return Err(ApiError::Unprocessable(format!(
+                "{name} must be zero or more"
+            )));
+        }
+    }
+    if let (Some(j), Schedule::Interval { interval, .. }) = (jitter, schedule) {
+        if j > 0 && (j as f64) >= *interval {
+            return Err(ApiError::Unprocessable(format!(
+                "jitter ({j} s) must be shorter than the interval ({interval} s)"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Zero means off for the optional policies.
+fn off_when_zero(value: Option<i64>) -> Option<i64> {
+    value.filter(|v| *v > 0)
 }
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -47,6 +89,12 @@ pub struct SchedulePatchBody {
     pub catchup: Option<CatchupPolicy>,
     #[serde(default)]
     pub catchup_max: Option<i64>,
+    #[serde(default)]
+    pub catchup_window: Option<i64>,
+    #[serde(default)]
+    pub jitter: Option<i64>,
+    #[serde(default)]
+    pub start_deadline: Option<i64>,
     #[serde(default)]
     pub persist: Option<bool>,
 }
@@ -101,6 +149,12 @@ pub async fn create_schedule_inner(
     body.schedule
         .validate()
         .map_err(|e| ApiError::Unprocessable(e.to_string()))?;
+    check_policy(
+        &body.schedule,
+        body.catchup_window,
+        body.jitter,
+        body.start_deadline,
+    )?;
     let pinned = body.schedule.clone().with_anchor_if_missing(now_micros());
     let st = state.clone();
     let source = source.to_string();
@@ -111,6 +165,9 @@ pub async fn create_schedule_inner(
             spec: serde_json::to_string(&pinned).unwrap_or_default(),
             catchup: body.catchup.unwrap_or_default().as_str().into(),
             catchup_max: body.catchup_max.unwrap_or(100),
+            catchup_window: off_when_zero(body.catchup_window),
+            jitter: body.jitter.unwrap_or(0),
+            start_deadline: off_when_zero(body.start_deadline),
             active: body.active.unwrap_or(true),
             source,
             code_key: None,
@@ -204,6 +261,12 @@ pub async fn patch_schedule_inner(
     schedule
         .validate()
         .map_err(|e| ApiError::Unprocessable(e.to_string()))?;
+    check_policy(
+        &schedule,
+        body.catchup_window,
+        Some(body.jitter.unwrap_or(row.jitter)),
+        body.start_deadline,
+    )?;
     let schedule = schedule.with_anchor_if_missing(now_micros());
     let st = state.clone();
     tokio::task::spawn_blocking(move || {
@@ -213,6 +276,9 @@ pub async fn patch_schedule_inner(
                 spec: Some(serde_json::to_string(&schedule).unwrap_or_default()),
                 catchup: body.catchup.map(|c| c.as_str().to_string()),
                 catchup_max: body.catchup_max,
+                catchup_window: body.catchup_window.map(|v| off_when_zero(Some(v))),
+                jitter: body.jitter,
+                start_deadline: body.start_deadline.map(|v| off_when_zero(Some(v))),
                 persist: body.persist,
                 ..Default::default()
             },

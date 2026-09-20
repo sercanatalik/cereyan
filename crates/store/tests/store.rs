@@ -864,6 +864,9 @@ fn flows_written_before_the_group_column_read_as_their_project() {
         let conn = rusqlite::Connection::open(dir.path().join("db.sqlite")).unwrap();
         conn.execute_batch(
             "DROP TABLE schedule_skip; ALTER TABLE flow DROP COLUMN flow_group; \
+             ALTER TABLE schedule DROP COLUMN catchup_window; \
+             ALTER TABLE schedule DROP COLUMN jitter; \
+             ALTER TABLE schedule DROP COLUMN start_deadline; \
              PRAGMA user_version = 6;",
         )
         .unwrap();

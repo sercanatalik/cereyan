@@ -1190,6 +1190,7 @@ Flow-level options declared in Python and stored as JSON on the flow row.
 | `resources` | object | no |  |
 | `retries` | integer (int64) | no |  |
 | `schedules` | [`ScheduleDecl`](#scheduledecl)[] | no |  |
+| `start_deadline` | number or null (double) | no | Seconds a run may wait to start before it is skipped; a schedule's own value wins. |
 | `timeout_seconds` | number or null (double) | no |  |
 
 ### `FlowSummary`
@@ -1547,11 +1548,14 @@ Type: any.
 | `anchor` | integer or null (int64) | no |  |
 | `catchup` | null or [`CatchupPolicy`](#catchuppolicy) | no |  |
 | `catchup_max` | integer or null (int64) | no |  |
+| `catchup_window` | integer or null (int64) | no |  |
 | `cron` | string or null | no |  |
 | `day_or` | boolean or null | no |  |
 | `interval` | number or null (double) | no |  |
+| `jitter` | integer or null (int64) | no |  |
 | `persist` | boolean or null | no |  |
 | `rrule` | string or null | no |  |
+| `start_deadline` | integer or null (int64) | no |  |
 | `timezone` | string or null | no |  |
 
 ### `ScheduleRow`
@@ -1565,11 +1569,13 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `active` | boolean | yes |  |
 | `catchup` | [`CatchupPolicy`](#catchuppolicy) | yes |  |
 | `catchup_max` | integer (int64) | yes |  |
+| `catchup_window` | integer or null (int64) | no | Seconds: missed fires older than this are not caught up. None is off. |
 | `code_key` | string or null | no |  |
 | `created_at` | [`i64`](#i64) | yes |  |
 | `external_id` | [`Id`](#id) | yes |  |
 | `flow_id` | integer (int64) | yes |  |
 | `id` | integer (int64) | yes |  |
+| `jitter` | integer (int64) | no | Seconds: each run becomes due up to this long after its fire time. |
 | `next_fire` | null or [`i64`](#i64) | no |  |
 | `paused_reason` | string or null | no |  |
 | `paused_until` | null or [`i64`](#i64) | no |  |
@@ -1577,6 +1583,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `schedule` | [`Schedule`](#schedule) | yes |  |
 | `skipped` | integer (int64) | no | Future fires skipped by a person, counted by the scheduler (not stored). |
 | `source` | string | yes | `code` for schedules declared on the flow, `ui` for ones created in the interface, `mcp` for ones created by an agent. Startup reconciliation singles out `code` alone; every other value is left as it is. |
+| `start_deadline` | integer or null (int64) | no | Seconds: a run that has not started this long after it was due is skipped. |
 | `updated_at` | [`i64`](#i64) | yes |  |
 
 ### `ServerInfo`

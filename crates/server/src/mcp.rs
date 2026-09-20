@@ -494,7 +494,10 @@ pub fn tool_list() -> Vec<Value> {
                 "timezone": {"type": "string", "description": "IANA name such as Europe/Istanbul; UTC when unset"},
                 "day_or": {"type": "boolean", "description": "For cron, OR day-of-month with day-of-week (default true)"},
                 "catchup": {"type": "string", "enum": ["skip", "latest", "all"], "default": "skip"},
-                "catchup_max": {"type": "integer", "default": 100}
+                "catchup_max": {"type": "integer", "default": 100},
+                "catchup_window": {"type": "integer", "description": "Seconds; missed fires older than this are not caught up (0 is off)"},
+                "jitter": {"type": "integer", "description": "Seconds; each run is due up to this long after its fire time, deterministically (0 is off)"},
+                "start_deadline": {"type": "integer", "description": "Seconds; a run not started this long after it was due is skipped (0 is off)"}
             }), &["flow", "kind"]),
         write_tool("edit_schedule", "Retime an existing schedule. Editing one that was declared in the flow's code lasts until the server restarts, when the declaration in the Python source applies again, and the result says so. Returns the schedule and the next few times it will fire.",
             json!({
@@ -502,7 +505,10 @@ pub fn tool_list() -> Vec<Value> {
                 "cron": {"type": "string"}, "interval": {"type": "number"}, "anchor": {"type": "integer"},
                 "rrule": {"type": "string"}, "timezone": {"type": "string"}, "day_or": {"type": "boolean"},
                 "catchup": {"type": "string", "enum": ["skip", "latest", "all"]},
-                "catchup_max": {"type": "integer"}
+                "catchup_max": {"type": "integer"},
+                "catchup_window": {"type": "integer", "description": "Seconds; 0 turns it off"},
+                "jitter": {"type": "integer", "description": "Seconds; 0 turns it off"},
+                "start_deadline": {"type": "integer", "description": "Seconds; 0 turns it off"}
             }), &["schedule_id"]),
         destructive_tool("delete_schedule", "Remove a schedule that was created in the interface or by an agent. A schedule declared in the flow's code cannot be removed this way, because the next restart recreates it from the declaration; pause_schedule stops that one durably.",
             json!({"schedule_id": {"type": "integer"}}), &["schedule_id"]),
@@ -574,6 +580,9 @@ fn schedule_body_json(args: &Map<String, Value>) -> Value {
         "day_or",
         "catchup",
         "catchup_max",
+        "catchup_window",
+        "jitter",
+        "start_deadline",
     ] {
         if let Some(v) = args.get(key) {
             body.insert(key.to_string(), v.clone());

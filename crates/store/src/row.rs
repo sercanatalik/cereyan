@@ -141,6 +141,7 @@ pub fn task_run_from_row(row: &Row<'_>) -> rusqlite::Result<TaskRun> {
 pub const SCHEDULE_COLUMNS: &str =
     "id, external_id, flow_id, spec, catchup, catchup_max, active, paused_reason, \
     paused_until, source, code_key, persist, created_at, updated_at, \
+    catchup_window, jitter, start_deadline, \
     (SELECT COUNT(*) FROM schedule_skip k WHERE k.schedule_id = schedule.id \
      AND k.fire_time > CAST(strftime('%s', 'now') AS INTEGER) * 1000000) AS skipped";
 
@@ -167,8 +168,11 @@ pub fn schedule_from_row(row: &Row<'_>) -> rusqlite::Result<ScheduleRow> {
         persist: row.get::<_, i64>(11)? != 0,
         created_at: row.get(12)?,
         updated_at: row.get(13)?,
+        catchup_window: row.get(14)?,
+        jitter: row.get(15)?,
+        start_deadline: row.get(16)?,
         next_fire: None,
-        skipped: row.get(14)?,
+        skipped: row.get(17)?,
     })
 }
 

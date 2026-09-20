@@ -83,6 +83,29 @@ pub fn enqueue_run(state: &Arc<AppState>, run: &Run, flow: &Flow, not_before: Op
                         let _ = state.transition_run(run.id, s, false);
                         return;
                     }
+                    "cancel_old" => supersede(state, flow, run),
+                    "buffer_one" => {
+                        let waiting = state.index.active_runs().into_iter().any(|r| {
+                            r.flow_id == flow.id
+                                && r.id != run.id
+                                && r.state.state_type != StateType::Running
+                                && r.engine_pid.is_none()
+                                && !r.state.is_terminal()
+                        });
+                        if waiting {
+                            let mut s = State::named(StateName::Skipped);
+                            s.message = Some("a run is already queued".into());
+                            s.details.insert("reason".into(), json!("buffered"));
+                            let _ = state.transition_run(run.id, s, false);
+                            let _ = state.record_engine_event(
+                                EventName::RunSkipped,
+                                Some(run.id),
+                                Some(flow.id),
+                                json!({"reason": "buffered"}),
+                            );
+                            return;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -93,6 +116,16 @@ pub fn enqueue_run(state: &Arc<AppState>, run: &Run, flow: &Flow, not_before: Op
             state
                 .supervisor
                 .set_total(&backfill_resource(b), backfill.concurrency.max(1) as f64);
+        }
+    }
+    // A run made by hand under a flow deadline: scheduled runs are armed by the
+    // scheduler from their due time instead.
+    if run.schedule_id.is_none() {
+        if let Some(seconds) = options.start_deadline.filter(|d| *d > 0.0) {
+            state.timer.push(
+                run.created_at + (seconds * 1_000_000.0) as i64,
+                crate::timer::TimerEvent::StartDeadline(run.id),
+            );
         }
     }
     let priority = effective_priority(state, flow, run);
@@ -110,6 +143,39 @@ pub fn enqueue_run(state: &Arc<AppState>, run: &Run, flow: &Flow, not_before: Op
         not_before,
     });
     state.supervisor.ensure_capacity(state);
+}
+
+/// `on_overlap="cancel_old"`: every other non-terminal run of the flow makes
+/// way for `new_run`. A queued run is cancelled at once; a running one is asked
+/// to stop exactly as a user cancel would, grace period and kill included.
+fn supersede(state: &Arc<AppState>, flow: &Flow, new_run: &Run) {
+    let message = format!("superseded by run {}", new_run.id);
+    for other in state.index.active_runs() {
+        if other.flow_id != flow.id || other.id == new_run.id || other.state.is_terminal() {
+            continue;
+        }
+        if other.state.state_type == StateType::Running || other.engine_pid.is_some() {
+            let _ = state.transition_run(
+                other.id,
+                State::new(StateType::Cancelling).with_message(&message),
+                false,
+            );
+            state.index.update(other.id, |r| {
+                r.cancel_requested = true;
+                if r.cancelling_since.is_none() {
+                    r.cancelling_since = Some(std::time::Instant::now());
+                }
+            });
+        } else {
+            state.supervisor.dequeue(other.id);
+            state.timer.remove_run_events(other.id);
+            let _ = state.transition_run(
+                other.id,
+                State::new(StateType::Cancelled).with_message(&message),
+                false,
+            );
+        }
+    }
 }
 
 /// Called after every accepted transition with the run's new state.
