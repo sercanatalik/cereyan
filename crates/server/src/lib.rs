@@ -393,10 +393,19 @@ impl Server {
         if let Ok(flows) = state.store.list_flows(None) {
             for flow in flows.iter().filter(|f| state.is_live(f.id)) {
                 let options = cereyan_core::FlowOptions::from_map(&flow.options);
-                if let Err(e) = scheduler::sync_code_schedules(&state, flow, &options.schedules) {
-                    let _ = state
-                        .store
-                        .set_flow_error(flow.id, Some(format!("schedule: {e}")));
+                match scheduler::sync_code_schedules(&state, flow, &options.schedules) {
+                    // Runs materialized under a spec the code no longer
+                    // declares: dropped, so look-ahead starts from now.
+                    Ok(changed) => {
+                        for id in changed {
+                            scheduler::drop_unstarted(&state, id);
+                        }
+                    }
+                    Err(e) => {
+                        let _ = state
+                            .store
+                            .set_flow_error(flow.id, Some(format!("schedule: {e}")));
+                    }
                 }
             }
         }

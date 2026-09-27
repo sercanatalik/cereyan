@@ -218,11 +218,20 @@ impl Scheduler {
 }
 
 /// Bring code-declared schedules of a flow in line with its declarations.
+/// Register a flow's code-declared schedules, returning the ids of those whose
+/// spec changed.
+///
+/// **A changed spec leaves runs materialized under the old one**, and
+/// look-ahead continues from the latest of them: a flow moved from daily to
+/// hourly kept its three nightly runs and gained no hourly one for three days.
+/// The caller drops them ([`drop_unstarted`]) before the scheduler starts, as
+/// an edit through the API does ([`rebuild`]).
 pub fn sync_code_schedules(
     state: &AppState,
     flow: &Flow,
     decls: &[ScheduleDecl],
-) -> Result<(), String> {
+) -> Result<Vec<i64>, String> {
+    let mut changed: Vec<i64> = Vec::new();
     let existing = state
         .store
         .list_schedules(Some(flow.id))
@@ -258,6 +267,10 @@ pub fn sync_code_schedules(
                     .map_err(|e| e.to_string())?,
                     _ => spec,
                 };
+                let stored = serde_json::to_string(&row.schedule).map_err(|e| e.to_string())?;
+                if stored != spec {
+                    changed.push(row.id);
+                }
                 state
                     .store
                     .upsert_schedule(ScheduleWrite {
@@ -307,7 +320,7 @@ pub fn sync_code_schedules(
             let _ = state.store.delete_schedule(row.id);
         }
     }
-    Ok(())
+    Ok(changed)
 }
 
 /// Load every schedule, apply catch-up, materialize, and arm timers.

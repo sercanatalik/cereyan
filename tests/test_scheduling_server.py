@@ -787,3 +787,59 @@ def test_resources_are_shared_across_projects(sched, tmp_path):
     done = sched.wait_run(waiter["id"], timeout=30)
     assert done["start_time"] >= c.get_run(holder["id"])["end_time"]
     assert fl
+
+
+MOVED_PIPELINE = '''
+from cereyan import App, Cron
+
+app = App("moved")
+
+
+@app.flow(schedule=Cron("{cron}", timezone="UTC"))
+def moved():
+    pass
+
+
+@app.flow(schedule=Cron("5 * * * *", timezone="UTC"))
+def steady():
+    pass
+'''
+
+
+def test_a_changed_code_schedule_drops_the_runs_of_the_old_one(isolated_home, tmp_path):
+    # Found downstream: a flow moved from daily at 00:10 to hourly at :20 kept
+    # its three nightly runs after a restart, and look-ahead continues from the
+    # latest future run, so the first hourly run would have come three days on.
+    from cereyan import engine
+
+    engine.close_store()
+    d = tmp_path / "moved"
+    d.mkdir()
+    (d / "pipeline.py").write_text(MOVED_PIPELINE.replace("{cron}", "10 0 * * *"))
+    port = free_port()
+    srv = ServerProcess(str(isolated_home), str(d), port=port)
+    try:
+        flows = {f["name"]: f["id"] for f in srv.client.flows("moved")}
+        before = srv.client.upcoming(flows["moved"])
+        assert len(before) == 3
+        assert all(datetime.fromtimestamp(u["scheduled_time"] / 1e6, timezone.utc).strftime("%H:%M") == "00:10" for u in before)
+        steady_before = [u["id"] for u in srv.client.upcoming(flows["steady"])]
+    finally:
+        srv.stop()
+
+    (d / "pipeline.py").write_text(MOVED_PIPELINE.replace("{cron}", "20 * * * *"))
+    # Same length, same second: without this the cached bytecode of the first
+    # file is imported again, and the server never sees the change.
+    import shutil
+
+    shutil.rmtree(d / "__pycache__", ignore_errors=True)
+    srv = ServerProcess(str(isolated_home), str(d), port=port)
+    try:
+        after = srv.client.upcoming(flows["moved"])
+        fires = [datetime.fromtimestamp(u["scheduled_time"] / 1e6, timezone.utc) for u in after]
+        assert fires and all(f.minute == 20 for f in fires), [f.isoformat() for f in fires]
+        assert fires[0] - datetime.now(timezone.utc) <= timedelta(hours=1)
+        # An unchanged schedule keeps the runs it had.
+        assert [u["id"] for u in srv.client.upcoming(flows["steady"])] == steady_before
+    finally:
+        srv.stop()

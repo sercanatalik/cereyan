@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **A changed code schedule no longer keeps the old one's runs.** When a flow's code changed its schedule and the server restarted, the spec was updated in place but the runs already materialized under the old spec stayed Scheduled, and look-ahead continues from the latest of them. A flow moved from daily at 00:10 to hourly at :20 kept its three nightly runs and got no hourly run for three days. Those runs are now dropped at start, as an edit through the API already dropped them. Catch-up, jitter and deadline changes keep the runs, because they do not move fire times.
+
 ## 2.3.0 (2026-09-20)
 
 Documentation only. The library, the CLI, the server and the UI are unchanged from 2.2.0.
