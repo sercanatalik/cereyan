@@ -47,3 +47,7 @@ harness = false
 [[bench]]
 name = "publish"
 harness = false
+
+[[bench]]
+name = "dispatch"
+harness = false

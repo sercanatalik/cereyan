@@ -47,7 +47,7 @@ cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--en
 |---|---|
 | `--host` `HOST` | bind address (also CEREYAN_HOST or [server] host; default 127.0.0.1). |
 | `--port` `PORT` | TCP port (also CEREYAN_PORT or [server] port; default 4200, 0 picks a free port). |
-| `--max-engines` `MAX_ENGINES` | size of the warm engine pool (also [server] max_engines). |
+| `--max-engines` `MAX_ENGINES` | size of the warm engine pool, the processors on the Queue page (default 1, at most the CPU count; also [server] max_engines). |
 | `--engine-max-runs` `ENGINE_MAX_RUNS` | recycle an engine after this many runs (also [server] engine_max_runs). |
 | `--no-open` | do not open the browser. |
 | `--crash-retries` `CRASH_RETRIES` | default crash retry limit (flow decorators override). |

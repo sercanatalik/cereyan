@@ -425,6 +425,41 @@ impl Store {
         self.with_reader(|conn| Ok(conn.query_row(&sql, [run_id], run_from_row).optional()?))
     }
 
+    /// The runs with these ids, in no particular order; missing ids are left out.
+    pub fn get_runs(&self, run_ids: &[i64]) -> Result<Vec<Run>> {
+        if run_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<String> = run_ids.iter().map(|id| id.to_string()).collect();
+        let sql = format!(
+            "SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id WHERE r.id IN ({})",
+            ids.join(",")
+        );
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map([], run_from_row)?
+                .collect::<rusqlite::Result<Vec<Run>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Scheduled runs due after `after` and at or before `until`, soonest first.
+    pub fn scheduled_between(&self, after: i64, until: i64, limit: usize) -> Result<Vec<Run>> {
+        let sql = format!(
+            "SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id
+             WHERE r.state_type = 'Scheduled' AND r.scheduled_time > ?1 AND r.scheduled_time <= ?2
+             ORDER BY r.scheduled_time, r.id LIMIT ?3"
+        );
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(rusqlite::params![after, until, limit as i64], run_from_row)?
+                .collect::<rusqlite::Result<Vec<Run>>>()?;
+            Ok(rows)
+        })
+    }
+
     pub fn get_run_by_external_id(&self, id: &Id) -> Result<Option<Run>> {
         let sql = format!(
             "SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id WHERE r.external_id = ?1"
@@ -840,6 +875,37 @@ impl Store {
                 .query_map(rusqlite::params![schedule_id, from, to], |r| r.get(0))?
                 .collect::<rusqlite::Result<Vec<i64>>>()?;
             Ok(rows)
+        })
+    }
+
+    /// Runs of a schedule that have not reached a final state, oldest first.
+    /// A Crashed run counts while its rerun is still to come.
+    pub fn active_runs_of_schedule(&self, schedule_id: i64) -> Result<Vec<Run>> {
+        let sql = format!(
+            "SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id
+             WHERE r.schedule_id = ?1
+               AND (r.state_type NOT IN ('Completed', 'Failed', 'Cancelled', 'Crashed')
+                    OR (r.state_type = 'Crashed'
+                        AND NOT EXISTS (SELECT 1 FROM run c WHERE c.parent_run_id = r.id)))
+             ORDER BY r.id"
+        );
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(&sql)?;
+            let rows = stmt
+                .query_map([schedule_id], run_from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// When the schedule's most recent finished run ended, in microseconds.
+    pub fn last_end_of_schedule(&self, schedule_id: i64) -> Result<Option<i64>> {
+        self.with_reader(|conn| {
+            Ok(conn.query_row(
+                "SELECT MAX(end_time) FROM run WHERE schedule_id = ?1 AND end_time IS NOT NULL",
+                [schedule_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )?)
         })
     }
 

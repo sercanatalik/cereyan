@@ -224,7 +224,13 @@ def free_port() -> int:
 
 
 class ServerProcess:
-    def __init__(self, home: str, directory: str, *, port: int = 0, env: dict | None = None, extra: list[str] | None = None):
+    def __init__(self, home: str, directory: str, *, port: int = 0, env: dict | None = None, extra: list[str] | None = None,
+                 max_engines: int | None = 4):
+        # The server defaults to one engine; most tests exercise concurrency, so
+        # they ask for a few. `max_engines=None` keeps the server's own default.
+        extra = list(extra or [])
+        if max_engines is not None and "--max-engines" not in extra:
+            extra += ["--max-engines", str(max_engines)]
         self.home = home
         self.directory = directory
         full_env = dict(os.environ)

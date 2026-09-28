@@ -473,6 +473,7 @@
             "catchup_max",
             "flow",
             "id",
+            "loop_state",
             "next_fire",
             "paused_reason",
             "paused_until",
@@ -584,6 +585,7 @@
           "engines",
           "exposed",
           "paused",
+          "processors",
           "queued",
           "read_only",
           "resources",
@@ -840,7 +842,7 @@
         "destructiveHint": false,
         "readOnlyHint": true
       },
-      "description": "The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, and whether it was declared in the flow's code, created in the interface, or created by an agent. Read-only.",
+      "description": "The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, whether it was declared in the flow's code, created in the interface, or created by an agent, and for a continuous schedule its loop state (waiting, in_line, running, or paused). Read-only.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1036,7 +1038,7 @@
         "destructiveHint": false,
         "readOnlyHint": false
       },
-      "description": "Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Returns the schedule and the next few times it will fire.",
+      "description": "Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Kind continuous runs the flow again `delay` seconds after each run ends, one run at a time, and takes no catch-up options. Returns the schedule and the next few times it will fire (none for a continuous schedule).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -1069,6 +1071,10 @@
             "description": "For cron, OR day-of-month with day-of-week (default true)",
             "type": "boolean"
           },
+          "delay": {
+            "description": "Seconds from the end of one run to the next joining the line, for kind continuous",
+            "type": "number"
+          },
           "flow": {
             "description": "Flow name, or project/flow when the name exists in several projects",
             "type": "string"
@@ -1086,7 +1092,8 @@
             "enum": [
               "cron",
               "interval",
-              "rrule"
+              "rrule",
+              "continuous"
             ],
             "type": "string"
           },
@@ -1146,6 +1153,10 @@
           },
           "day_or": {
             "type": "boolean"
+          },
+          "delay": {
+            "description": "Seconds a continuous schedule waits after each run ends",
+            "type": "number"
           },
           "interval": {
             "type": "number"
@@ -1401,7 +1412,7 @@
         "destructiveHint": false,
         "readOnlyHint": true
       },
-      "description": "The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Read-only.",
+      "description": "The server's state in one call: engines and what they are running, processors (the engine pool size, its CPU cap, and how many engines run, idle or drain), queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Read-only.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},

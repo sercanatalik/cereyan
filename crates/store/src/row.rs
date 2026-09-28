@@ -178,6 +178,7 @@ pub fn schedule_from_row(row: &Row<'_>) -> rusqlite::Result<ScheduleRow> {
         start_deadline: row.get(16)?,
         next_fire: None,
         skipped: row.get(17)?,
+        loop_state: None,
     })
 }
 

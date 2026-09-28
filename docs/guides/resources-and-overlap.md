@@ -126,7 +126,7 @@ def reprocess_history() -> None:
 
 ## Bound the pool
 
-`max_engines` in `[server]` or `--max-engines` caps engine processes, and therefore runs executing at once, machine-wide. The default is the CPU count.
+`max_engines` in `[server]` or `--max-engines` caps engine processes, and therefore runs executing at once, machine-wide. The default is 1 and the most is the CPU count; the Queue page changes it while the server runs.
 
 ## Stop a failing flow
 

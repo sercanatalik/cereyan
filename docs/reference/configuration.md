@@ -61,7 +61,7 @@ title = "Data Platform"   # optional: shown in the top bar and the browser tab
 | `mcp_read_only` | boolean | `false` | List and allow only MCP tools that change nothing; every other tool call answers an error. The REST API and the UI are unaffected. |
 | `metrics_public` | boolean | `false` | Serve `GET /api/metrics` without a token, as `/api/health`. The host and origin checks still apply. |
 | `public_url` | string | unset | The address people reach the UI at, such as `https://cereyan.example.com`; the base of `{{ run.url }}` in rule templates and webhook presets. Unset, the server's own address is used. |
-| `max_engines` | integer | CPU count | Size of the warm engine pool. |
+| `max_engines` | integer | 1 | Size of the warm engine pool (processors on the Queue page), at most the CPU count. The Queue page writes it. |
 | `engine_max_runs` | integer | `100` | Runs an engine executes before it is recycled. |
 | `cancel_grace_secs` | integer | `10` | Seconds between SIGTERM and SIGKILL when cancelling a run. |
 | `open_browser` | boolean | `true` | Open the UI when the server starts. |

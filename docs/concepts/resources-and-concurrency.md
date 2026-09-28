@@ -39,9 +39,11 @@ A name can be a template over the run's parameters, `api:{{ tenant }}`, rendered
 
 `disable_after=(count, window_seconds, persist_seconds)` pauses every schedule of the flow for `persist_seconds` once it has failed `count` times within `window_seconds`, records `flow.disabled`, and resumes automatically with `flow.enabled`. Use it to stop a broken nightly flow from filling the run list until someone looks. The window survives a restart of the server: one still open when the server starts again ends on time, and one that ended while it was down resumes as it starts. Fires inside the window are never caught up; fires after it follow the schedule's `catchup` policy.
 
+With a window of `None`, `disable_after=(3, None, 6 * 3600)` counts failures in a row instead: a Completed run resets the count to zero. That is the natural stop for a [continuous schedule](schedules.md#continuous-schedules), whose loop is paused, holds no waiting run, and is seeded again when the pause ends.
+
 ## Engines
 
-The number of runs executing at once is also bounded by the engine pool: `max_engines` (default: CPU count) engine processes, each running one run at a time. Resources and caps decide *which* runs may proceed; the pool decides *how many*. See [Engines and the home directory](engines-and-home.md).
+The number of runs executing at once is also bounded by the engine pool: `max_engines` engine processes, called processors in the UI (default: 1, at most the CPU count, changeable on the Queue page while the server runs), each running one run at a time. A free processor takes the first run in line that can start; runs blocked by a resource or a cap are passed by the ones that can. Resources and caps decide *which* runs may proceed; the pool decides *how many*. See [Engines and the home directory](engines-and-home.md).
 
 ## Backfills
 

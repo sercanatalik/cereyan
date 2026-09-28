@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("dir", nargs="?", help="directory to import flows from (default: current)")
     serve.add_argument("--host", help="bind address (also CEREYAN_HOST or [server] host; default 127.0.0.1)")
     serve.add_argument("--port", type=int, help="TCP port (also CEREYAN_PORT or [server] port; default 4200, 0 picks a free port)")
-    serve.add_argument("--max-engines", type=int, help="size of the warm engine pool (also [server] max_engines)")
+    serve.add_argument("--max-engines", type=int, help="size of the warm engine pool, the processors on the Queue page (default 1, at most the CPU count; also [server] max_engines)")
     serve.add_argument("--engine-max-runs", type=int, help="recycle an engine after this many runs (also [server] engine_max_runs)")
     serve.add_argument("--no-open", action="store_true", help="do not open the browser")
     serve.add_argument("--crash-retries", type=int, help="default crash retry limit (flow decorators override)")

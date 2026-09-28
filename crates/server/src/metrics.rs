@@ -295,7 +295,7 @@ pub fn render(state: &AppState) -> String {
         &mut out,
         "cereyan_engines_max",
         &[],
-        state.supervisor.max_engines,
+        state.supervisor.max_engines(),
     );
 
     header(

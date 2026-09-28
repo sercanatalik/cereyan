@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { CalendarClock, Clock, SkipForward, Undo2 } from "lucide-react";
 import { marked } from "marked";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   ApiError,
   api,
@@ -17,7 +17,14 @@ import { JsonView } from "@/components/json-view";
 import { RescheduleDialog } from "@/components/reschedule-dialog";
 import { RunForm } from "@/components/run-form";
 import { RunTable } from "@/components/run-table";
-import { describeSchedule, rowToDraft, ScheduleEditor, scheduleParts } from "@/components/schedule-editor";
+import {
+  type DisableAfter,
+  describeSchedule,
+  formatSeconds,
+  rowToDraft,
+  ScheduleEditor,
+  scheduleParts,
+} from "@/components/schedule-editor";
 import { Page } from "@/components/shell";
 import { SkipDialog, upcomingQuery } from "@/components/skip-dialog";
 import { StateBadge, StateDot } from "@/components/state-badge";
@@ -80,6 +87,134 @@ function ScheduleChip({ s }: { s: ScheduleRow }) {
         </span>
       ) : null}
     </span>
+  );
+}
+
+/** The seconds tick, so a countdown moves between fetches. */
+function useNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
+
+/** "23 min 10 s": what is left until `micros`. */
+function countdown(micros: number, now: number): string {
+  const secs = Math.max(0, Math.round(micros / 1000 - now) / 1000);
+  const m = Math.floor(secs / 60);
+  const h = Math.floor(m / 60);
+  if (h) return `${h} h ${m % 60} min`;
+  if (m) return `${m} min ${Math.round(secs % 60)} s`;
+  return `${Math.round(secs)} s`;
+}
+
+const LOOP_BADGE: Record<string, { label: string; className: string }> = {
+  running: { label: "Running", className: "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200" },
+  in_line: {
+    label: "In line",
+    className: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
+  },
+  waiting: { label: "Waiting", className: "bg-muted text-muted-foreground" },
+  paused: { label: "Paused", className: "bg-muted text-muted-foreground" },
+  disabled: {
+    label: "Paused after failures",
+    className: "bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200",
+  },
+};
+
+/** A continuous schedule's card: where its loop is and what can be done about it. */
+export function LoopCard({
+  s,
+  recent,
+  onPause,
+  onResume,
+  onJoinNow,
+}: {
+  s: ScheduleRow;
+  recent: [number, string, string, number | null][];
+  onPause: () => void;
+  onResume: () => void;
+  onJoinNow: () => void;
+}) {
+  const now = useNow();
+  const disabled = !s.active && s.paused_reason === "disabled";
+  const state = disabled ? "disabled" : (s.loop_state ?? "waiting");
+  const badge = LOOP_BADGE[state] ?? LOOP_BADGE.waiting;
+  const delay = (s.schedule as { delay?: number }).delay ?? 0;
+  return (
+    <div
+      className={cn(
+        "flex min-w-80 flex-col gap-2 rounded-md border bg-card px-3 py-2 text-xs",
+        disabled && "border-red-200 dark:border-red-900",
+      )}
+      data-testid="loop-card"
+      data-state={state}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2">
+          <Clock className="size-3.5 text-muted-foreground" />
+          <span className={cn("rounded-full px-2 py-0.5 font-medium", badge.className)}>{badge.label}</span>
+        </span>
+        <span className="font-mono text-muted-foreground">Continuous · {formatSeconds(delay)}</span>
+      </div>
+      {state === "waiting" && s.next_fire ? (
+        <span>
+          Joins the line in <span className="font-mono font-medium">{countdown(s.next_fire, now)}</span>
+        </span>
+      ) : null}
+      {state === "in_line" ? (
+        <span>
+          Waiting for a free processor.{" "}
+          <Link to="/queue" className="underline">
+            Open the queue
+          </Link>
+        </span>
+      ) : null}
+      {state === "running" ? (
+        <span>A run is in progress; the next joins the line {formatSeconds(delay)} after it ends.</span>
+      ) : null}
+      {state === "paused" ? <span>No run waits while the loop is paused.</span> : null}
+      {disabled ? (
+        <div className="flex flex-col gap-1.5">
+          <span>
+            disable_after stopped the loop
+            {s.paused_until ? (
+              <>
+                ; it resumes by itself at{" "}
+                <span className="font-mono font-medium">{formatFire(s.paused_until)}</span>
+              </>
+            ) : null}
+            .
+          </span>
+          <span className="flex gap-1" title="Last runs, oldest first">
+            {recent
+              .slice()
+              .reverse()
+              .map(([rid, type, name]) => (
+                <StateDot key={rid} type={type as StateType} title={`${name} (run ${rid})`} />
+              ))}
+          </span>
+        </div>
+      ) : null}
+      <div className="flex gap-2">
+        {state === "waiting" ? (
+          <Button size="xs" variant="outline" onClick={onJoinNow}>
+            Join the line now
+          </Button>
+        ) : null}
+        {s.active ? (
+          <Button size="xs" variant="outline" onClick={onPause}>
+            Pause loop
+          </Button>
+        ) : (
+          <Button size="xs" variant={disabled ? "default" : "outline"} onClick={onResume}>
+            {disabled ? "Resume now" : "Resume loop"}
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -167,6 +302,12 @@ function FlowDetail() {
         ? api.POST("/api/schedules/{sid}/resume", { params: { path: { sid } } })
         : api.POST("/api/schedules/{sid}/pause", { params: { path: { sid } } }),
     onSuccess: invalidate,
+  });
+  const joinNow = useMutation({
+    mutationFn: async (sid: number) =>
+      unwrap(await api.POST("/api/schedules/{sid}/now", { params: { path: { sid } } })),
+    onSuccess: invalidate,
+    onError: (e) => setError(e instanceof ApiError ? e.message : String(e)),
   });
   const removeSchedule = useMutation({
     mutationFn: async (sid: number) => api.DELETE("/api/schedules/{sid}", { params: { path: { sid } } }),
@@ -256,7 +397,7 @@ function FlowDetail() {
           >
             Backfill
           </Button>
-          {f.schedules.length ? (
+          {f.schedules.some((sc) => (sc.schedule as { kind: string }).kind !== "continuous") ? (
             <Button size="sm" variant="outline" onClick={() => setSkipOpen(true)}>
               <SkipForward /> Skip next…
             </Button>
@@ -317,9 +458,20 @@ function FlowDetail() {
       ) : null}
       {f.schedules.length ? (
         <div className="flex flex-wrap items-center gap-2">
-          {f.schedules.map((s) => (
-            <ScheduleChip key={s.id} s={s} />
-          ))}
+          {f.schedules.map((s) =>
+            (s.schedule as { kind: string }).kind === "continuous" ? (
+              <LoopCard
+                key={s.id}
+                s={s}
+                recent={f.recent_runs}
+                onPause={() => toggleSchedule.mutate({ sid: s.id, active: false })}
+                onResume={() => toggleSchedule.mutate({ sid: s.id, active: true })}
+                onJoinNow={() => joinNow.mutate(s.id)}
+              />
+            ) : (
+              <ScheduleChip key={s.id} s={s} />
+            ),
+          )}
           <Button size="xs" variant="ghost" onClick={() => setRescheduleOpen(true)}>
             <CalendarClock /> Reschedule
           </Button>
@@ -544,6 +696,7 @@ function FlowDetail() {
                   ) : null}
                   <ScheduleEditor
                     initial={rowToDraft(s)}
+                    disableAfter={options.disable_after as DisableAfter | null}
                     active={s.active}
                     saving={saveSchedule.isPending}
                     onSave={async (body) => {
@@ -592,6 +745,7 @@ function FlowDetail() {
           {editing === "new" ? (
             <div className="rounded-md border bg-card p-3">
               <ScheduleEditor
+                disableAfter={options.disable_after as DisableAfter | null}
                 saving={saveSchedule.isPending}
                 onSave={async (body) => {
                   await saveSchedule.mutateAsync({ body });

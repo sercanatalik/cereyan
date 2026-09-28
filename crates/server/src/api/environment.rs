@@ -176,7 +176,7 @@ fn configuration(state: &AppState) -> Vec<ConfigEntry> {
     push(
         "server",
         "max_engines",
-        json!(state.supervisor.max_engines),
+        json!(state.supervisor.max_engines()),
         false,
     );
     push("server", "engine_max_runs", json!(c.engine_max_runs), false);

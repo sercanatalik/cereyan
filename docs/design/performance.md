@@ -13,12 +13,13 @@ These targets shaped the design (a Rust core, batched reporting, an in-memory wo
 | Warm-pool overhead, Scheduled to user code | under 5 ms |
 | Counts endpoint | under 5 ms |
 | Orchestration cost per completed task run | under 200 µs |
+| Dispatch poll (`take_work`) with 10k queued runs across 4 modules | under 1 ms |
 
 ## How they are checked
 
 `just bench` runs two suites:
 
-- **Criterion benchmarks** in the Rust crates: the store's hot path (a transition on either table, and applying an engine report at three batch widths), bulk run creation and log append, the transition rules, matching, and the stream payload built for every transition.
+- **Criterion benchmarks** in the Rust crates: the store's hot path (a transition on either table, and applying an engine report at three batch widths), bulk run creation and log append, the transition rules, matching, the stream payload built for every transition, and a dispatch poll against a 10k-run queue with half of it blocked.
 - **The end-to-end benchmark** `benches/e2e.py`, which starts a server on a temporary home, generates its own fixtures (a million-run history, wide and log-heavy flows, a long backfill, an interval schedule), and measures each operation through the public API.
 
 The end-to-end benchmark fails when a target is missed or when a number regresses more than 20 percent against the checked-in baseline for the platform, `benches/baseline.<platform>.json`. CI runs it on every push with `--quick`. When a regression is intentional, refresh the baseline in the same change with `just bench-baseline`. That rewrites every key, so read the table it prints before committing the result: a number that moved for a reason you have not established is not one to bless.

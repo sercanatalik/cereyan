@@ -49,6 +49,7 @@ pub trait RouteDispatcher: Send + Sync {
 pub const BUILTIN_PATHS: &[&str] = &[
     "/api/health",
     "/api/server",
+    "/api/queue",
     "/api/flows",
     "/api/flows/{id}",
     "/api/flows/{id}/runs",
@@ -82,6 +83,7 @@ pub const BUILTIN_PATHS: &[&str] = &[
     "/api/schedules/{sid}",
     "/api/schedules/{sid}/pause",
     "/api/schedules/{sid}/resume",
+    "/api/schedules/{sid}/now",
     "/api/backfills/{id}",
     "/api/backfills/{id}/prefilter",
     "/api/backfills/{id}/cancel",

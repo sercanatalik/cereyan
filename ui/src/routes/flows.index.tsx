@@ -246,9 +246,9 @@ function FlowsPage() {
               className="rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-900/30 dark:text-amber-100"
               data-testid="saturation-banner"
             >
-              These flows can occupy every engine: {settings.data.saturation_flows.join(", ")}.{" "}
-              <Link to="/settings" className="underline">
-                Settings
+              These flows can occupy every processor: {settings.data.saturation_flows.join(", ")}.{" "}
+              <Link to="/queue" className="underline">
+                Queue
               </Link>
             </div>
           ) : null}

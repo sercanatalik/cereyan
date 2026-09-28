@@ -20,7 +20,7 @@ pub mod rules;
 mod scheduler;
 mod state;
 mod stream;
-mod supervisor;
+pub mod supervisor;
 pub mod timer;
 mod ui;
 mod validate;
@@ -229,9 +229,7 @@ fn default_python() -> String {
     "python3".into()
 }
 fn default_max_engines() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
+    1
 }
 fn default_engine_max_runs() -> u32 {
     100
@@ -377,6 +375,22 @@ impl Server {
                     .crash_retries_default
                     .store(c, std::sync::atomic::Ordering::Relaxed);
                 state.mark_edited("defaults.crash_retries");
+            }
+        }
+        // A count set on the Queue page, for a server with no cereyan.toml to
+        // hold it; a flag or a [server] value still wins.
+        let engines_default = state
+            .sources
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get("server.max_engines")
+            .is_none_or(|s| s.source == "default");
+        if engines_default {
+            if let Ok(Some(v)) = state.store.kv_get("settings.max_engines") {
+                if let Ok(n) = v.parse::<usize>() {
+                    state.supervisor.set_max_engines(n);
+                    state.mark_edited("server.max_engines");
+                }
             }
         }
         if let Ok(Some(saved)) = state.store.kv_get("settings.resources") {

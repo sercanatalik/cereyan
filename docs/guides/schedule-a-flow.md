@@ -36,6 +36,7 @@ The flow page shows the schedule summary and next fire time, the **Upcoming** ta
 | Wall-clock times | `Cron("0 9 * * 1-5", timezone="Europe/Istanbul")` |
 | Every N seconds or minutes | `Interval(timedelta(minutes=15))`; add `anchor=datetime(...)` to align the grid |
 | Calendar rules | `RRule("DTSTART:20260101T090000\nRRULE:FREQ=MONTHLY;BYDAY=-1FR", timezone="UTC")` |
+| Again and again, a while after each run ends | `Continuous(delay="30m")`; see [Continuous schedules](../concepts/schedules.md#continuous-schedules) |
 
 Several schedules can be given as `schedules=[...]`. Each takes `catchup` (`skip`, `latest`, `all`) and `catchup_max` for what happens to fires missed while the server was down.
 
@@ -45,7 +46,7 @@ A slow flow on a fast schedule needs a policy. `max_concurrent=1` with `on_overl
 
 ## Pause and resume
 
-Pause from the flow page, `POST /api/schedules/{id}/pause`, the MCP `pause_schedule` tool, or a rule's `pause_schedule` action. Pausing removes the schedule's not-yet-started runs; resuming materialises them again. `disable_after=(count, window, persist)` pauses automatically after repeated failures.
+Pause from the flow page, `POST /api/schedules/{id}/pause`, the MCP `pause_schedule` tool, or a rule's `pause_schedule` action. Pausing removes the schedule's not-yet-started runs; resuming materialises them again. `disable_after=(count, window, persist)` pauses automatically after repeated failures; a window of `None` counts failures in a row. Pausing a `Continuous` schedule stops its loop: the waiting run is removed and a running one finishes without a successor.
 
 ## Skip a run
 

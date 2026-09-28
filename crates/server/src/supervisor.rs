@@ -2,9 +2,10 @@
 //! directory, module, and isolation; a pull-based work queue; heartbeat and
 //! exit monitoring; cancellation escalation; restart adoption.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -27,6 +28,13 @@ pub struct EngineKey {
     /// engines started with `min(19, -priority)`.
     #[serde(default)]
     pub nice: u8,
+}
+
+/// The machine's CPU count: the most engines the pool may hold.
+pub fn cpu_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
 }
 
 /// Niceness for a priority: negative priorities lower the OS priority.
@@ -88,6 +96,85 @@ pub struct Engine {
     pub spawned_at: Instant,
     pub last_seen: Instant,
     pub adopted: bool,
+    /// Set when the pool shrank below this busy engine: it finishes its run, then exits.
+    pub drained_at: Option<Instant>,
+    /// When the current run was handed over.
+    pub run_since: Option<Instant>,
+    /// Whether the engine has asked for work since it started.
+    pub polled: bool,
+}
+
+impl Engine {
+    fn new(
+        id: String,
+        key: EngineKey,
+        pid: Option<u32>,
+        child: Option<Child>,
+        adopted: bool,
+    ) -> Engine {
+        Engine {
+            id,
+            module_mtime: key.module_mtime(),
+            key,
+            pid,
+            child,
+            runs_done: 0,
+            current_run: None,
+            exit_requested: false,
+            spawned_at: Instant::now(),
+            last_seen: Instant::now(),
+            adopted,
+            drained_at: None,
+            run_since: None,
+            polled: false,
+        }
+    }
+
+    /// `starting`, `idle`, `running` or `draining`.
+    pub fn status(&self) -> &'static str {
+        match (self.current_run, self.drained_at, self.polled) {
+            (Some(_), Some(_), _) => "draining",
+            (Some(_), None, _) => "running",
+            (None, _, false) => "starting",
+            (None, _, true) => "idle",
+        }
+    }
+}
+
+/// One engine as the Queue page shows it.
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+pub struct EngineView {
+    pub id: String,
+    /// `starting`, `idle`, `running` or `draining`.
+    pub status: &'static str,
+    /// The module the engine has loaded.
+    pub module: String,
+    pub run_id: Option<i64>,
+    /// Seconds in the current run, or since the engine started when it has none.
+    pub since_secs: u64,
+}
+
+/// One queued run that is due, in dispatch order.
+#[derive(Clone, Debug)]
+pub struct LineEntry {
+    pub run_id: i64,
+    pub module: String,
+    pub priority: i64,
+    /// 1 for the first run in line.
+    pub position: usize,
+    /// Scheduled or creation time (microseconds): when it joined the line.
+    pub order: i64,
+    pub can_start: bool,
+    pub reason: Option<String>,
+    pub overtaken_by: u32,
+}
+
+/// A queued run's place in line: priority first (highest first), then time
+/// in line, then id.
+type QKey = (i64, i64, i64);
+
+fn qkey(q: &QueuedRun) -> QKey {
+    (-q.priority, q.order, q.run_id)
 }
 
 #[derive(Clone, Debug)]
@@ -230,12 +317,43 @@ impl Resources {
 #[derive(Default)]
 struct Inner {
     engines: HashMap<String, Engine>,
-    queue: VecDeque<QueuedRun>,
+    /// The one queue, in dispatch order.
+    queue: BTreeMap<QKey, QueuedRun>,
+    /// Each queued run's place in `queue`.
+    positions: HashMap<i64, QKey>,
+    /// How many later runs were dispatched while a queued run could not start.
+    overtaken: HashMap<i64, u32>,
     jobs: VecDeque<QueuedJob>,
     next_engine: u64,
     /// Runs already reported as waiting for a resource (avoid repeated transitions).
     waiting_marked: HashMap<i64, String>,
     failures: HashMap<i64, Vec<i64>>,
+}
+
+impl Inner {
+    fn push(&mut self, item: QueuedRun) {
+        if self.positions.contains_key(&item.run_id) {
+            return;
+        }
+        let k = qkey(&item);
+        self.positions.insert(item.run_id, k);
+        self.queue.insert(k, item);
+    }
+
+    fn remove(&mut self, run_id: i64) -> Option<QueuedRun> {
+        self.overtaken.remove(&run_id);
+        let k = self.positions.remove(&run_id)?;
+        self.queue.remove(&k)
+    }
+
+    /// Engines counted against the pool: every one but those told to exit
+    /// while idle (they are on their way out).
+    fn occupying(&self) -> usize {
+        self.engines
+            .values()
+            .filter(|e| !e.exit_requested || e.current_run.is_some())
+            .count()
+    }
 }
 
 pub struct Supervisor {
@@ -245,7 +363,9 @@ pub struct Supervisor {
     python: String,
     home: std::path::PathBuf,
     token: Option<String>,
-    pub max_engines: usize,
+    max_engines: AtomicUsize,
+    /// The most `max_engines` may be: the machine's CPU count.
+    pub cpu_cap: usize,
     engine_max_runs: u32,
     pub cancel_grace: Duration,
     pub heartbeat: Duration,
@@ -301,6 +421,13 @@ impl Supervisor {
         for (name, total) in &config.resources {
             resources.totals.insert(name.clone(), *total);
         }
+        let cpu_cap = cpu_count();
+        if config.max_engines > cpu_cap {
+            eprintln!(
+                "cereyan: max_engines {} is above this machine's {cpu_cap} CPUs; using {cpu_cap}",
+                config.max_engines
+            );
+        }
         Supervisor {
             inner: Mutex::new(Inner::default()),
             resources: Mutex::new(resources),
@@ -308,18 +435,73 @@ impl Supervisor {
             python: config.python.clone(),
             home: config.home.clone(),
             token: config.token.clone(),
-            max_engines: config.max_engines.max(1),
+            max_engines: AtomicUsize::new(config.max_engines.clamp(1, cpu_cap)),
+            cpu_cap,
             engine_max_runs: config.engine_max_runs.max(1),
             cancel_grace: Duration::from_secs(config.cancel_grace_secs.max(1)),
             heartbeat: Duration::from_secs(config.heartbeat_secs.max(1)),
         }
     }
 
+    /// The pool size in force: how many engines may run at once.
+    pub fn max_engines(&self) -> usize {
+        self.max_engines.load(Ordering::Relaxed)
+    }
+
+    /// Resize the pool while the server runs. Growing lets `ensure_capacity`
+    /// start engines up to `n`, cancelling drains first. Shrinking tells idle
+    /// engines above `n` to exit and drains busy ones, youngest run first: a
+    /// draining engine finishes its run and then exits, so no run is
+    /// interrupted. `n` is clamped to `1..=cpu_cap`; callers validate first.
+    pub fn set_max_engines(&self, n: usize) {
+        let n = n.clamp(1, self.cpu_cap);
+        self.max_engines.store(n, Ordering::Relaxed);
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut live = inner.engines.values().filter(|e| !e.exit_requested).count();
+        // Growing: undo drains, most recent first.
+        while live < n {
+            let undo = inner
+                .engines
+                .values_mut()
+                .filter(|e| e.drained_at.is_some() && e.current_run.is_some())
+                .max_by_key(|e| e.drained_at);
+            match undo {
+                Some(e) => {
+                    e.drained_at = None;
+                    e.exit_requested = false;
+                    live += 1;
+                }
+                None => break,
+            }
+        }
+        // Shrinking: idle engines first, then busy ones, youngest run first.
+        let mut live: Vec<&mut Engine> = inner
+            .engines
+            .values_mut()
+            .filter(|e| !e.exit_requested)
+            .collect();
+        if live.len() > n {
+            let excess = live.len() - n;
+            live.sort_by_key(|e| {
+                (
+                    e.current_run.is_some(),
+                    std::cmp::Reverse(e.run_since.unwrap_or(e.spawned_at)),
+                )
+            });
+            for e in live.into_iter().take(excess) {
+                e.exit_requested = true;
+                if e.current_run.is_some() {
+                    e.drained_at = Some(Instant::now());
+                }
+            }
+        }
+        drop(inner);
+        self.notify.notify_waiters();
+    }
+
     pub fn enqueue(&self, item: QueuedRun) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if !inner.queue.iter().any(|q| q.run_id == item.run_id) {
-            inner.queue.push_back(item);
-        }
+        inner.push(item);
         drop(inner);
         self.notify.notify_waiters();
     }
@@ -327,12 +509,8 @@ impl Supervisor {
     /// Queue many runs at once (backfills), notifying waiters once.
     pub fn enqueue_many(&self, items: Vec<QueuedRun>) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let existing: std::collections::HashSet<i64> =
-            inner.queue.iter().map(|q| q.run_id).collect();
         for item in items {
-            if !existing.contains(&item.run_id) {
-                inner.queue.push_back(item);
-            }
+            inner.push(item);
         }
         drop(inner);
         self.notify.notify_waiters();
@@ -458,8 +636,8 @@ impl Supervisor {
         let mut out = Vec::new();
         let now = cereyan_core::now_micros();
         let resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
-        let queued: Vec<QueuedRun> = inner.queue.iter().cloned().collect();
-        let engines_full = inner.engines.len() >= self.max_engines
+        let queued: Vec<QueuedRun> = inner.queue.values().cloned().collect();
+        let engines_full = inner.occupying() >= self.max_engines()
             && inner
                 .engines
                 .values()
@@ -492,17 +670,15 @@ impl Supervisor {
     /// Remove a queued run (cancel before pickup). Returns whether it was queued.
     pub fn dequeue(&self, run_id: i64) -> bool {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let before = inner.queue.len();
-        inner.queue.retain(|q| q.run_id != run_id);
         inner.waiting_marked.remove(&run_id);
-        before != inner.queue.len()
+        inner.remove(run_id).is_some()
     }
 
     pub fn dequeue_many(&self, run_ids: &[i64]) {
         let set: std::collections::HashSet<i64> = run_ids.iter().copied().collect();
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.queue.retain(|q| !set.contains(&q.run_id));
         for id in &set {
+            inner.remove(*id);
             inner.waiting_marked.remove(id);
         }
     }
@@ -511,9 +687,8 @@ impl Supervisor {
         self.inner
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .queue
-            .iter()
-            .any(|q| q.run_id == run_id)
+            .positions
+            .contains_key(&run_id)
     }
 
     /// Track an engine that a previous server started.
@@ -523,22 +698,18 @@ impl Supervisor {
             .engine_id
             .clone()
             .unwrap_or_else(|| format!("adopted-{}", run.engine_pid.unwrap_or(0)));
-        inner.engines.insert(
+        let mut engine = Engine::new(
             id.clone(),
-            Engine {
-                id,
-                key,
-                pid: run.engine_pid.map(|p| p as u32),
-                child: None,
-                runs_done: 0,
-                module_mtime: None,
-                current_run: Some(run.id),
-                exit_requested: false,
-                spawned_at: Instant::now(),
-                last_seen: Instant::now(),
-                adopted: true,
-            },
+            key,
+            run.engine_pid.map(|p| p as u32),
+            None,
+            true,
         );
+        engine.module_mtime = None;
+        engine.current_run = Some(run.id);
+        engine.run_since = Some(Instant::now());
+        engine.polled = true;
+        inner.engines.insert(id, engine);
     }
 
     /// Spawn engines so that every queued run has an engine that can take it,
@@ -550,7 +721,7 @@ impl Supervisor {
         let horizon = cereyan_core::now_micros() + crate::scheduler::PREWARM_SECS * 1_000_000;
         {
             let resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
-            for q in &inner.queue {
+            for q in inner.queue.values() {
                 if q.not_before.map(|t| t > horizon).unwrap_or(false) {
                     continue;
                 }
@@ -571,8 +742,7 @@ impl Supervisor {
                 .count();
             let mut to_spawn = pending.saturating_sub(usable);
             while to_spawn > 0 {
-                let total = inner.engines.len();
-                if total >= self.max_engines {
+                if inner.occupying() >= self.max_engines() {
                     // Evict one idle engine of another key.
                     let victim = inner
                         .engines
@@ -590,21 +760,10 @@ impl Supervisor {
                 inner.next_engine += 1;
                 match self.spawn(&id, &key) {
                     Ok(child) => {
+                        let pid = Some(child.id());
                         inner.engines.insert(
                             id.clone(),
-                            Engine {
-                                id,
-                                pid: Some(child.id()),
-                                child: Some(child),
-                                runs_done: 0,
-                                module_mtime: key.module_mtime(),
-                                current_run: None,
-                                exit_requested: false,
-                                spawned_at: Instant::now(),
-                                last_seen: Instant::now(),
-                                adopted: false,
-                                key: key.clone(),
-                            },
+                            Engine::new(id, key.clone(), pid, Some(child), false),
                         );
                     }
                     Err(e) => {
@@ -674,35 +833,27 @@ impl Supervisor {
         key: &EngineKey,
         server_url: &str,
     ) -> WorkDecision {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = &mut *guard;
         let known = inner.engines.contains_key(engine_id);
         if !known {
             // An engine we did not spawn (previous server) or one that
             // reconnected after a restart: track it.
             inner.engines.insert(
                 engine_id.to_string(),
-                Engine {
-                    id: engine_id.to_string(),
-                    key: key.clone(),
-                    pid: Some(pid),
-                    child: None,
-                    runs_done: 0,
-                    module_mtime: key.module_mtime(),
-                    current_run: None,
-                    exit_requested: false,
-                    spawned_at: Instant::now(),
-                    last_seen: Instant::now(),
-                    adopted: true,
-                },
+                Engine::new(engine_id.to_string(), key.clone(), Some(pid), None, true),
             );
         }
         let max_runs = self.engine_max_runs;
-        let total = inner.engines.len();
-        let over_capacity = total > self.max_engines;
+        let max_engines = self.max_engines();
+        let over_capacity = inner.occupying() > max_engines;
         let engine = inner.engines.get_mut(engine_id).expect("just inserted");
         engine.last_seen = Instant::now();
         engine.pid = Some(pid);
+        engine.polled = true;
         engine.current_run = None;
+        engine.run_since = None;
+        engine.drained_at = None;
         let stale = match (engine.module_mtime, key.module_mtime()) {
             (Some(a), Some(b)) => a != b,
             _ => false,
@@ -720,30 +871,65 @@ impl Supervisor {
             let job = inner.jobs.remove(pos).expect("position exists");
             return WorkDecision::Job(job.payload);
         }
+        // The first run in line that can start goes to a free engine, whatever
+        // its module. When it is another module's and nothing can serve it (no
+        // idle engine of that module, no room to start one), this engine
+        // exits to make that room rather than take a later run of its own.
         let now = cereyan_core::now_micros();
-        let mut candidates: Vec<(usize, i64, i64, i64)> = inner
-            .queue
-            .iter()
-            .enumerate()
-            .filter(|(_, q)| &q.key == key && q.not_before.map(|t| t <= now).unwrap_or(true))
-            .map(|(i, q)| (i, -q.priority, q.order, q.run_id))
-            .collect();
-        candidates.sort_by_key(|(_, p, o, id)| (*p, *o, *id));
         let mut resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
-        for (i, _, _, _) in candidates {
-            let needs = inner.queue[i].needs.clone();
-            if resources.can_acquire(&needs).is_some() {
+        let mut blocked_ahead: Vec<i64> = Vec::new();
+        let mut take: Option<QKey> = None;
+        let mut room = inner.occupying() < max_engines;
+        let mut served_keys: Vec<&EngineKey> = Vec::new();
+        for (k, q) in inner.queue.iter() {
+            if q.not_before.map(|t| t > now).unwrap_or(false) {
                 continue;
             }
-            let item = inner.queue.remove(i).expect("position exists");
-            resources.acquire(item.run_id, &needs);
-            inner.waiting_marked.remove(&item.run_id);
-            if let Some(engine) = inner.engines.get_mut(engine_id) {
-                engine.current_run = Some(item.run_id);
+            if resources.can_acquire(&q.needs).is_some() {
+                blocked_ahead.push(q.run_id);
+                continue;
             }
-            return WorkDecision::Run(item.run_id);
+            if &q.key == key {
+                take = Some(*k);
+                break;
+            }
+            if served_keys.contains(&&q.key) {
+                continue;
+            }
+            let idle_other = inner.engines.values().any(|e| {
+                e.id != engine_id && e.key == q.key && e.current_run.is_none() && !e.exit_requested
+            });
+            if idle_other {
+                served_keys.push(&q.key);
+                continue;
+            }
+            if room {
+                // An engine for it can start; count it against the room.
+                room = false;
+                served_keys.push(&q.key);
+                continue;
+            }
+            // Pool full and nothing can take that run: give up this slot.
+            drop(resources);
+            inner.engines.remove(engine_id);
+            return WorkDecision::Exit;
         }
-        WorkDecision::Wait
+        let Some(k) = take else {
+            return WorkDecision::Wait;
+        };
+        let item = inner.queue.remove(&k).expect("key exists");
+        inner.positions.remove(&item.run_id);
+        inner.overtaken.remove(&item.run_id);
+        for id in blocked_ahead {
+            *inner.overtaken.entry(id).or_insert(0) += 1;
+        }
+        resources.acquire(item.run_id, &item.needs);
+        inner.waiting_marked.remove(&item.run_id);
+        if let Some(engine) = inner.engines.get_mut(engine_id) {
+            engine.current_run = Some(item.run_id);
+            engine.run_since = Some(Instant::now());
+        }
+        WorkDecision::Run(item.run_id)
     }
 
     pub fn run_finished(&self, run_id: i64) {
@@ -757,7 +943,7 @@ impl Supervisor {
                 }
             }
         }
-        inner.queue.retain(|q| q.run_id != run_id);
+        inner.remove(run_id);
         inner.waiting_marked.remove(&run_id);
         drop(inner);
         self.resources
@@ -780,16 +966,94 @@ impl Supervisor {
     /// forget the engine.
     pub fn take_queued_for_key(&self, key: &EngineKey, engine_id: &str) -> Vec<i64> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let mut out = Vec::new();
-        inner.queue.retain(|q| {
-            if &q.key == key {
-                out.push(q.run_id);
-                false
-            } else {
-                true
-            }
-        });
+        let out: Vec<i64> = inner
+            .queue
+            .values()
+            .filter(|q| &q.key == key)
+            .map(|q| q.run_id)
+            .collect();
+        for id in &out {
+            inner.remove(*id);
+        }
         inner.engines.remove(engine_id);
+        out
+    }
+
+    /// The pool and the queue as the Queue page shows them: each engine with
+    /// its status, and the first `limit` queued runs in dispatch order with
+    /// whether each can start now. Returns (engines, in line, total queued).
+    pub fn queue_snapshot(&self, limit: usize) -> (Vec<EngineView>, Vec<LineEntry>, usize) {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
+        let now = cereyan_core::now_micros();
+        let mut engines: Vec<EngineView> = inner
+            .engines
+            .values()
+            .filter(|e| !e.exit_requested || e.current_run.is_some())
+            .map(|e| EngineView {
+                id: e.id.clone(),
+                status: e.status(),
+                module: e.key.module.clone(),
+                run_id: e.current_run,
+                since_secs: e.run_since.unwrap_or(e.spawned_at).elapsed().as_secs(),
+            })
+            .collect();
+        engines.sort_by(|a, b| a.id.cmp(&b.id));
+        let room = inner.occupying() < self.max_engines();
+        let mut line = Vec::new();
+        let mut position = 0;
+        for q in inner.queue.values() {
+            if q.not_before.map(|t| t > now).unwrap_or(false) {
+                continue;
+            }
+            position += 1;
+            if line.len() >= limit {
+                continue;
+            }
+            let blocked = resources.can_acquire(&q.needs);
+            let engine_free = room
+                || inner
+                    .engines
+                    .values()
+                    .any(|e| e.key == q.key && e.current_run.is_none() && !e.exit_requested);
+            let reason = match &blocked {
+                Some(name) if name.starts_with("flow:") => Some("max_concurrent".to_string()),
+                Some(name) if name.starts_with("backfill:") => {
+                    Some("backfill concurrency".to_string())
+                }
+                Some(name) => Some(format!("resource:{name}")),
+                None if !engine_free => Some("no processor".to_string()),
+                None => None,
+            };
+            line.push(LineEntry {
+                run_id: q.run_id,
+                module: q.key.module.clone(),
+                priority: q.priority,
+                position,
+                order: q.order,
+                can_start: reason.is_none(),
+                reason,
+                overtaken_by: inner.overtaken.get(&q.run_id).copied().unwrap_or(0),
+            });
+        }
+        (engines, line, position)
+    }
+
+    /// Queued runs not yet due before `until` (microseconds), soonest first.
+    pub fn joining(&self, until: i64, limit: usize) -> Vec<(i64, i64)> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let now = cereyan_core::now_micros();
+        let mut out: Vec<(i64, i64)> = inner
+            .queue
+            .values()
+            .filter_map(|q| {
+                q.not_before
+                    .filter(|t| *t > now && *t <= until)
+                    .map(|t| (q.run_id, t))
+            })
+            .collect();
+        out.sort_by_key(|(id, t)| (*t, *id));
+        out.truncate(limit);
         out
     }
 
@@ -976,5 +1240,144 @@ fn supervise_once(state: &Arc<AppState>) {
     // 4. Keep the pool sized to the queue.
     if sup.queue_len() > 0 {
         sup.ensure_capacity(state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sup(max: usize) -> Supervisor {
+        let config: ServeConfig = serde_json::from_value(json!({
+            "home": std::env::temp_dir(),
+            "max_engines": max,
+        }))
+        .unwrap();
+        Supervisor::new(&config)
+    }
+
+    fn key(module: &str) -> EngineKey {
+        EngineKey {
+            source_dir: "/nonexistent".into(),
+            module: module.into(),
+            isolated: false,
+            nice: 0,
+        }
+    }
+
+    fn queued(run_id: i64, module: &str, priority: i64, order: i64) -> QueuedRun {
+        QueuedRun {
+            run_id,
+            key: key(module),
+            priority,
+            order,
+            needs: Vec::new(),
+            not_before: None,
+        }
+    }
+
+    fn take(s: &Supervisor, engine: &str, module: &str) -> Option<i64> {
+        match s.take_work(engine, 1, &key(module), "") {
+            WorkDecision::Run(id) => Some(id),
+            WorkDecision::Exit => Some(-1),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_deep_backlog_does_not_starve_another_module() {
+        if cpu_count() < 2 {
+            return;
+        }
+        let s = sup(2);
+        assert_eq!(take(&s, "a", "etl"), None);
+        assert_eq!(take(&s, "b", "etl"), None);
+        s.enqueue_many((1..=500).map(|i| queued(i, "etl", 0, i)).collect());
+        assert_eq!(take(&s, "a", "etl"), Some(1));
+        assert_eq!(take(&s, "b", "etl"), Some(2));
+        s.enqueue(queued(900, "ml", 5, 1_000));
+        s.run_finished(1);
+        // The next free etl engine gives up its slot for the ml run ahead of it.
+        assert_eq!(take(&s, "a", "etl"), Some(-1));
+        // An ml engine started in its place takes the ml run.
+        assert_eq!(take(&s, "m", "ml"), Some(900));
+    }
+
+    #[test]
+    fn oldest_first_across_modules() {
+        let s = sup(1);
+        assert_eq!(take(&s, "a", "etl"), None);
+        s.enqueue(queued(1, "etl", 0, 10));
+        s.enqueue(queued(2, "ml", 0, 20));
+        assert_eq!(take(&s, "a", "etl"), Some(1));
+    }
+
+    #[test]
+    fn an_engine_does_not_leave_for_a_run_behind_its_own() {
+        let s = sup(1);
+        assert_eq!(take(&s, "a", "etl"), None);
+        s.enqueue(queued(1, "etl", 0, 10));
+        s.enqueue(queued(2, "ml", 0, 20));
+        s.enqueue(queued(3, "etl", 0, 30));
+        assert_eq!(take(&s, "a", "etl"), Some(1));
+        s.run_finished(1);
+        // ml is now first: with the pool full, the etl engine exits.
+        assert_eq!(take(&s, "a", "etl"), Some(-1));
+    }
+
+    #[test]
+    fn a_blocked_run_is_overtaken() {
+        let s = sup(1);
+        s.set_total("gpu", 1.0);
+        s.try_acquire(500, &[("gpu".into(), 1.0)]).unwrap();
+        let mut first = queued(1, "etl", 0, 10);
+        first.needs = vec![("gpu".into(), 1.0)];
+        s.enqueue(first);
+        s.enqueue(queued(2, "etl", 0, 20));
+        assert_eq!(take(&s, "a", "etl"), Some(2));
+        let inner = s.inner.lock().unwrap();
+        assert_eq!(inner.overtaken.get(&1), Some(&1));
+        assert!(inner.positions.contains_key(&1));
+    }
+
+    #[test]
+    fn shrinking_drains_busy_engines_and_growing_undoes_it() {
+        if cpu_count() < 2 {
+            return;
+        }
+        let s = sup(2);
+        s.enqueue(queued(1, "etl", 0, 10));
+        s.enqueue(queued(2, "etl", 0, 20));
+        assert_eq!(take(&s, "a", "etl"), Some(1));
+        assert_eq!(take(&s, "b", "etl"), Some(2));
+        s.set_max_engines(1);
+        let draining = |s: &Supervisor| {
+            s.inner
+                .lock()
+                .unwrap()
+                .engines
+                .values()
+                .filter(|e| e.status() == "draining")
+                .map(|e| e.id.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(draining(&s), vec!["b".to_string()]);
+        // Undo: the drain is cancelled, no new engine is needed.
+        s.set_max_engines(2);
+        assert!(draining(&s).is_empty());
+        // Drain again, then let the run end: the engine exits instead of taking work.
+        s.set_max_engines(1);
+        s.enqueue(queued(3, "etl", 0, 30));
+        s.run_finished(2);
+        assert_eq!(take(&s, "b", "etl"), Some(-1));
+        assert_eq!(s.inner.lock().unwrap().engines.len(), 1);
+    }
+
+    #[test]
+    fn the_pool_is_capped_at_the_cpu_count() {
+        let s = sup(10_000);
+        assert_eq!(s.max_engines(), cpu_count());
+        s.set_max_engines(0);
+        assert_eq!(s.max_engines(), 1);
     }
 }

@@ -85,6 +85,26 @@ export function useUiTitle(): string {
   return title;
 }
 
+/** The queue depth on the Queue tab, hidden while nothing waits. */
+function QueueBadge() {
+  const server = useQuery({
+    queryKey: ["server"],
+    queryFn: async () => unwrap(await api.GET("/api/server")),
+    refetchInterval: 5000,
+  });
+  const queued = server.data?.queued ?? 0;
+  if (queued <= 0) return null;
+  return (
+    <span
+      className="ml-1.5 rounded-full bg-muted px-1.5 font-mono text-[11px] leading-[18px] text-foreground"
+      title={`${queued} in line`}
+      data-testid="queue-badge"
+    >
+      {queued}
+    </span>
+  );
+}
+
 const SECURE_GUIDE = "https://sercanatalik.github.io/cereyan/guides/secure-the-server/";
 
 /**
@@ -162,6 +182,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                   )}
                 >
                   {item.label}
+                  {item.to === "/queue" ? <QueueBadge /> : null}
                 </Link>
               );
             })}

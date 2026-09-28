@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { pauseTime } from "@/components/pause-banner";
@@ -261,8 +262,11 @@ export function GeneralTab() {
             />
           </label>
           <div className="text-xs text-muted-foreground">
-            Catch-up {s?.catchup_default} · max engines {s?.max_engines} · engine max runs{" "}
-            {s?.engine_max_runs}
+            Catch-up {s?.catchup_default} ·{" "}
+            <Link to="/queue" className="underline">
+              processors {s?.max_engines} of {s?.cpu_cap}
+            </Link>{" "}
+            · engine max runs {s?.engine_max_runs}
           </div>
           <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
             Save settings

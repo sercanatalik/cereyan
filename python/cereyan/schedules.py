@@ -121,7 +121,68 @@ class RRule:
         }
 
 
-Schedule = Cron | Interval | RRule
+_UNITS = {"d": 86_400, "h": 3_600, "m": 60, "s": 1}
+
+
+def duration_seconds(value: float | int | timedelta | str) -> float:
+    """Seconds in a number, a ``timedelta``, or a string such as ``"30m"``, ``"1h30m"`` or ``"45s"``.
+
+    Raises ``ValueError`` for a negative value or a string it cannot read.
+    """
+    if isinstance(value, timedelta):
+        seconds = value.total_seconds()
+    elif isinstance(value, str):
+        text = value.strip().lower()
+        seconds, number = 0.0, ""
+        for ch in text:
+            if ch.isdigit() or ch == ".":
+                number += ch
+            elif ch in _UNITS and number:
+                seconds += float(number) * _UNITS[ch]
+                number = ""
+            elif not ch.isspace():
+                raise ValueError(f"cannot read the duration {value!r}; write it like '30m' or '1h30m'")
+        if number:
+            if text.replace(".", "", 1).isdigit():
+                seconds = float(number)
+            else:
+                raise ValueError(f"cannot read the duration {value!r}; give every number a unit (d, h, m, s)")
+        if not text:
+            raise ValueError("the duration is empty")
+    else:
+        seconds = float(value)
+    if seconds < 0:
+        raise ValueError("the duration must be zero or more")
+    return seconds
+
+
+@dataclass(frozen=True)
+class Continuous:
+    """Run again ``delay`` after the last run ends, once a processor is free.
+
+    ``delay`` is seconds, a ``timedelta``, or a string such as ``"30m"``. At
+    most one run of the schedule is ever waiting, in line, or running; the wait
+    holds no processor. A continuous schedule has no fire times, so it takes no
+    catch-up options. Pause the schedule to stop the loop; ``disable_after`` on
+    the flow stops it after repeated failures and resumes it later.
+    """
+
+    delay: float | int | timedelta | str = 0
+    jitter: int = 0
+    start_deadline: int | None = None
+    key: str | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        """The schedule as the server stores it; raises ``ValueError`` for a negative or unreadable delay."""
+        return {
+            "kind": "continuous",
+            "delay": duration_seconds(self.delay),
+            **_policy_json(None, self.jitter, self.start_deadline),
+            "key": self.key,
+        }
+
+
+Schedule = Cron | Interval | RRule | Continuous
 
 
 def normalize(value: Any) -> list[dict[str, Any]]:
@@ -131,8 +192,8 @@ def normalize(value: Any) -> list[dict[str, Any]]:
     items = value if isinstance(value, (list, tuple)) else [value]
     out = []
     for i, item in enumerate(items):
-        if not isinstance(item, (Cron, Interval, RRule)):
-            raise TypeError(f"schedule must be Cron, Interval, or RRule, got {type(item).__name__}")
+        if not isinstance(item, (Cron, Interval, RRule, Continuous)):
+            raise TypeError(f"schedule must be Cron, Interval, RRule, or Continuous, got {type(item).__name__}")
         data = item.to_json()
         if data.get("key") is None:
             data["key"] = f"code-{i}"

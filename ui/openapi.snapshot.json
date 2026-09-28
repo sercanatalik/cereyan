@@ -945,6 +945,42 @@
         ],
         "type": "object"
       },
+      "EngineView": {
+        "description": "One engine as the Queue page shows it.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "module": {
+            "description": "The module the engine has loaded.",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "since_secs": {
+            "description": "Seconds in the current run, or since the engine started when it has none.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "description": "`starting`, `idle`, `running` or `draining`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "module",
+          "since_secs"
+        ],
+        "type": "object"
+      },
       "EnvVariable": {
         "properties": {
           "hidden": {
@@ -1344,7 +1380,7 @@
           },
           "disable_after": {
             "default": null,
-            "description": "(count, window_seconds, persist_seconds)",
+            "description": "(count, window_seconds, persist_seconds)\n`(count, window_seconds, persist_seconds)`; a window of `None` counts\nfailures in a row, reset by a Completed run.",
             "items": false,
             "prefixItems": [
               {
@@ -1353,7 +1389,10 @@
               },
               {
                 "format": "int64",
-                "type": "integer"
+                "type": [
+                  "integer",
+                  "null"
+                ]
               },
               {
                 "format": "int64",
@@ -1660,6 +1699,117 @@
       "Id": {
         "type": "string"
       },
+      "InLine": {
+        "properties": {
+          "can_start": {
+            "type": "boolean"
+          },
+          "flow": {
+            "type": "string"
+          },
+          "module": {
+            "type": "string"
+          },
+          "overtaken_by": {
+            "description": "Later runs dispatched while this one could not start.",
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "position": {
+            "description": "1 for the first run in line.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "priority": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "project": {
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why it cannot start: `resource:<name>`, `max_concurrent`,\n`backfill concurrency`, or `no processor`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run_name": {
+            "type": "string"
+          },
+          "trigger": {
+            "description": "What made the run: `schedule`, `backfill`, `rule`, `dependency`, `crash rerun`,\nor the run's `created_by`.",
+            "type": "string"
+          },
+          "waited_us": {
+            "description": "Microseconds since the run joined the line.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_name",
+          "flow",
+          "project",
+          "module",
+          "trigger",
+          "priority",
+          "position",
+          "waited_us",
+          "can_start",
+          "overtaken_by"
+        ],
+        "type": "object"
+      },
+      "Joining": {
+        "properties": {
+          "at": {
+            "description": "When it joins the line, microseconds since the epoch.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "flow": {
+            "type": "string"
+          },
+          "kind": {
+            "description": "`retry`, `continuous`, `schedule`, or `delayed`.",
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "run_name": {
+            "type": "string"
+          },
+          "schedule_id": {
+            "description": "The schedule that made the run, when one did.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "run_id",
+          "run_name",
+          "flow",
+          "project",
+          "kind",
+          "at"
+        ],
+        "type": "object"
+      },
       "Log": {
         "properties": {
           "id": {
@@ -1802,6 +1952,42 @@
         },
         "type": "object"
       },
+      "PausedLoop": {
+        "description": "A continuous schedule that is paused: its loop has no run waiting.",
+        "properties": {
+          "flow": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "reason": {
+            "description": "`paused` by a person, or `disabled` by the flow's `disable_after`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedule_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "until": {
+            "description": "When a `disabled` loop resumes on its own, microseconds since the epoch.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "schedule_id",
+          "flow",
+          "project"
+        ],
+        "type": "object"
+      },
       "PrefilterBody": {
         "properties": {
           "skip": {
@@ -1851,6 +2037,45 @@
         "required": [
           "next",
           "timezone"
+        ],
+        "type": "object"
+      },
+      "Processors": {
+        "properties": {
+          "cap": {
+            "description": "The most `count` may be: this machine's CPU count.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "count": {
+            "description": "Engines that may run at once.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EngineView"
+            },
+            "type": "array"
+          },
+          "load": {
+            "description": "The one-minute load average over the CPU count (1.0 is every CPU busy);\nabsent where the platform does not report one.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "source": {
+            "description": "Where `count` came from: `flag`, `toml`, `settings`, or `default`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "cap",
+          "source",
+          "items"
         ],
         "type": "object"
       },
@@ -1983,6 +2208,45 @@
           "scheduled_time",
           "skipped",
           "projected"
+        ],
+        "type": "object"
+      },
+      "QueueView": {
+        "properties": {
+          "in_line": {
+            "items": {
+              "$ref": "#/components/schemas/InLine"
+            },
+            "type": "array"
+          },
+          "joining": {
+            "items": {
+              "$ref": "#/components/schemas/Joining"
+            },
+            "type": "array"
+          },
+          "more": {
+            "description": "Runs in line past the listed ones.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "paused_loops": {
+            "description": "Continuous schedules that are paused, so the page can resume them.",
+            "items": {
+              "$ref": "#/components/schemas/PausedLoop"
+            },
+            "type": "array"
+          },
+          "processors": {
+            "$ref": "#/components/schemas/Processors"
+          }
+        },
+        "required": [
+          "processors",
+          "in_line",
+          "more",
+          "joining",
+          "paused_loops"
         ],
         "type": "object"
       },
@@ -3135,6 +3399,26 @@
               "kind"
             ],
             "type": "object"
+          },
+          {
+            "description": "Runs again `delay` seconds after the last run ends, when a processor is\nfree. It has no fire times of its own: the scheduler creates its one\nnext run when the last one reaches a final state.",
+            "properties": {
+              "delay": {
+                "description": "Seconds from the end of one run to the next joining the line.",
+                "format": "double",
+                "type": "number"
+              },
+              "kind": {
+                "enum": [
+                  "continuous"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
           }
         ]
       },
@@ -3291,6 +3575,14 @@
               "null"
             ]
           },
+          "delay": {
+            "description": "Seconds a continuous schedule waits after each run ends.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "interval": {
             "format": "double",
             "type": [
@@ -3378,6 +3670,13 @@
             "description": "Seconds: each run becomes due up to this long after its fire time.",
             "format": "int64",
             "type": "integer"
+          },
+          "loop_state": {
+            "description": "For a continuous schedule, where its loop is: `waiting`, `in_line`,\n`running`, or `paused` (not stored).",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "next_fire": {
             "oneOf": [
@@ -3602,6 +3901,11 @@
           "catchup_default": {
             "type": "string"
           },
+          "cpu_cap": {
+            "description": "The most `max_engines` may be: this machine's CPU count.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "crash_retries_default": {
             "format": "int64",
             "type": "integer"
@@ -3657,8 +3961,13 @@
             ]
           },
           "max_engines": {
+            "description": "Engines (processors) that may run at once.",
             "minimum": 0,
             "type": "integer"
+          },
+          "max_engines_source": {
+            "description": "Where `max_engines` came from: `flag`, `toml`, `settings`, or `default`.",
+            "type": "string"
           },
           "pid": {
             "format": "int32",
@@ -3741,6 +4050,8 @@
           "wal_bytes",
           "resources",
           "max_engines",
+          "max_engines_source",
+          "cpu_cap",
           "engine_max_runs",
           "crash_retries_default",
           "catchup_default",
@@ -3785,6 +4096,14 @@
             ]
           },
           "keep_last_runs_per_flow": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "max_engines": {
+            "description": "Engines (processors) that may run at once: 1 up to the CPU count,\napplied at once and written under `[server]`.",
             "format": "int64",
             "type": [
               "integer",
@@ -5956,6 +6275,26 @@
         ]
       }
     },
+    "/api/queue": {
+      "get": {
+        "operationId": "get_queue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueView"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "queue"
+        ]
+      }
+    },
     "/api/resources/acquire": {
       "post": {
         "operationId": "acquire",
@@ -7441,6 +7780,44 @@
         ]
       }
     },
+    "/api/schedules/{sid}/now": {
+      "post": {
+        "operationId": "join_now",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sid",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "Not continuous, paused, or no run is waiting"
+          }
+        },
+        "summary": "Start a continuous schedule's waiting run now: it joins the line at once\ninstead of after the rest of its delay.",
+        "tags": [
+          "schedules"
+        ]
+      }
+    },
     "/api/schedules/{sid}/pause": {
       "post": {
         "operationId": "pause_schedule",
@@ -7540,6 +7917,9 @@
           },
           "404": {
             "description": ""
+          },
+          "409": {
+            "description": "The schedule is continuous and has no fire times"
           },
           "422": {
             "description": ""

@@ -53,6 +53,8 @@ def _describe_schedule(spec: dict[str, Any]) -> str:
         return f"every {spec.get('interval')} s"
     if kind == "rrule":
         return f"rrule {spec.get('rrule')}"
+    if kind == "continuous":
+        return f"continuous, {spec.get('delay')} s after each run"
     return str(kind)
 
 
@@ -135,9 +137,11 @@ def check_directory(directory: str, now: datetime | str | None = None) -> dict[s
                 own.append(_finding("error", "schedule", f"schedule {key} ({_describe_schedule(spec)}): {exc}", flow=label))
             else:
                 entry["next"] = [_iso(m, spec.get("timezone")) for m in fires]
+                # A continuous schedule has no fire times: its runs follow each other.
+                upcoming = ("runs when served, then again after each run ends" if spec.get("kind") == "continuous"
+                            else "next " + (", ".join(entry["next"]) or "never"))
                 own.append(_finding("info", "schedule",
-                                    f"schedule {key} ({_describe_schedule(spec)}): next "
-                                    + (", ".join(entry["next"]) or "never"), flow=label))
+                                    f"schedule {key} ({_describe_schedule(spec)}): {upcoming}", flow=label))
             previews.append(entry)
         for name in sorted(f.resources):
             if not _resource_declared(name, totals):

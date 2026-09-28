@@ -55,6 +55,8 @@ assert report().endswith("/record-0")   # "report#1: <run name>/record-0"
 
 ::: cereyan.RRule
 
+::: cereyan.Continuous
+
 ::: cereyan.exponential
 
 ## Targets, caching and results

@@ -477,7 +477,9 @@ fn catch_up(state: &Arc<AppState>, row: &ScheduleRow, last: i64, now: i64) {
     };
     for fire in &chosen {
         let scheduled = to_micros(*fire);
-        if let Some(run) = create_scheduled_run(state, &flow, row, scheduled, "catchup", false) {
+        if let Some(run) =
+            create_scheduled_run(state, &flow, row, scheduled, "catchup", false, None)
+        {
             crate::dispatch::enqueue_run(state, &run, &flow, None);
         }
     }
@@ -499,6 +501,7 @@ fn create_scheduled_run(
     scheduled: i64,
     created_by: &str,
     skip: bool,
+    unique: Option<cereyan_store::UniqueCheck>,
 ) -> Option<Run> {
     let options = FlowOptions::from_map(&flow.options);
     let mut params = serde_json::Map::new();
@@ -541,6 +544,7 @@ fn create_scheduled_run(
             schedule_id: Some(row.id),
             scheduled_time: Some(scheduled),
             priority: options.priority,
+            unique,
             ..Default::default()
         })
         .ok()?;
@@ -563,6 +567,10 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
     let Some(flow) = state.store.get_flow(row.flow_id).ok().flatten() else {
         return;
     };
+    if let Schedule::Continuous { delay } = row.schedule {
+        seed_continuous(state, &row, &flow, delay);
+        return;
+    }
     let now = now_micros();
     let all_skips = state.store.list_skips(row.id).unwrap_or_default();
     if all_skips.first().is_some_and(|t| *t <= now) {
@@ -596,7 +604,9 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
         cursor = next;
         let scheduled = to_micros(next);
         let skip = skips.contains(&scheduled);
-        if let Some(run) = create_scheduled_run(state, &flow, &row, scheduled, "schedule", skip) {
+        if let Some(run) =
+            create_scheduled_run(state, &flow, &row, scheduled, "schedule", skip, None)
+        {
             if !skip {
                 starting += 1;
             }
@@ -640,6 +650,111 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
     updated.next_fire = next_fire;
     updated.skipped = skips.len() as i64;
     state.scheduler.put(updated);
+}
+
+/// The unique key that keeps a continuous schedule to one run at a time.
+pub fn continuous_key(schedule_id: i64) -> String {
+    format!("continuous:{schedule_id}")
+}
+
+/// A continuous schedule has at most one run that has not finished. With none,
+/// create it, due at the later of now and the last run's end plus `delay`, so
+/// the wait holds no processor. Called on activation, at start, on resume, and
+/// when a run of the schedule reaches a final state; seeding twice leaves one
+/// run, because the store refuses a second holder of the schedule's key.
+fn seed_continuous(state: &Arc<AppState>, row: &ScheduleRow, flow: &Flow, delay: f64) {
+    let now = now_micros();
+    let active = state
+        .store
+        .active_runs_of_schedule(row.id)
+        .unwrap_or_default();
+    let waiting = if active.is_empty() {
+        let last_end = state.store.last_end_of_schedule(row.id).ok().flatten();
+        let due = last_end
+            .map(|end| end + (delay * 1e6) as i64)
+            .unwrap_or(now)
+            .max(now);
+        let unique = cereyan_store::UniqueCheck {
+            key: continuous_key(row.id),
+            states: ["Scheduled", "Pending", "Running", "Paused", "Cancelling"]
+                .map(String::from)
+                .to_vec(),
+            since: None,
+        };
+        create_scheduled_run(state, flow, row, due, "continuous", false, Some(unique))
+    } else {
+        active
+            .into_iter()
+            .find(|r| r.state.state_type == StateType::Scheduled && r.engine_pid.is_none())
+    };
+    let mut next_fire = None;
+    if let Some(run) = waiting.filter(|r| r.state.state_type == StateType::Scheduled) {
+        if let Some(fire) = run.scheduled_time {
+            let due = fire + jitter_offset(row.id, fire, row.jitter);
+            arm_run(state, run.id, due, false);
+            let deadline = row.start_deadline.or_else(|| {
+                FlowOptions::from_map(&flow.options)
+                    .start_deadline
+                    .map(|d| d.round() as i64)
+            });
+            if let Some(seconds) = deadline.filter(|d| *d > 0) {
+                state
+                    .timer
+                    .push(due + seconds * 1_000_000, TimerEvent::StartDeadline(run.id));
+            }
+            next_fire = Some(due).filter(|d| *d > now);
+        }
+    }
+    let mut updated = row.clone();
+    updated.next_fire = next_fire;
+    updated.skipped = 0;
+    state.scheduler.put(updated);
+    state.publish_schedule(row.id);
+}
+
+/// Move a continuous schedule's waiting run to now, so it joins the line at
+/// once. `Err` when the schedule is not continuous, is paused, or has no run
+/// waiting (it is already in line or running).
+pub fn join_now(state: &Arc<AppState>, schedule_id: i64) -> Result<i64, String> {
+    let row = state
+        .scheduler
+        .get(schedule_id)
+        .ok_or_else(|| "schedule not found".to_string())?;
+    if !row.schedule.is_continuous() {
+        return Err("only a continuous schedule has a run waiting to join the line".into());
+    }
+    if !row.active {
+        return Err("the schedule is paused; resume it to start the loop".into());
+    }
+    let waiting = state
+        .store
+        .active_runs_of_schedule(schedule_id)
+        .unwrap_or_default()
+        .into_iter()
+        .find(|r| {
+            r.state.state_type == StateType::Scheduled
+                && r.engine_pid.is_none()
+                && !state.supervisor.queued(r.id)
+        })
+        .ok_or_else(|| "no run is waiting: it is already in line or running".to_string())?;
+    let now = now_micros();
+    let params = serde_json::to_string(&waiting.parameters).unwrap_or_else(|_| "{}".into());
+    if !state
+        .store
+        .reschedule_run(waiting.id, now, &params)
+        .map_err(|e| e.to_string())?
+    {
+        return Err("the run started meanwhile".into());
+    }
+    arm_run(state, waiting.id, now, false);
+    let mut updated = row;
+    updated.next_fire = None;
+    state.scheduler.put(updated);
+    if let Ok(Some(run)) = state.store.get_run(waiting.id) {
+        state.publish_run(&run);
+    }
+    state.publish_schedule(schedule_id);
+    Ok(waiting.id)
 }
 
 /// A deterministic offset in `[0, jitter)` seconds, as microseconds, from the
@@ -1026,10 +1141,17 @@ fn handle(state: &Arc<AppState>, event: TimerEvent) {
             let Some(run) = state.store.get_run(run_id).ok().flatten() else {
                 return;
             };
+            // A continuous schedule's time is a floor for joining the line,
+            // not a promise to start: its runs are never Late.
+            let continuous = run
+                .schedule_id
+                .and_then(|sid| state.scheduler.get(sid))
+                .is_some_and(|row| row.schedule.is_continuous());
             if run.state.state_type == StateType::Scheduled
                 && run.engine_pid.is_none()
                 && run.state.name != "Late"
                 && !is_marked(&run)
+                && !continuous
             {
                 let mut late = State::named(cereyan_core::StateName::Late);
                 late.message = run.state.message.clone();

@@ -593,7 +593,7 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
     engines, sources["server.max_engines"] = _first((
         (max_engines or None, "flag", "--max-engines or app.serve(max_engines=)"),
         (settings.get("max_engines") or None, "toml", "[server] max_engines"),
-    ), os.cpu_count() or 4)
+    ), 1)
     engine_runs, sources["server.engine_max_runs"] = _first((
         (engine_max_runs or None, "flag", "--engine-max-runs or app.serve(engine_max_runs=)"),
         (settings.get("engine_max_runs") or None, "toml", "[server] engine_max_runs"),

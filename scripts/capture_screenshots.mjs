@@ -63,7 +63,7 @@ class Demo {
     this.cwd = mkdtempSync(path.join(tmpdir(), "cereyan-shots-cwd-"));
     this.proc = spawn(
       "uv",
-      ["run", "--project", ROOT, "cereyan", "serve", path.join(ROOT, "examples"), "--port", String(port)],
+      ["run", "--project", ROOT, "cereyan", "serve", path.join(ROOT, "examples"), "--port", String(port), "--max-engines", "4"],
       { cwd: this.cwd, env: { ...process.env, CEREYAN_HOME: this.home }, stdio: "ignore", detached: true },
     );
   }
@@ -391,6 +391,19 @@ function images({ base, flows, etl }) {
     settings: async (b) => {
       await b.go(`${base}/settings`, "light");
       await b.until("document.querySelector('main').innerText.includes('Engines')", "the engine pool");
+    },
+    queue: async (b) => {
+      // Last, so its runs for later appear on no other page: three runs join the line soon.
+      for (const [name, minutes] of [["etl", 4], ["daily_etl", 18], ["sales", 42]]) {
+        await fetch(`${base}/api/flows/${flows[name].id}/runs`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ parameters: { day: DAY }, delay: minutes * 60 }),
+        });
+      }
+      await b.go(`${base}/queue`, "light");
+      await b.until("document.querySelectorAll('[data-testid=processor-tile]').length >= 4", "the processors");
+      await b.until("document.querySelector('main').innerText.includes('sales')", "the runs joining the line");
     },
   };
 }

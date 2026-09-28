@@ -21,5 +21,6 @@ It needs Node 22 and Chrome (set `CHROME` if Chrome is not in a standard place),
 | `skip-dialog.png`, `reschedule-dialog.png` | The Skip upcoming runs dialog set to three runs, and Reschedule with the time moved to 07:30 |
 | `events.png` | The Events feed with a `run.failed` event open |
 | `artifacts.png`, `rules.png`, `variables.png`, `settings.png` | Those pages with the seeded artifacts, rules, and variables |
+| `queue.png` | The Queue page with four idle processors and three runs for later joining the line |
 
 Every file here must be referenced from a page with alt text that says what the picture shows. When the script changes what a picture shows, update its alt text on the pages that use it.

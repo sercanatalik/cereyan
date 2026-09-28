@@ -262,13 +262,14 @@ test("state badge colours are the 1.3 colours", () => {
   expect(screen.getByText("Skipped").className).toContain("bg-teal-100");
 });
 
-test("top bar carries the eight sections, a list page the scope sidebar, and the theme toggle persists", async () => {
+test("top bar carries the nine sections, a list page the scope sidebar, and the theme toggle persists", async () => {
   mount("/runs");
   const nav = await screen.findByRole("navigation", { name: "Sections" });
   const links = within(nav).getAllByRole("link");
   expect(links.map((l) => l.textContent)).toEqual([
     "Dashboard",
     "Runs",
+    "Queue",
     "Flows",
     "Events",
     "Artifacts",

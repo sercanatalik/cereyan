@@ -453,6 +453,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_queue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/resources/acquire": {
         parameters: {
             query?: never;
@@ -868,6 +884,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["patch_schedule"];
+        trace?: never;
+    };
+    "/api/schedules/{sid}/now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a continuous schedule's waiting run now: it joins the line at once
+         *     instead of after the rest of its delay.
+         */
+        post: operations["join_now"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/schedules/{sid}/pause": {
@@ -1436,6 +1472,21 @@ export interface components {
             /** Format: int64 */
             run_id?: number | null;
         };
+        /** @description One engine as the Queue page shows it. */
+        EngineView: {
+            id: string;
+            /** @description The module the engine has loaded. */
+            module: string;
+            /** Format: int64 */
+            run_id?: number | null;
+            /**
+             * Format: int64
+             * @description Seconds in the current run, or since the engine started when it has none.
+             */
+            since_secs: number;
+            /** @description `starting`, `idle`, `running` or `draining`. */
+            status: string;
+        };
         Environment: {
             /** @description The served directory's `cereyan.toml` with its secrets hidden. */
             cereyan_toml?: string | null;
@@ -1568,11 +1619,13 @@ export interface components {
             crash_retries: number | null;
             /**
              * @description (count, window_seconds, persist_seconds)
+             *     `(count, window_seconds, persist_seconds)`; a window of `None` counts
+             *     failures in a row, reset by a Completed run.
              * @default null
              */
             disable_after: [
                 number,
-                number,
+                number | null,
                 number
             ] | null;
             /**
@@ -1695,6 +1748,58 @@ export interface components {
         /** Format: int64 */
         i64: number;
         Id: string;
+        InLine: {
+            can_start: boolean;
+            flow: string;
+            module: string;
+            /**
+             * Format: int32
+             * @description Later runs dispatched while this one could not start.
+             */
+            overtaken_by: number;
+            /** @description 1 for the first run in line. */
+            position: number;
+            /** Format: int64 */
+            priority: number;
+            project: string;
+            /**
+             * @description Why it cannot start: `resource:<name>`, `max_concurrent`,
+             *     `backfill concurrency`, or `no processor`.
+             */
+            reason?: string | null;
+            /** Format: int64 */
+            run_id: number;
+            run_name: string;
+            /**
+             * @description What made the run: `schedule`, `backfill`, `rule`, `dependency`, `crash rerun`,
+             *     or the run's `created_by`.
+             */
+            trigger: string;
+            /**
+             * Format: int64
+             * @description Microseconds since the run joined the line.
+             */
+            waited_us: number;
+        };
+        Joining: {
+            /**
+             * Format: int64
+             * @description When it joins the line, microseconds since the epoch.
+             */
+            at: number;
+            flow: string;
+            /** @description `retry`, `continuous`, `schedule`, or `delayed`. */
+            kind: string;
+            project: string;
+            /** Format: int64 */
+            run_id: number;
+            run_name: string;
+            /**
+             * Format: int64
+             * @description The schedule that made the run, when one did.
+             */
+            schedule_id?: number | null;
+        };
         Log: {
             /** Format: int64 */
             id: number;
@@ -1752,6 +1857,20 @@ export interface components {
              */
             until: number | null;
         };
+        /** @description A continuous schedule that is paused: its loop has no run waiting. */
+        PausedLoop: {
+            flow: string;
+            project: string;
+            /** @description `paused` by a person, or `disabled` by the flow's `disable_after`. */
+            reason?: string | null;
+            /** Format: int64 */
+            schedule_id: number;
+            /**
+             * Format: int64
+             * @description When a `disabled` loop resumes on its own, microseconds since the epoch.
+             */
+            until?: number | null;
+        };
         PrefilterBody: {
             skip: string[];
         };
@@ -1761,6 +1880,21 @@ export interface components {
         PreviewResponse: {
             next: number[];
             timezone: string;
+        };
+        Processors: {
+            /** @description The most `count` may be: this machine's CPU count. */
+            cap: number;
+            /** @description Engines that may run at once. */
+            count: number;
+            items: components["schemas"]["EngineView"][];
+            /**
+             * Format: double
+             * @description The one-minute load average over the CPU count (1.0 is every CPU busy);
+             *     absent where the platform does not report one.
+             */
+            load?: number | null;
+            /** @description Where `count` came from: `flag`, `toml`, `settings`, or `default`. */
+            source: string;
         };
         /** @description A fire past the look-ahead, computed from the schedule; no run exists for it yet. */
         ProjectedFire: {
@@ -1810,6 +1944,15 @@ export interface components {
             runs: number;
             /** @description True when any of its flows is live, so it cannot be removed. */
             served: boolean;
+        };
+        QueueView: {
+            in_line: components["schemas"]["InLine"][];
+            joining: components["schemas"]["Joining"][];
+            /** @description Runs in line past the listed ones. */
+            more: number;
+            /** @description Continuous schedules that are paused, so the page can resume them. */
+            paused_loops: components["schemas"]["PausedLoop"][];
+            processors: components["schemas"]["Processors"];
         };
         ReleaseRequest: {
             /** Format: int64 */
@@ -2184,6 +2327,14 @@ export interface components {
             kind: "rrule";
             rrule: string;
             timezone?: string | null;
+        } | {
+            /**
+             * Format: double
+             * @description Seconds from the end of one run to the next joining the line.
+             */
+            delay?: number;
+            /** @enum {string} */
+            kind: "continuous";
         };
         ScheduleBody: components["schemas"]["Schedule"] & {
             active?: boolean | null;
@@ -2229,6 +2380,11 @@ export interface components {
             catchup_window?: number | null;
             cron?: string | null;
             day_or?: boolean | null;
+            /**
+             * Format: double
+             * @description Seconds a continuous schedule waits after each run ends.
+             */
+            delay?: number | null;
             /** Format: double */
             interval?: number | null;
             /** Format: int64 */
@@ -2266,6 +2422,11 @@ export interface components {
              * @description Seconds: each run becomes due up to this long after its fire time.
              */
             jitter?: number;
+            /**
+             * @description For a continuous schedule, where its loop is: `waiting`, `in_line`,
+             *     `running`, or `paused` (not stored).
+             */
+            loop_state?: string | null;
             next_fire?: null | components["schemas"]["i64"];
             paused_reason?: string | null;
             paused_until?: null | components["schemas"]["i64"];
@@ -2346,6 +2507,8 @@ export interface components {
             /** @description `db-*.sqlite` copies under the backup directory. */
             backups: number;
             catchup_default: string;
+            /** @description The most `max_engines` may be: this machine's CPU count. */
+            cpu_cap: number;
             /** Format: int64 */
             crash_retries_default: number;
             custom_routes: components["schemas"]["RouteSpec"][];
@@ -2369,7 +2532,10 @@ export interface components {
              */
             last_backup_at?: number | null;
             last_backup_path?: string | null;
+            /** @description Engines (processors) that may run at once. */
             max_engines: number;
+            /** @description Where `max_engines` came from: `flag`, `toml`, `settings`, or `default`. */
+            max_engines_source: string;
             /** Format: int32 */
             pid: number;
             /** Format: int32 */
@@ -2412,6 +2578,12 @@ export interface components {
             crash_retries?: number | null;
             /** Format: int64 */
             keep_last_runs_per_flow?: number | null;
+            /**
+             * Format: int64
+             * @description Engines (processors) that may run at once: 1 up to the CPU count,
+             *     applied at once and written under `[server]`.
+             */
+            max_engines?: number | null;
             resources?: {
                 [key: string]: number;
             } | null;
@@ -3595,6 +3767,25 @@ export interface operations {
             };
         };
     };
+    get_queue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueView"];
+                };
+            };
+        };
+    };
     acquire: {
         parameters: {
             query?: never;
@@ -4568,6 +4759,40 @@ export interface operations {
             };
         };
     };
+    join_now: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sid: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRow"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not continuous, paused, or no run is waiting */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     pause_schedule: {
         parameters: {
             query?: never;
@@ -4634,6 +4859,13 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The schedule is continuous and has no fire times */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

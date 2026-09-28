@@ -13,6 +13,7 @@ pub mod metrics;
 pub mod observability;
 pub mod pause;
 pub mod projects;
+pub mod queue;
 pub mod runs;
 pub mod schedules;
 pub mod settings;
@@ -134,6 +135,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         schedules::delete_schedule,
         schedules::pause_schedule,
         schedules::resume_schedule,
+        schedules::join_now,
         schedules::add_skips,
         schedules::delete_skip,
         schedules::upcoming_runs,
@@ -149,6 +151,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         backfills::prefilter_backfill,
         backfills::cancel_backfill,
         settings::get_settings,
+        queue::get_queue,
         settings::patch_settings,
         environment::get_environment,
         projects::list_projects,
@@ -250,6 +253,12 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         backfills::BackfillStatus,
         backfills::PrefilterBody,
         settings::Settings,
+        queue::QueueView,
+        queue::Processors,
+        queue::InLine,
+        queue::Joining,
+        queue::PausedLoop,
+        crate::supervisor::EngineView,
         settings::SettingsPatch,
         environment::Environment,
         environment::Runtime,
@@ -299,6 +308,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     let api = Router::new()
         .route("/api/health", get(health))
         .route("/api/server", get(server_info))
+        .route("/api/queue", get(queue::get_queue))
         .route("/api/openapi.json", get(openapi))
         .route("/api/flows", get(flows::list_flows))
         .route(
@@ -344,6 +354,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/schedules/{sid}/resume",
             post(schedules::resume_schedule),
         )
+        .route("/api/schedules/{sid}/now", post(schedules::join_now))
         .route("/api/schedules/{sid}/skips", post(schedules::add_skips))
         .route(
             "/api/schedules/{sid}/skips/{fire}",

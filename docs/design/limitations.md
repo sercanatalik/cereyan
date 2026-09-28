@@ -12,7 +12,7 @@ Cereyan is built for one machine, one wheel, and pipelines that can always be re
 
 **One wheel, no runtime dependencies.** `pip install cereyan` is the whole install: the Rust core, the server, the UI, and the MCP server are inside the wheel. Nothing is pulled in at run time, so a pipeline environment gains no transitive dependencies from its orchestrator. Docs tooling and tests use dependency groups that never reach the wheel.
 
-**One process serves everything.** `cereyan serve` is the API, the UI, the scheduler, the rules engine, the MCP endpoint, and the engine supervisor. There are no separate agents, workers, or queues to run.
+**One process serves everything.** `cereyan serve` is the API, the UI, the scheduler, the rules engine, the MCP endpoint, and the engine supervisor. There are no separate agents, workers, or queues to run: the queue and the processors on the Queue page are the supervisor's own queue and its engine children, sized from the UI but never started by hand.
 
 **Two execution paths, one store.** A plain `python pipeline.py` writes the same SQLite store the server uses, under the same state rules, so a script and a served run look identical in history. When a server holds the store, scripts hand their runs to it.
 
@@ -40,7 +40,7 @@ Cereyan is built for one machine, one wheel, and pipelines that can always be re
 ## Limits worth knowing
 
 - One server per machine, because the home and its advisory lock are global.
-- The engine pool bounds concurrent runs at `max_engines`, default the CPU count; a run occupies an engine for its whole duration, including time spent waiting on I/O, unless it waits through `sleep`, `wait_for_event`, `wait_for_target`, or `wait_for_input`, which free the engine.
+- The engine pool bounds concurrent runs at `max_engines` (processors on the Queue page), default 1 and at most the CPU count; a run occupies an engine for its whole duration, including time spent waiting on I/O, unless it waits through `sleep`, `wait_for_event`, `wait_for_target`, or `wait_for_input`, which free the engine.
 - Artifacts are limited to 1 MB and variables to 64 KB.
 - Retention deletes logs and events older than `retain_days`, and runs older than `retain_runs_days` when that is set; persisted results under `storage/` are a cache keyed by task inputs and are not deleted per run.
 - Unix sockets and engine niceness do not exist on Windows.

@@ -16,7 +16,7 @@ from .waits import Snooze, WaitTimeout, sleep, sleep_until, wait_for_event, wait
 from .results import INPUTS, SOURCE, CachePolicy
 from .routes import HTTPError, Request, Response
 from .runners import Future, ProcessRunner, ThreadRunner
-from .schedules import Cron, Interval, RRule, exponential
+from .schedules import Continuous, Cron, Interval, RRule, exponential
 from .targets import LocalTarget, Target
 from .tasks import Task, task
 from .variables import Variable
@@ -30,6 +30,7 @@ __all__ = [
     "CachePolicy",
     "Abort",
     "CereyanError",
+    "Continuous",
     "Cron",
     "Future",
     "INPUTS",

@@ -85,6 +85,9 @@ pub struct SchedulePatchBody {
     pub anchor: Option<i64>,
     #[serde(default)]
     pub rrule: Option<String>,
+    /// Seconds a continuous schedule waits after each run ends.
+    #[serde(default)]
+    pub delay: Option<f64>,
     #[serde(default)]
     pub catchup: Option<CatchupPolicy>,
     #[serde(default)]
@@ -109,7 +112,51 @@ pub(crate) fn decorate(state: &AppState, mut row: ScheduleRow) -> ScheduleRow {
     if let Some(cached) = state.scheduler.get(row.id) {
         row.next_fire = cached.next_fire;
     }
+    if row.schedule.is_continuous() {
+        row.loop_state = Some(loop_state(state, &row).into());
+    }
     row
+}
+
+/// Where a continuous schedule's loop is: its one unfinished run decides.
+fn loop_state(state: &AppState, row: &ScheduleRow) -> &'static str {
+    if !row.active {
+        return "paused";
+    }
+    let active = state
+        .store
+        .active_runs_of_schedule(row.id)
+        .unwrap_or_default();
+    let Some(run) = active.last() else {
+        return "waiting";
+    };
+    if run.state.state_type != cereyan_core::StateType::Scheduled || run.engine_pid.is_some() {
+        "running"
+    } else if state.supervisor.queued(run.id) {
+        "in_line"
+    } else {
+        "waiting"
+    }
+}
+
+/// A continuous schedule has no fires to catch up.
+fn check_continuous(
+    schedule: &Schedule,
+    catchup: Option<CatchupPolicy>,
+    catchup_max: Option<i64>,
+    catchup_window: Option<i64>,
+) -> ApiResult<()> {
+    if schedule.is_continuous()
+        && (catchup.is_some_and(|c| c != CatchupPolicy::Skip)
+            || catchup_max.is_some()
+            || catchup_window.is_some_and(|w| w > 0))
+    {
+        return Err(ApiError::Unprocessable(
+            "a continuous schedule has no fires to catch up; leave catchup, catchup_max and catchup_window unset"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 #[utoipa::path(get, path = "/api/flows/{id}/schedules", params(("id" = i64, Path)), responses((status = 200, body = Vec<ScheduleRow>)))]
@@ -154,6 +201,12 @@ pub async fn create_schedule_inner(
         body.catchup_window,
         body.jitter,
         body.start_deadline,
+    )?;
+    check_continuous(
+        &body.schedule,
+        body.catchup,
+        body.catchup_max,
+        body.catchup_window,
     )?;
     let pinned = body.schedule.clone().with_anchor_if_missing(now_micros());
     let st = state.clone();
@@ -210,6 +263,9 @@ fn apply_patch(current: &Schedule, body: &SchedulePatchBody) -> Schedule {
             rrule: body.rrule.clone().unwrap_or(rrule),
             timezone: body.timezone.clone().or(timezone),
         },
+        Schedule::Continuous { delay } => Schedule::Continuous {
+            delay: body.delay.unwrap_or(delay),
+        },
     }
 }
 
@@ -249,6 +305,10 @@ pub async fn patch_schedule_inner(
             rrule: rrule.clone(),
             timezone: body.timezone.clone(),
         }
+    } else if body.delay.is_some() && !row.schedule.is_continuous() {
+        Schedule::Continuous {
+            delay: body.delay.unwrap_or(0.0),
+        }
     } else if body.interval.is_some() && !matches!(row.schedule, Schedule::Interval { .. }) {
         Schedule::Interval {
             interval: body.interval.unwrap_or(3600.0),
@@ -266,6 +326,12 @@ pub async fn patch_schedule_inner(
         body.catchup_window,
         Some(body.jitter.unwrap_or(row.jitter)),
         body.start_deadline,
+    )?;
+    check_continuous(
+        &schedule,
+        body.catchup,
+        body.catchup_max,
+        body.catchup_window,
     )?;
     let schedule = schedule.with_anchor_if_missing(now_micros());
     let st = state.clone();
@@ -345,6 +411,29 @@ pub async fn resume_schedule(
     tokio::task::spawn_blocking(move || scheduler::resume(&st, sid))
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let row = state
+        .store
+        .get_schedule(sid)?
+        .ok_or_else(|| ApiError::NotFound("schedule not found".into()))?;
+    Ok(Json(decorate(&state, row)))
+}
+
+#[utoipa::path(post, path = "/api/schedules/{sid}/now", params(("sid" = i64, Path)), responses((status = 200, body = ScheduleRow), (status = 404), (status = 409, description = "Not continuous, paused, or no run is waiting")))]
+/// Start a continuous schedule's waiting run now: it joins the line at once
+/// instead of after the rest of its delay.
+pub async fn join_now(
+    State(state): State<Arc<AppState>>,
+    Path(sid): Path<i64>,
+) -> ApiResult<Json<ScheduleRow>> {
+    state
+        .store
+        .get_schedule(sid)?
+        .ok_or_else(|| ApiError::NotFound("schedule not found".into()))?;
+    let st = state.clone();
+    tokio::task::spawn_blocking(move || scheduler::join_now(&st, sid))
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .map_err(|e| ApiError::Conflict(serde_json::json!({ "error": e })))?;
     let row = state
         .store
         .get_schedule(sid)?
@@ -524,7 +613,7 @@ fn downstream_of(state: &AppState, flow: &Flow) -> Result<Vec<Flow>, StoreError>
     Ok(out)
 }
 
-#[utoipa::path(post, path = "/api/schedules/{sid}/skips", params(("sid" = i64, Path)), request_body = SkipBody, responses((status = 200, body = SkipResponse), (status = 404), (status = 422)))]
+#[utoipa::path(post, path = "/api/schedules/{sid}/skips", params(("sid" = i64, Path)), request_body = SkipBody, responses((status = 200, body = SkipResponse), (status = 404), (status = 409, description = "The schedule is continuous and has no fire times"), (status = 422)))]
 pub async fn add_skips(
     State(state): State<Arc<AppState>>,
     Path(sid): Path<i64>,
@@ -534,6 +623,11 @@ pub async fn add_skips(
         .store
         .get_schedule(sid)?
         .ok_or_else(|| ApiError::NotFound("schedule not found".into()))?;
+    if row.schedule.is_continuous() {
+        return Err(ApiError::Conflict(serde_json::json!({
+            "error": "a continuous schedule has no fire times to skip; pause it instead"
+        })));
+    }
     let by = match body.by.as_deref() {
         None | Some("api") => "api",
         Some("ui") => "ui",

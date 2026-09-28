@@ -205,6 +205,10 @@ pub struct ScheduleRow {
     /// Future fires skipped by a person, counted by the scheduler (not stored).
     #[serde(default)]
     pub skipped: i64,
+    /// For a continuous schedule, where its loop is: `waiting`, `in_line`,
+    /// `running`, or `paused` (not stored).
+    #[serde(default)]
+    pub loop_state: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -244,7 +248,9 @@ pub struct FlowOptions {
     pub retries: i64,
     pub after: Option<AfterSpec>,
     /// (count, window_seconds, persist_seconds)
-    pub disable_after: Option<(i64, i64, i64)>,
+    /// `(count, window_seconds, persist_seconds)`; a window of `None` counts
+    /// failures in a row, reset by a Completed run.
+    pub disable_after: Option<(i64, Option<i64>, i64)>,
     pub schedules: Vec<ScheduleDecl>,
     pub has_bulk_complete: bool,
     pub has_crash_hooks: bool,

@@ -527,6 +527,21 @@ Also served on POST, which is what the engine client speaks.
 | 204 | no body |
 | 404 | no body |
 
+### `POST /api/schedules/{sid}/now`
+
+Start a continuous schedule's waiting run now: it joins the line at once
+instead of after the rest of its delay.
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `sid` | path | integer (int64) | yes |  |
+
+| Status | Body |
+|---|---|
+| 200 | [`ScheduleRow`](#schedulerow) (application/json) |
+| 404 | no body |
+| 409 | Not continuous, paused, or no run is waiting |
+
 ### `POST /api/schedules/{sid}/pause`
 
 | Parameter | In | Type | Required | Description |
@@ -559,6 +574,7 @@ Also served on POST, which is what the engine client speaks.
 |---|---|
 | 200 | [`SkipResponse`](#skipresponse) (application/json) |
 | 404 | no body |
+| 409 | The schedule is continuous and has no fire times |
 | 422 | no body |
 
 ### `DELETE /api/schedules/{sid}/skips/{fire}`
@@ -951,6 +967,12 @@ Also served on POST, which is what the engine client speaks.
 | 409 | The project is served, or a run of it is in progress |
 | 503 | The database is being reset |
 
+### `GET /api/queue`
+
+| Status | Body |
+|---|---|
+| 200 | [`QueueView`](#queueview) (application/json) |
+
 ### `GET /api/scheduler`
 
 | Status | Body |
@@ -1242,6 +1264,18 @@ A flow that runs after the skipped one, directly or further down its chain.
 | `resource` | null or [`Resource`](#resource) | no |  |
 | `run_id` | integer or null (int64) | no |  |
 
+### `EngineView`
+
+One engine as the Queue page shows it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes |  |
+| `module` | string | yes | The module the engine has loaded. |
+| `run_id` | integer or null (int64) | no |  |
+| `since_secs` | integer (int64) | yes | Seconds in the current run, or since the engine started when it has none. |
+| `status` | string | yes | `starting`, `idle`, `running` or `draining`. |
+
 ### `EnvVariable`
 
 | Field | Type | Required | Description |
@@ -1362,7 +1396,7 @@ Flow-level options declared in Python and stored as JSON on the flow row.
 |---|---|---|---|
 | `after` | null or [`AfterSpec`](#afterspec) | no |  |
 | `crash_retries` | integer or null (int64) | no |  |
-| `disable_after` | array or null | no | (count, window_seconds, persist_seconds) |
+| `disable_after` | array or null | no | (count, window_seconds, persist_seconds) `(count, window_seconds, persist_seconds)`; a window of `None` counts failures in a row, reset by a Completed run. |
 | `expect_by` | string or null | no | Cron by which a run must have completed, in `expect_by_tz`. |
 | `expect_by_tz` | string or null | no |  |
 | `expected_duration` | number or null (double) | no | Seconds a run is expected to take; longer is overdue. |
@@ -1417,6 +1451,35 @@ Type: any.
 
 Type: string.
 
+### `InLine`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `can_start` | boolean | yes |  |
+| `flow` | string | yes |  |
+| `module` | string | yes |  |
+| `overtaken_by` | integer (int32) | yes | Later runs dispatched while this one could not start. |
+| `position` | integer | yes | 1 for the first run in line. |
+| `priority` | integer (int64) | yes |  |
+| `project` | string | yes |  |
+| `reason` | string or null | no | Why it cannot start: `resource:<name>`, `max_concurrent`, `backfill concurrency`, or `no processor`. |
+| `run_id` | integer (int64) | yes |  |
+| `run_name` | string | yes |  |
+| `trigger` | string | yes | What made the run: `schedule`, `backfill`, `rule`, `dependency`, `crash rerun`, or the run's `created_by`. |
+| `waited_us` | integer (int64) | yes | Microseconds since the run joined the line. |
+
+### `Joining`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `at` | integer (int64) | yes | When it joins the line, microseconds since the epoch. |
+| `flow` | string | yes |  |
+| `kind` | string | yes | `retry`, `continuous`, `schedule`, or `delayed`. |
+| `project` | string | yes |  |
+| `run_id` | integer (int64) | yes |  |
+| `run_name` | string | yes |  |
+| `schedule_id` | integer or null (int64) | no | The schedule that made the run, when one did. |
+
 ### `Log`
 
 | Field | Type | Required | Description |
@@ -1462,6 +1525,18 @@ The global pause: every schedule held at once, with a reason and an end.
 | `suppress_rules` | boolean | no | Record rules that would fire as suppressed instead of acting. |
 | `until` | integer or null (int64) | no | When to resume on its own, microseconds; absent means until resumed. |
 
+### `PausedLoop`
+
+A continuous schedule that is paused: its loop has no run waiting.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `flow` | string | yes |  |
+| `project` | string | yes |  |
+| `reason` | string or null | no | `paused` by a person, or `disabled` by the flow's `disable_after`. |
+| `schedule_id` | integer (int64) | yes |  |
+| `until` | integer or null (int64) | no | When a `disabled` loop resumes on its own, microseconds since the epoch. |
+
 ### `PrefilterBody`
 
 | Field | Type | Required | Description |
@@ -1478,6 +1553,16 @@ Type: any.
 |---|---|---|---|
 | `next` | array of integer (int64) | yes |  |
 | `timezone` | string | yes |  |
+
+### `Processors`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cap` | integer | yes | The most `count` may be: this machine's CPU count. |
+| `count` | integer | yes | Engines that may run at once. |
+| `items` | [`EngineView`](#engineview)[] | yes |  |
+| `load` | number or null (double) | no | The one-minute load average over the CPU count (1.0 is every CPU busy); absent where the platform does not report one. |
+| `source` | string | yes | Where `count` came from: `flag`, `toml`, `settings`, or `default`. |
 
 ### `ProjectPreview`
 
@@ -1516,6 +1601,16 @@ A fire past the look-ahead, computed from the schedule; no run exists for it yet
 | `skipped` | boolean | yes |  |
 | `skipped_at` | integer or null (int64) | no |  |
 | `skipped_by` | string or null | no |  |
+
+### `QueueView`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `in_line` | [`InLine`](#inline)[] | yes |  |
+| `joining` | [`Joining`](#joining)[] | yes |  |
+| `more` | integer | yes | Runs in line past the listed ones. |
+| `paused_loops` | [`PausedLoop`](#pausedloop)[] | yes | Continuous schedules that are paused, so the page can resume them. |
+| `processors` | [`Processors`](#processors) | yes |  |
 
 ### `ReleaseRequest`
 
@@ -1790,7 +1885,7 @@ One point of the dashboard's history.
 
 ### `Schedule`
 
-One of: object, object, object.
+One of: object, object, object, object.
 
 ### `ScheduleBody`
 
@@ -1810,6 +1905,7 @@ Type: any.
 | `catchup_window` | integer or null (int64) | no |  |
 | `cron` | string or null | no |  |
 | `day_or` | boolean or null | no |  |
+| `delay` | number or null (double) | no | Seconds a continuous schedule waits after each run ends. |
 | `interval` | number or null (double) | no |  |
 | `jitter` | integer or null (int64) | no |  |
 | `persist` | boolean or null | no |  |
@@ -1835,6 +1931,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `flow_id` | integer (int64) | yes |  |
 | `id` | integer (int64) | yes |  |
 | `jitter` | integer (int64) | no | Seconds: each run becomes due up to this long after its fire time. |
+| `loop_state` | string or null | no | For a continuous schedule, where its loop is: `waiting`, `in_line`, `running`, or `paused` (not stored). |
 | `next_fire` | null or [`i64`](#i64) | no |  |
 | `paused_reason` | string or null | no |  |
 | `paused_until` | null or [`i64`](#i64) | no |  |
@@ -1884,6 +1981,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `backup_keep` | integer (int64) | yes | Scheduled copies kept. |
 | `backups` | integer | yes | `db-*.sqlite` copies under the backup directory. |
 | `catchup_default` | string | yes |  |
+| `cpu_cap` | integer | yes | The most `max_engines` may be: this machine's CPU count. |
 | `crash_retries_default` | integer (int64) | yes |  |
 | `custom_routes` | [`RouteSpec`](#routespec)[] | yes |  |
 | `database_bytes` | integer (int64) | yes |  |
@@ -1896,7 +1994,8 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `keep_last_runs_per_flow` | integer (int64) | yes | Runs per flow retention never deletes. |
 | `last_backup_at` | integer or null (int64) | no | Microseconds since the epoch of the last backup, scheduled or on demand. |
 | `last_backup_path` | string or null | no |  |
-| `max_engines` | integer | yes |  |
+| `max_engines` | integer | yes | Engines (processors) that may run at once. |
+| `max_engines_source` | string | yes | Where `max_engines` came from: `flag`, `toml`, `settings`, or `default`. |
 | `pid` | integer (int32) | yes |  |
 | `port` | integer (int32) | yes |  |
 | `resources` | object | yes |  |
@@ -1921,6 +2020,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `backup_keep` | integer or null (int64) | no |  |
 | `crash_retries` | integer or null (int64) | no |  |
 | `keep_last_runs_per_flow` | integer or null (int64) | no |  |
+| `max_engines` | integer or null (int64) | no | Engines (processors) that may run at once: 1 up to the CPU count, applied at once and written under `[server]`. |
 | `resources` | object or null | no |  |
 | `retain_checkpoints_days` | integer or null (int64) | no |  |
 | `retain_days` | integer or null (int64) | no |  |

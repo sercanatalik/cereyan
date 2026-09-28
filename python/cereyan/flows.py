@@ -212,7 +212,7 @@ class Flow:
         self.after = _parse_after(after, batch_key)
         if disable_after is not None:
             count, window, persist = disable_after
-            self.disable_after = (int(count), int(window), int(persist))
+            self.disable_after = (int(count), None if window is None else int(window), int(persist))
         else:
             self.disable_after = None
         self.runner = runner
@@ -372,9 +372,9 @@ def flow(
         log_prints (bool): Tee ``print`` output into the run log at INFO.
         app (App | None): The `App` to register on; defaults to the default App of the
             defining module.
-        schedule (Cron | Interval | RRule | list | None): A `Cron`, `Interval`, or `RRule`, or a list
+        schedule (Cron | Interval | RRule | Continuous | list | None): A `Cron`, `Interval`, `RRule`, or `Continuous`, or a list
             of them; the server materialises runs from it.
-        schedules (Cron | Interval | RRule | list | None): Same as ``schedule``; both are combined.
+        schedules (Cron | Interval | RRule | Continuous | list | None): Same as ``schedule``; both are combined.
         retries (int): How many times a failed run is retried.
         retry_delay (float | list[float] | exponential): Wait before each retry: seconds, a list of per-attempt seconds,
             or `exponential`.
@@ -428,9 +428,10 @@ def flow(
         batch_key (str | None): With a list in ``after``, the parameter whose value identifies a
             batch; this flow runs once per value after every upstream has a
             completed run for it.
-        disable_after (tuple[int, int, int] | None): ``(count, window_seconds, persist_seconds)``: after ``count``
+        disable_after (tuple[int, int | None, int] | None): ``(count, window_seconds, persist_seconds)``: after ``count``
             failures within ``window_seconds`` the flow's schedules pause for
-            ``persist_seconds`` and resume automatically.
+            ``persist_seconds`` and resume automatically. A window of ``None``
+            counts failures in a row instead: a Completed run resets the count.
         runner (ThreadRunner | ProcessRunner | None): A `ThreadRunner` or `ProcessRunner` executing tasks
             submitted with ``submit`` and ``map``; a thread runner by default.
         bulk_complete (Callable | None): ``bulk_complete(values) -> set`` called once by a backfill;

@@ -26,7 +26,12 @@ pub struct Settings {
     pub wal_bytes: u64,
     #[schema(value_type = Object)]
     pub resources: serde_json::Value,
+    /// Engines (processors) that may run at once.
     pub max_engines: usize,
+    /// Where `max_engines` came from: `flag`, `toml`, `settings`, or `default`.
+    pub max_engines_source: String,
+    /// The most `max_engines` may be: this machine's CPU count.
+    pub cpu_cap: usize,
     pub engine_max_runs: u32,
     pub crash_retries_default: i64,
     pub catchup_default: String,
@@ -77,6 +82,10 @@ pub struct SettingsPatch {
     pub retain_checkpoints_days: Option<i64>,
     #[serde(default)]
     pub crash_retries: Option<i64>,
+    /// Engines (processors) that may run at once: 1 up to the CPU count,
+    /// applied at once and written under `[server]`.
+    #[serde(default)]
+    pub max_engines: Option<i64>,
     /// UI title; an empty string removes `[ui] title` and restores `cereyan`.
     #[serde(default)]
     pub title: Option<String>,
@@ -116,13 +125,13 @@ pub fn saturation(state: &AppState) -> (bool, Vec<String>, Option<String>) {
         }
     }
     let total: i64 = capped.iter().map(|(_, c)| c).sum();
-    if total >= state.supervisor.max_engines as i64 && !capped.is_empty() {
+    if total >= state.supervisor.max_engines() as i64 && !capped.is_empty() {
         return (
             true,
             capped.into_iter().map(|(n, _)| n).collect(),
             Some(format!(
                 "declared max_concurrent caps total {total} with max_engines {}",
-                state.supervisor.max_engines
+                state.supervisor.max_engines()
             )),
         );
     }
@@ -163,7 +172,14 @@ pub async fn get_settings(State(state): State<Arc<AppState>>) -> Json<Settings> 
         database_bytes: db,
         wal_bytes: wal,
         resources: state.supervisor.resources_snapshot(),
-        max_engines: state.supervisor.max_engines,
+        max_engines: state.supervisor.max_engines(),
+        max_engines_source: state
+            .sources
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get("server.max_engines")
+            .map_or_else(|| "default".into(), |s| s.source.clone()),
+        cpu_cap: state.supervisor.cpu_cap,
         engine_max_runs: state.config.engine_max_runs,
         crash_retries_default: state
             .crash_retries_default
@@ -210,6 +226,7 @@ fn persist_toml(
     resources: Option<&HashMap<String, f64>>,
     defaults: &[(&str, Option<i64>)],
     title: Option<&str>,
+    max_engines: Option<i64>,
 ) -> Result<(), String> {
     let Some(dir) = &state.config.served_dir else {
         return Ok(());
@@ -241,6 +258,14 @@ fn persist_toml(
                     t.insert((*key).into(), toml::Value::Integer(*v));
                 }
             }
+        }
+    }
+    if let Some(n) = max_engines {
+        let table = doc
+            .entry("server")
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        if let toml::Value::Table(t) = table {
+            t.insert("max_engines".into(), toml::Value::Integer(n));
         }
     }
     match title {
@@ -276,6 +301,14 @@ pub async fn patch_settings(
         Some(raw) => Some(crate::ui::normalize_title(Some(raw)).map_err(ApiError::Unprocessable)?),
         None => None,
     };
+    let cap = state.supervisor.cpu_cap;
+    if let Some(n) = body.max_engines {
+        if n < 1 || n as usize > cap {
+            return Err(ApiError::Unprocessable(format!(
+                "max_engines must be between 1 and {cap}, this machine's CPU count"
+            )));
+        }
+    }
     if let Some(resources) = &body.resources {
         if resources.values().any(|v| *v < 0.0) {
             return Err(ApiError::Unprocessable(
@@ -341,6 +374,12 @@ pub async fn patch_settings(
         let _ = state.store.kv_set("settings.crash_retries", &c.to_string());
         state.mark_edited("defaults.crash_retries");
     }
+    if let Some(n) = body.max_engines {
+        state.supervisor.set_max_engines(n as usize);
+        state.supervisor.ensure_capacity(&state);
+        let _ = state.store.kv_set("settings.max_engines", &n.to_string());
+        state.mark_edited("server.max_engines");
+    }
     if let Some(t) = title {
         *state.title.write().unwrap_or_else(|e| e.into_inner()) = t;
         state.mark_edited("ui.title");
@@ -359,6 +398,7 @@ pub async fn patch_settings(
             ("crash_retries", body.crash_retries),
         ],
         body.title.as_deref().map(str::trim),
+        body.max_engines,
     )
     .map_err(ApiError::Internal)?;
     Ok(get_settings(State(state)).await)

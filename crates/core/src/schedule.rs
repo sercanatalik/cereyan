@@ -63,6 +63,14 @@ pub enum Schedule {
         #[serde(default)]
         timezone: Option<String>,
     },
+    /// Runs again `delay` seconds after the last run ends, when a processor is
+    /// free. It has no fire times of its own: the scheduler creates its one
+    /// next run when the last one reaches a final state.
+    Continuous {
+        /// Seconds from the end of one run to the next joining the line.
+        #[serde(default)]
+        delay: f64,
+    },
 }
 
 fn default_true() -> bool {
@@ -160,7 +168,20 @@ impl Schedule {
                 parse_rrule(rrule, tz)?;
                 Ok(())
             }
+            Schedule::Continuous { delay } => {
+                if *delay < 0.0 || delay.is_nan() {
+                    return Err(ScheduleError::Invalid(
+                        "a continuous schedule's delay must be zero or more".into(),
+                    ));
+                }
+                Ok(())
+            }
         }
+    }
+
+    /// Whether this is a continuous schedule, which has no fire times.
+    pub fn is_continuous(&self) -> bool {
+        matches!(self, Schedule::Continuous { .. })
     }
 
     pub fn timezone_name(&self) -> String {
@@ -168,6 +189,7 @@ impl Schedule {
             Schedule::Cron { timezone, .. }
             | Schedule::Interval { timezone, .. }
             | Schedule::RRule { timezone, .. } => timezone.as_deref(),
+            Schedule::Continuous { .. } => None,
         };
         resolve_tz(tz)
             .map(|t| t.name().to_string())
@@ -253,6 +275,7 @@ impl Schedule {
                     .find(|d| d.with_timezone(&Utc) > after)
                     .map(|d| d.with_timezone(&Utc)))
             }
+            Schedule::Continuous { .. } => Ok(None),
         }
     }
 
@@ -689,5 +712,20 @@ mod tests {
     fn catchup_policy_parse() {
         assert_eq!(CatchupPolicy::parse("ALL"), Some(CatchupPolicy::All));
         assert_eq!(CatchupPolicy::parse("nope"), None);
+    }
+
+    #[test]
+    fn continuous_has_no_fire_times() {
+        let s = Schedule::Continuous { delay: 1800.0 };
+        s.validate().unwrap();
+        assert!(s.is_continuous());
+        assert_eq!(s.next_after(utc("2026-03-01T00:00:00Z")).unwrap(), None);
+        assert!(s.next_fires(0, 3).unwrap().is_empty());
+        let json = serde_json::to_value(&s).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"kind": "continuous", "delay": 1800.0})
+        );
+        assert!(Schedule::Continuous { delay: -1.0 }.validate().is_err());
     }
 }

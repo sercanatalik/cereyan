@@ -475,7 +475,7 @@ pub fn tool_list() -> Vec<Value> {
             json!({"kind": {"type": "string"}, "key": {"type": "string"}, "flow": {"type": "string"}, "project": {"type": "string"}, "run_id": {"type": "integer"}, "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50}}), &[]),
         read_tool("list_rules", "The rules (reactive and proactive) with their match, actions, guards, and fire counts. Read-only.",
             json!({}), &[]),
-        read_tool("list_schedules", "The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, and whether it was declared in the flow's code, created in the interface, or created by an agent. Read-only.",
+        read_tool("list_schedules", "The schedules of one flow or of every flow: the spec, whether it is active, when it next fires, whether it was declared in the flow's code, created in the interface, or created by an agent, and for a continuous schedule its loop state (waiting, in_line, running, or paused). Read-only.",
             json!({"flow": flow_prop, "project": {"type": "string", "description": "Only schedules of this project"}}), &[]),
         read_tool("explain_failure", "Everything needed to diagnose a run in one call: the run, its failed or crashed task runs, the last warning-or-above log lines, and the run's events. Read-only.",
             json!({"run_id": {"type": "integer"}}), &["run_id"]),
@@ -493,14 +493,15 @@ pub fn tool_list() -> Vec<Value> {
                    "missing_only": {"type": "boolean", "description": "Leave out values whose latest run completed"},
                    "force": {"type": "boolean", "description": "Restate: the runs ignore targets, caches, checkpoints and bulk_complete"},
                    "dry_run": {"type": "boolean", "default": true}}), &["flow", "parameter"]),
-        write_tool("create_schedule", "Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Returns the schedule and the next few times it will fire.",
+        write_tool("create_schedule", "Make a flow run repeatedly. To run a flow once, now, use run_flow instead: a flow needs no schedule, and running on demand is the normal case. Kind continuous runs the flow again `delay` seconds after each run ends, one run at a time, and takes no catch-up options. Returns the schedule and the next few times it will fire (none for a continuous schedule).",
             json!({
                 "flow": flow_prop, "project": {"type": "string"},
-                "kind": {"type": "string", "enum": ["cron", "interval", "rrule"], "description": "Which kind of schedule"},
+                "kind": {"type": "string", "enum": ["cron", "interval", "rrule", "continuous"], "description": "Which kind of schedule"},
                 "cron": {"type": "string", "description": "Five-field cron expression, for kind cron"},
                 "interval": {"type": "number", "description": "Seconds between fires, for kind interval"},
                 "anchor": {"type": "integer", "description": "Microseconds UTC the interval counts from; defaults to now"},
                 "rrule": {"type": "string", "description": "RFC 5545 RRULE, for kind rrule"},
+                "delay": {"type": "number", "description": "Seconds from the end of one run to the next joining the line, for kind continuous"},
                 "timezone": {"type": "string", "description": "IANA name such as Europe/Istanbul; UTC when unset"},
                 "day_or": {"type": "boolean", "description": "For cron, OR day-of-month with day-of-week (default true)"},
                 "catchup": {"type": "string", "enum": ["skip", "latest", "all"], "default": "skip"},
@@ -514,6 +515,7 @@ pub fn tool_list() -> Vec<Value> {
                 "schedule_id": {"type": "integer"},
                 "cron": {"type": "string"}, "interval": {"type": "number"}, "anchor": {"type": "integer"},
                 "rrule": {"type": "string"}, "timezone": {"type": "string"}, "day_or": {"type": "boolean"},
+                "delay": {"type": "number", "description": "Seconds a continuous schedule waits after each run ends"},
                 "catchup": {"type": "string", "enum": ["skip", "latest", "all"]},
                 "catchup_max": {"type": "integer"},
                 "catchup_window": {"type": "integer", "description": "Seconds; 0 turns it off"},
@@ -544,7 +546,7 @@ pub fn tool_list() -> Vec<Value> {
             json!({"backfill_id": {"type": "integer"}}), &["backfill_id"]),
         read_tool("get_flow_source", "The Python source of the module that registered a flow, read from the flow's own source directory and cut at 64 KB. Read-only.",
             json!({"flow": flow_prop, "project": {"type": "string"}}), &["flow"]),
-        read_tool("server_health", "The server's state in one call: engines and what they are running, queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Read-only.",
+        read_tool("server_health", "The server's state in one call: engines and what they are running, processors (the engine pool size, its CPU cap, and how many engines run, idle or drain), queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Read-only.",
             json!({}), &[]),
         read_tool("list_variables", "Every variable's name, tags, and timestamps; the value only when it is not a secret. Read-only.",
             json!({}), &[]),
@@ -611,6 +613,7 @@ fn schedule_body_json(args: &Map<String, Value>) -> Value {
         "interval",
         "anchor",
         "rrule",
+        "delay",
         "timezone",
         "day_or",
         "catchup",
@@ -699,6 +702,7 @@ async fn call_tool(
         "server_health" => Ok(json!({
             "version": state.config.version,
             "engines": state.supervisor.engines_snapshot(),
+            "processors": processors(state),
             "queued": state.supervisor.queue_len(),
             "resources": state.supervisor.resources_snapshot(),
             "schedules": state.store.list_schedules(None)?.len(),
@@ -1097,6 +1101,7 @@ async fn call_tool(
                         "schedule": row.schedule, "catchup": row.catchup, "catchup_max": row.catchup_max,
                         "active": row.active, "source": row.source, "next_fire": row.next_fire,
                         "paused_reason": row.paused_reason, "paused_until": row.paused_until,
+                        "loop_state": row.loop_state,
                     }))
                 })
                 .collect();
@@ -1245,6 +1250,26 @@ const CHECK_OUTPUT_CAP: u64 = 1024 * 1024;
 /// The module file that registered `flow`, read only from under the flow's
 /// own source directory and cut at `SOURCE_CAP`. Nothing here comes from the
 /// request: the directory and module were recorded at registration.
+/// The engine pool as `server_health` reports it. Read-only: no tool sets it.
+fn processors(state: &AppState) -> Value {
+    let (items, _, _) = state.supervisor.queue_snapshot(0);
+    let count = |status: &str| items.iter().filter(|e| e.status == status).count();
+    let source = state
+        .sources
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .get("server.max_engines")
+        .map_or_else(|| "default".to_string(), |s| s.source.clone());
+    json!({
+        "count": state.supervisor.max_engines(),
+        "cap": state.supervisor.cpu_cap,
+        "source": source,
+        "running": count("running"),
+        "idle": count("idle") + count("starting"),
+        "draining": count("draining"),
+    })
+}
+
 fn flow_source(flow: &cereyan_core::Flow) -> Result<Value, ToolError> {
     let base = std::fs::canonicalize(&flow.source_dir)
         .map_err(|e| ToolError::Failed(format!("source directory {}: {e}", flow.source_dir)))?;

@@ -227,10 +227,29 @@ pub fn after_transition(state: &Arc<AppState>, run: &Run, previous: Option<&Stat
             disable_window(state, &flow, &options, run);
         }
         StateType::Completed => {
+            if matches!(options.disable_after, Some((_, None, _))) {
+                state.supervisor.clear_failures(flow.id);
+            }
             trigger_dependents(state, &flow, run);
         }
         StateType::Paused => crate::waits::arm(state, run),
         _ => {}
+    }
+    // A continuous schedule's run ended: its next run joins the line after the
+    // delay. A Crashed run has a rerun coming, which ends the iteration instead.
+    if matches!(
+        run.state.state_type,
+        StateType::Completed | StateType::Failed | StateType::Cancelled
+    ) {
+        if let Some(sid) = run.schedule_id {
+            if state
+                .scheduler
+                .get(sid)
+                .is_some_and(|row| row.active && row.schedule.is_continuous())
+            {
+                crate::scheduler::materialize(state, sid);
+            }
+        }
     }
     if run.state.is_terminal() {
         if let Some(backfill_id) = run.backfill_id {
@@ -408,9 +427,9 @@ fn disable_window(state: &Arc<AppState>, flow: &Flow, options: &FlowOptions, run
         return;
     }
     let now = now_micros();
-    let failures = state
-        .supervisor
-        .record_failure(flow.id, now, window.max(1) * 1_000_000);
+    // No window: failures in a row, which a Completed run resets.
+    let window_micros = window.map_or(i64::MAX, |w| w.max(1) * 1_000_000);
+    let failures = state.supervisor.record_failure(flow.id, now, window_micros);
     if failures >= count as usize {
         let until = now + persist.max(1) * 1_000_000;
         let mut paused_any = false;
