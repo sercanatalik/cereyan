@@ -1,6 +1,10 @@
 # Changelog
 
-## 3.0.0 (2026-09-29)
+## 3.0.1 (2026-09-29)
+
+- **3.0.0 was tagged but never published.** Its Windows test run failed, so the release was held back. 3.0.1 is the same release plus test-suite fixes: test workers start in their own process group so a worker can drain on Ctrl-Break, tests that need four processors skip on smaller runners, and rule-firing tests wait for the firings to finish. The notes below describe 3.0.
+
+## 3.0.0 (2026-09-29, not published)
 
 Remote workers, a Queue page with processors you set while the server runs, and continuous schedules.
 
