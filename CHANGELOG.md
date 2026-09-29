@@ -7,6 +7,8 @@
 - **`disable_after` can count failures in a row.** A window of `None`, as in `disable_after=(3, None, 6 * 3600)`, disables the flow after that many failures in a row, and a Completed run resets the count. Windowed declarations behave as before.
 - **The queue keeps its order across modules.** A free engine takes the first run in line that can start, whatever its module. A deep backfill of one module no longer keeps a waiting run of another module from starting.
 
+- **Fix: a served run can read a variable whose name contains `/`.** `Variable.get("warehouse/api_token")` inside a served run, or from a script while a server runs, put the name into the URL unencoded, reached a route that does not exist, and returned the default, so the run saw `None` without an error. `Variable.unset` had the same fault. The name is now sent as one encoded path segment. Offline reads were not affected.
+
 **Upgrade note.** A server now starts with **one** processor unless `--max-engines`, `app.serve(max_engines=)`, or `[server] max_engines` says otherwise; it used to start with one per CPU. Runs that used to execute side by side now wait their turn until you add processors on the Queue page or set `[server] max_engines`.
 
 ## 2.3.1 (2026-09-28)

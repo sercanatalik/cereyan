@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.parse
 from typing import Any
 
 from . import _core
@@ -21,6 +22,13 @@ def _validate_name(name: str) -> None:
         raise ValueError(
             f"invalid variable name {name!r}: use lowercase letters, digits, '_', '-', '/', and '.'"
         )
+
+
+def _path(name: str) -> str:
+    """The API path of a variable. The name is one path segment, so a '/' in it is
+    percent-encoded: sent raw, `a/b` addressed a route that does not exist and a
+    served read returned the default."""
+    return "/api/variables/" + urllib.parse.quote(name, safe="")
 
 
 def _access():
@@ -72,7 +80,7 @@ class Variable:
         from .client import ApiError
 
         try:
-            data = handle._request("GET", f"/api/variables/{name}", params={"raw": "true"})
+            data = handle._request("GET", _path(name), params={"raw": "true"})
         except ApiError as exc:
             if exc.status == 404:
                 return default
@@ -138,7 +146,7 @@ class Variable:
         from .client import ApiError
 
         try:
-            handle._request("DELETE", f"/api/variables/{name}")
+            handle._request("DELETE", _path(name))
             return True
         except ApiError as exc:
             if exc.status == 404:
