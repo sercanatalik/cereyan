@@ -13,7 +13,7 @@ import time
 import pytest
 
 from cereyan.client import ApiError, Client
-from server_helpers import ServerProcess, stop_server
+from server_helpers import ServerProcess, own_group, stop_server
 
 TOKEN = "remote-workers-token"
 
@@ -121,8 +121,7 @@ class WorkerProcess:
         for p in shared or []:
             argv += ["--shared-path", str(p)]
         self.log = open(self.log_path, "ab")
-        self.proc = subprocess.Popen(argv, env=env, stdout=self.log, stderr=subprocess.STDOUT,
-                                     start_new_session=True)
+        self.proc = subprocess.Popen(argv, env=env, stdout=self.log, stderr=subprocess.STDOUT, **own_group())
 
     def read_log(self) -> str:
         return self.log_path.read_text(errors="replace")

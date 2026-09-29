@@ -301,6 +301,8 @@ class Worker:
 
         signal.signal(signal.SIGTERM, on_signal)
         signal.signal(signal.SIGINT, on_signal)
+        if hasattr(signal, "SIGBREAK"):  # Windows: Ctrl-Break, what a service manager sends
+            signal.signal(signal.SIGBREAK, on_signal)
         while not self.stopping:
             try:
                 self.heartbeat()

@@ -79,6 +79,15 @@ else:
             pass
 
 
+def own_group() -> dict:
+    """Popen arguments that give a child its own process group, so `stop_server`
+    can reach it: on Windows the CTRL_BREAK_EVENT it sends goes to the child's
+    whole group, and without this that group is the test runner's own console."""
+    if WINDOWS:  # pragma: no cover - exercised on Windows CI
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
 def stop_server(proc: subprocess.Popen, timeout: float = 40.0) -> int:
     """Ask a serve subprocess to shut down cooperatively, then force it.
 

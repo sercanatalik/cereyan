@@ -12,7 +12,7 @@ import time
 import pytest
 
 from cereyan.client import Client
-from server_helpers import ServerProcess, free_port, stop_server
+from server_helpers import ServerProcess, free_port, own_group, stop_server
 from test_remote_workers import PIPELINE, TOKEN, WorkerProcess, wait_for, worker_view
 
 pytestmark = pytest.mark.skipif(shutil.which("openssl") is None, reason="needs the openssl command")
@@ -82,7 +82,8 @@ def behind_proxy(isolated_home, tmp_path):
     port = free_port()
     (tmp_path / "proxy.py").write_text(PROXY)
     proxy = subprocess.Popen([sys.executable, str(tmp_path / "proxy.py"), str(port), str(server.info["url"]).rsplit(":", 1)[1].split("/")[0],
-                              str(cert), str(key)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                              str(cert), str(key)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             **own_group())
     time.sleep(0.5)
     url = f"https://localhost:{port}/cereyan"
     try:
