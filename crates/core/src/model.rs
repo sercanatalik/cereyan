@@ -106,6 +106,18 @@ pub struct Run {
     /// or the request carried an idempotency key.
     #[serde(default)]
     pub unique_key: Option<String>,
+    /// Where the run executed: `server`, or a worker's name.
+    #[serde(default)]
+    pub host: Option<String>,
+    /// The processor slot on that host, from 1.
+    #[serde(default)]
+    pub processor: Option<i64>,
+    /// Incremented on every hand-off to an engine; reports under an older lease are refused.
+    #[serde(default)]
+    pub lease: i64,
+    /// Fingerprint of the module that executed the run.
+    #[serde(default)]
+    pub source_hash: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -166,6 +178,34 @@ pub struct Log {
 
 /// Placeholders for later phases; defined now so the schema and API types
 /// are stable from the start.
+/// A registered remote worker: another machine with its own checkout that adds
+/// processors to the server's queue.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct Worker {
+    pub id: i64,
+    pub name: String,
+    /// The cereyan version the worker runs.
+    pub version: String,
+    pub cpus: i64,
+    /// Engines it may run at once, at most `cpus`.
+    pub processors: i64,
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub labels: Map<String, Value>,
+    /// Paths the worker shares with the server (a mounted volume, for example).
+    #[serde(default)]
+    pub shared_paths: Vec<String>,
+    /// Host metadata the worker reported: hostname, platform, memory, git state.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
+    pub meta: Map<String, Value>,
+    /// `online`, `draining`, or `offline`.
+    pub state: String,
+    pub registered_at: Micros,
+    pub last_seen_at: Micros,
+}
+
 /// A stored schedule row: the schedule itself plus policy and bookkeeping.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -256,6 +296,8 @@ pub struct FlowOptions {
     pub has_crash_hooks: bool,
     /// Seconds a run may wait to start before it is skipped; a schedule's own value wins.
     pub start_deadline: Option<f64>,
+    /// `any` (the default: the server or any matching worker) or `server`.
+    pub runs_on: Option<String>,
     /// At most one run per key at a time; see `UniqueSpec`.
     pub unique: Option<UniqueSpec>,
     /// Seconds a Completed run may be old before the flow is stale.
@@ -320,6 +362,11 @@ impl UniqueSpec {
 }
 
 impl FlowOptions {
+    /// Whether runs of the flow may execute on a remote worker.
+    pub fn may_run_remotely(&self) -> bool {
+        self.runs_on.as_deref() != Some("server")
+    }
+
     pub fn from_map(map: &Map<String, Value>) -> FlowOptions {
         serde_json::from_value(Value::Object(map.clone())).unwrap_or_default()
     }

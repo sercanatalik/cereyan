@@ -60,6 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--public-url", help="the address people reach the UI at, used for run links in rule templates (also CEREYAN_PUBLIC_URL or [server] public_url)")
     serve.set_defaults(func=cmd_serve)
 
+    worker = sub.add_parser("worker", help="add this machine's processors to a server's queue, running this checkout's flows")
+    worker.add_argument("dir", nargs="?", help="this machine's checkout of the project (default: current directory)")
+    worker.add_argument("--host", help="the server's URL, e.g. https://cereyan.internal (also [worker] host)")
+    worker.add_argument("--name", help="how the server lists this worker (default: the hostname; also [worker] name)")
+    worker.add_argument("--processors", type=int, help="engines this worker may run at once, at most its CPU count (default 1; also [worker] processors)")
+    worker.add_argument("--labels", help="k=v pairs shown on the Workers tab, e.g. gpu=true,zone=eu (also [worker] labels)")
+    worker.add_argument("--shared-path", action="append", dest="shared_paths", metavar="PATH", help="a path this machine shares with the server; a LocalTarget elsewhere is reported (repeat for more; also [worker] shared_paths)")
+    worker.add_argument("--token", dest="worker_token", help="the server's API token (also CEREYAN_TOKEN)")
+    worker.add_argument("--token-file", help="read the server's API token from this file (also [worker] token_file)")
+    worker.set_defaults(func=cmd_worker)
+
     check = sub.add_parser("check", help="import a directory as serve would and report problems, without touching the store")
     check.add_argument("dir", nargs="?", help="directory to check (default: current directory)")
     check.add_argument("--json", action="store_true", help="print the report as one JSON object")
@@ -227,6 +238,25 @@ def cmd_serve(args) -> int:
             public_url=args.public_url,
         )
     except CereyanError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_SCHEDULING
+
+
+def cmd_worker(args) -> int:
+    from .worker import run_worker
+
+    try:
+        return run_worker(
+            args.host,
+            args.dir,
+            name=args.name,
+            processors=args.processors,
+            labels=args.labels,
+            shared_paths=args.shared_paths,
+            token=args.worker_token,
+            token_file=args.token_file,
+        )
+    except (CereyanError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_SCHEDULING
 

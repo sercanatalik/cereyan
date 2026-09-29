@@ -28,6 +28,8 @@ pub struct Processors {
     pub cap: usize,
     /// Where `count` came from: `flag`, `toml`, `settings`, or `default`.
     pub source: String,
+    /// Processors per host: the server first, then each worker.
+    pub hosts: Vec<HostTotals>,
     /// The one-minute load average over the CPU count (1.0 is every CPU busy);
     /// absent where the platform does not report one.
     pub load: Option<f64>,
@@ -46,6 +48,16 @@ fn load_per_cpu(cpus: usize) -> Option<f64> {
 #[cfg(not(unix))]
 fn load_per_cpu(_cpus: usize) -> Option<f64> {
     None
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct HostTotals {
+    pub host: String,
+    /// Processors the host may run at once.
+    pub count: usize,
+    pub busy: usize,
+    /// `online`, `draining`, or `offline`; the server is always `online`.
+    pub state: String,
 }
 
 #[derive(Serialize, utoipa::ToSchema)]
@@ -244,6 +256,26 @@ pub async fn get_queue(State(state): State<Arc<AppState>>) -> ApiResult<Json<Que
             count: sup.max_engines(),
             cap: sup.cpu_cap,
             source,
+            hosts: {
+                let mut hosts = vec![HostTotals {
+                    host: "server".into(),
+                    count: sup.max_engines(),
+                    busy: items
+                        .iter()
+                        .filter(|e| e.host == "server" && e.run_id.is_some())
+                        .count(),
+                    state: "online".into(),
+                }];
+                for (_, name, st, processors, running, _) in sup.workers_snapshot() {
+                    hosts.push(HostTotals {
+                        host: name,
+                        count: processors,
+                        busy: running,
+                        state: st,
+                    });
+                }
+                hosts
+            },
             load: load_per_cpu(sup.cpu_cap),
             items,
         },

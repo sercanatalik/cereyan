@@ -165,6 +165,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/engine/local-path": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** A run on a worker used a `LocalTarget` outside the worker's shared paths. */
+        post: operations["local_path"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/engine/report": {
         parameters: {
             query?: never;
@@ -495,6 +512,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["release"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/results/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get"];
+        put: operations["put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1162,6 +1195,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["forget"];
+        options?: never;
+        head?: never;
+        patch: operations["patch"];
+        trace?: never;
+    };
+    "/api/workers/{id}/drain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["drain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/{id}/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["heartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/{id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["timeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["register"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1474,6 +1619,8 @@ export interface components {
         };
         /** @description One engine as the Queue page shows it. */
         EngineView: {
+            /** @description `server`, or the worker's name. */
+            host: string;
             id: string;
             /** @description The module the engine has loaded. */
             module: string;
@@ -1484,6 +1631,8 @@ export interface components {
              * @description Seconds in the current run, or since the engine started when it has none.
              */
             since_secs: number;
+            /** @description The processor slot on that host, from 1. */
+            slot: number;
             /** @description `starting`, `idle`, `running` or `draining`. */
             status: string;
         };
@@ -1682,6 +1831,11 @@ export interface components {
              * @default 0
              */
             retries: number;
+            /**
+             * @description `any` (the default: the server or any matching worker) or `server`.
+             * @default null
+             */
+            runs_on: string | null;
             /** @default [] */
             schedules: components["schemas"]["ScheduleDecl"][];
             /**
@@ -1740,10 +1894,31 @@ export interface components {
             start_time?: number | null;
             state: components["schemas"]["State"];
         };
+        HeartbeatBody: {
+            /** @description Engine ids the worker runs now. */
+            engines?: string[];
+            /** @description Fingerprints again when the checkout changed. */
+            flows?: components["schemas"]["WorkerFlow"][] | null;
+            /** @description Metadata that changes: free memory, busy processors, git state. */
+            meta?: Record<string, never>;
+        };
         HeartbeatRequest: {
             engine_id: string;
             /** Format: int64 */
             run_id: number;
+        };
+        HeartbeatResponse: {
+            commands: Record<string, never>[];
+            drift: string[];
+            state: string;
+        };
+        HostTotals: {
+            busy: number;
+            /** @description Processors the host may run at once. */
+            count: number;
+            host: string;
+            /** @description `online`, `draining`, or `offline`; the server is always `online`. */
+            state: string;
         };
         /** Format: int64 */
         i64: number;
@@ -1799,6 +1974,12 @@ export interface components {
              * @description The schedule that made the run, when one did.
              */
             schedule_id?: number | null;
+        };
+        LocalPathBody: {
+            /** @description The resolved path of the `LocalTarget`, on the worker. */
+            path: string;
+            /** Format: int64 */
+            run_id: number;
         };
         Log: {
             /** Format: int64 */
@@ -1886,6 +2067,8 @@ export interface components {
             cap: number;
             /** @description Engines that may run at once. */
             count: number;
+            /** @description Processors per host: the server first, then each worker. */
+            hosts: components["schemas"]["HostTotals"][];
             items: components["schemas"]["EngineView"][];
             /**
              * Format: double
@@ -1953,6 +2136,30 @@ export interface components {
             /** @description Continuous schedules that are paused, so the page can resume them. */
             paused_loops: components["schemas"]["PausedLoop"][];
             processors: components["schemas"]["Processors"];
+        };
+        RegisterBody: {
+            /** Format: int64 */
+            cpus: number;
+            flows?: components["schemas"]["WorkerFlow"][];
+            labels?: Record<string, never>;
+            meta?: Record<string, never>;
+            name: string;
+            /** Format: int64 */
+            processors?: number;
+            shared_paths?: string[];
+            version: string;
+        };
+        RegisterResponse: {
+            /** @description Modules whose code differs from the server's: the worker takes no run of them. */
+            drift: string[];
+            /** Format: int64 */
+            heartbeat_secs: number;
+            /** @description Flows the worker has that the server does not: they never run there. */
+            refused: string[];
+            /** @description `online` or `draining` (a worker drained before it restarted stays drained). */
+            state: string;
+            /** Format: int64 */
+            worker_id: number;
         };
         ReleaseRequest: {
             /** Format: int64 */
@@ -2227,20 +2434,34 @@ export interface components {
             flow_name: string;
             /** @description The flow's group, read through the flow: never stored on the run. */
             group?: string;
+            /** @description Where the run executed: `server`, or a worker's name. */
+            host?: string | null;
             /** Format: int64 */
             id: number;
+            /**
+             * Format: int64
+             * @description Incremented on every hand-off to an engine; reports under an older lease are refused.
+             */
+            lease?: number;
             name: string;
             parameters?: Record<string, never>;
             /** Format: int64 */
             parent_run_id?: number | null;
             /** Format: int64 */
             priority?: number;
+            /**
+             * Format: int64
+             * @description The processor slot on that host, from 1.
+             */
+            processor?: number | null;
             project: string;
             /** Format: int64 */
             report_seq?: number;
             /** Format: int64 */
             schedule_id?: number | null;
             scheduled_time?: null | components["schemas"]["i64"];
+            /** @description Fingerprint of the module that executed the run. */
+            source_hash?: string | null;
             start_time?: null | components["schemas"]["i64"];
             state: components["schemas"]["State"];
             tags?: string[];
@@ -2395,11 +2616,7 @@ export interface components {
             start_deadline?: number | null;
             timezone?: string | null;
         };
-        /**
-         * @description Placeholders for later phases; defined now so the schema and API types
-         *     are stable from the start.
-         *     A stored schedule row: the schedule itself plus policy and bookkeeping.
-         */
+        /** @description A stored schedule row: the schedule itself plus policy and bookkeeping. */
         ScheduleRow: {
             active: boolean;
             catchup: components["schemas"]["CatchupPolicy"];
@@ -2734,6 +2951,31 @@ export interface components {
             updated_at: number;
             value: unknown;
         };
+        Timeline: {
+            host: string;
+            /**
+             * @description A forecast, not an assignment: runs in line or due within the hour that
+             *     this host can take, soonest first.
+             */
+            next: components["schemas"]["TimelineRun"][];
+            runs: components["schemas"]["TimelineRun"][];
+            /** Format: int64 */
+            since: number;
+        };
+        /** @description One run on a processor lane. */
+        TimelineRun: {
+            /** Format: int64 */
+            end?: number | null;
+            flow: string;
+            /** Format: int64 */
+            processor?: number | null;
+            /** Format: int64 */
+            run_id: number;
+            /** Format: int64 */
+            start?: number | null;
+            /** @description The run's state type; `null` for a run not started yet. */
+            state?: string | null;
+        };
         TransitionBody: {
             details?: Record<string, never>;
             force?: boolean;
@@ -2828,6 +3070,12 @@ export interface components {
             value: Record<string, never>;
         };
         VariableWithRaw: components["schemas"]["VariableRow"] & {
+            /**
+             * @description A secret's value in the clear, present only when `decrypt=true` was
+             *     requested of a server with a token: what a remote worker's engine reads,
+             *     since the key never leaves the server.
+             */
+            plain?: Record<string, never>;
             /** @description Ciphertext of a secret, present only when `raw=true` was requested. */
             raw?: string | null;
         };
@@ -2845,6 +3093,58 @@ export interface components {
              */
             states: components["schemas"]["StateEntry"][];
         };
+        /**
+         * @description Placeholders for later phases; defined now so the schema and API types
+         *     are stable from the start.
+         *     A registered remote worker: another machine with its own checkout that adds
+         *     processors to the server's queue.
+         */
+        Worker: {
+            /** Format: int64 */
+            cpus: number;
+            /** Format: int64 */
+            id: number;
+            labels?: Record<string, never>;
+            last_seen_at: components["schemas"]["i64"];
+            /** @description Host metadata the worker reported: hostname, platform, memory, git state. */
+            meta?: Record<string, never>;
+            name: string;
+            /**
+             * Format: int64
+             * @description Engines it may run at once, at most `cpus`.
+             */
+            processors: number;
+            registered_at: components["schemas"]["i64"];
+            /** @description Paths the worker shares with the server (a mounted volume, for example). */
+            shared_paths?: string[];
+            /** @description `online`, `draining`, or `offline`. */
+            state: string;
+            /** @description The cereyan version the worker runs. */
+            version: string;
+        };
+        WorkerFlow: {
+            flow: string;
+            module: string;
+            /** @description The worker's fingerprint of the module (`_core.module_fingerprint`). */
+            module_hash: string;
+            project: string;
+        };
+        WorkerPatch: {
+            /**
+             * Format: int64
+             * @description Engines the worker may run at once, 1 up to its CPU count.
+             */
+            processors: number;
+        };
+        /** @description A worker with what the server knows of it right now. */
+        WorkerView: components["schemas"]["Worker"] & {
+            drift: string[];
+            /** @description Flows it can run (code matches) and modules whose code differs. */
+            flows: number;
+            idle: number;
+            /** @description Engines running a run, and idle or starting. */
+            running: number;
+        };
         /** @description Work handed to an engine. */
         WorkItem: {
             cancel_requested: boolean;
@@ -2859,6 +3159,13 @@ export interface components {
             force?: boolean;
             /** @description `run`, `hooks`, or `bulk_complete`. */
             kind?: string;
+            /**
+             * Format: int64
+             * @description The hand-off this execution belongs to. The engine sends it back as
+             *     `X-Cereyan-Lease` on reports, heartbeats and transitions; an older lease
+             *     is refused, so a run rerun elsewhere is not also finished here.
+             */
+            lease?: number;
             options: Record<string, never>;
             parameters: Record<string, never>;
             /**
@@ -3187,6 +3494,27 @@ export interface operations {
         responses: {
             /** @description {cancel: bool, active: bool} */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    local_path: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalPathBody"];
+            };
+        };
+        responses: {
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3822,6 +4150,74 @@ export interface operations {
         };
         responses: {
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": number[];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    put: {
+        parameters: {
+            query?: {
+                /** @description Whether this is the last chunk: the result becomes visible when it lands. */
+                last?: boolean;
+                /** @description The chunk number, from 0. Part 0 starts the upload over. */
+                part?: number;
+            };
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": number[];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Over the size bound */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5211,6 +5607,11 @@ export interface operations {
     get_variable: {
         parameters: {
             query?: {
+                /**
+                 * @description Return a secret decrypted, for a remote worker's engine. Refused unless
+                 *     the server has a token.
+                 */
+                decrypt?: boolean | null;
                 /** @description Return the stored ciphertext of a secret so a local client can decrypt it. */
                 raw?: boolean | null;
             };
@@ -5310,6 +5711,260 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Vocabulary"];
                 };
+            };
+        };
+    };
+    list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerView"][];
+                };
+            };
+        };
+    };
+    forget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The worker is not offline */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerPatch"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerView"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    drain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerView"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    heartbeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HeartbeatBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HeartbeatResponse"];
+                };
+            };
+            /** @description Unknown to this server: register again */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerView"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    timeline: {
+        parameters: {
+            query?: {
+                /** @description Hours back from now (default 6, at most 48). */
+                hours?: number | null;
+            };
+            header?: never;
+            path: {
+                /** @description A worker id, or 0 for the server */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Timeline"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    register: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegisterResponse"];
+                };
+            };
+            /** @description The server has no token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Another major version */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

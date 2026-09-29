@@ -9,6 +9,7 @@ mod open;
 mod read;
 mod row;
 pub mod secrets;
+mod workers;
 mod writer;
 
 pub use error::StoreError;
@@ -20,6 +21,7 @@ pub use read::{
     TaskStateRow,
 };
 pub use read::{ListRunsFilter, ListTaskRunsFilter, LogFilter, LogsPage, RunsPage, TaskRunsPage};
+pub use workers::WorkerRegistration;
 pub use writer::{
     ArmExpectation, CreateBackfill, CreateRun, CreateTaskRun, DeletedCounts, FlowRows, NewEvent,
     NewLog, ReportEvent, ReportOutcome, ResetScope, RuleWrite, SchedulePatch, ScheduleWrite,

@@ -85,8 +85,65 @@ struct Inner {
     agent: ureq::Agent,
     long_agent: ureq::Agent,
     runs: Mutex<HashMap<i64, RunBuffer>>,
+    /// The lease of each run this engine was handed, sent back as
+    /// `X-Cereyan-Lease` on every request about that run.
+    leases: Mutex<HashMap<i64, i64>>,
     stop: AtomicBool,
     last_failure_log: Mutex<Option<Instant>>,
+}
+
+/// Root certificates from `SSL_CERT_FILE` and `SSL_CERT_DIR` when either is set
+/// (the trust store the operator installed, as for curl and Python), else the
+/// built-in bundle. Verification cannot be turned off.
+fn tls_config() -> ureq::tls::TlsConfig {
+    let mut certs = Vec::new();
+    let mut read = |path: &std::path::Path| {
+        if let Ok(bytes) = std::fs::read(path) {
+            for item in ureq::tls::parse_pem(&bytes).flatten() {
+                if let ureq::tls::PemItem::Certificate(c) = item {
+                    certs.push(c);
+                }
+            }
+        }
+    };
+    if let Some(file) = std::env::var_os("SSL_CERT_FILE") {
+        read(std::path::Path::new(&file));
+    }
+    if let Some(dirs) = std::env::var_os("SSL_CERT_DIR") {
+        for dir in std::env::split_paths(&dirs) {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    read(&entry.path());
+                }
+            }
+        }
+    }
+    let builder = ureq::tls::TlsConfig::builder();
+    if certs.is_empty() {
+        builder.build()
+    } else {
+        builder
+            .root_certs(ureq::tls::RootCerts::new_with_certs(&certs))
+            .build()
+    }
+}
+
+/// The run a request is about: a `run_id` in the body, or `/api/runs/<id>/...`.
+fn run_of(path: &str, body: &Value) -> Option<i64> {
+    body.get("run_id").and_then(Value::as_i64).or_else(|| {
+        path.strip_prefix("/api/runs/")
+            .and_then(|rest| rest.split('/').next())
+            .and_then(|n| n.parse().ok())
+    })
+}
+
+/// A 409 answer saying this engine's hand-off of the run is no longer current.
+fn is_stale_lease(status: u16, value: &Value) -> bool {
+    status == 409
+        && value
+            .get("stale_lease")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 impl Inner {
@@ -103,6 +160,16 @@ impl Inner {
         let mut req = agent.post(&self.url(path));
         if let Some(t) = &self.token {
             req = req.header("authorization", &format!("Bearer {t}"));
+        }
+        let lease = run_of(path, body).and_then(|run| {
+            self.leases
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(&run)
+                .copied()
+        });
+        if let Some(lease) = lease {
+            req = req.header("x-cereyan-lease", &lease.to_string());
         }
         let mut resp = req.send_json(body).map_err(|e| e.to_string())?;
         let status = resp.status().as_u16();
@@ -231,6 +298,16 @@ impl Inner {
                 }
                 Err("report rejected as too large; dropped oldest log lines".into())
             }
+            Ok((status, value)) if is_stale_lease(status, &value) => {
+                // Another engine holds the run now: what this one buffered is
+                // not the run's history. Drop it and stop the run here.
+                let mut runs = self.runs.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(buf) = runs.get_mut(&run_id) {
+                    buf.pending.clear();
+                    buf.cancel = true;
+                }
+                Ok((false, true))
+            }
             Ok((status, value)) => Err(format!("report rejected with {status}: {value}")),
             Err(e) => Err(e),
         }
@@ -239,6 +316,14 @@ impl Inner {
     fn heartbeat(&self, run_id: i64) -> Result<bool, String> {
         let body = json!({"engine_id": self.engine_id, "run_id": run_id});
         let (status, value) = self.post_json(&self.agent, "/api/engine/heartbeat", &body)?;
+        if is_stale_lease(status, &value) {
+            // The run was handed to another engine: stop it here.
+            let mut runs = self.runs.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(buf) = runs.get_mut(&run_id) {
+                buf.cancel = true;
+            }
+            return Ok(true);
+        }
         if status >= 300 {
             return Err(format!("heartbeat status {status}"));
         }
@@ -336,11 +421,13 @@ impl Client {
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(Duration::from_secs(30)))
+            .tls_config(tls_config())
             .build()
             .into();
         let long_agent: ureq::Agent = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(LONG_POLL_TIMEOUT))
+            .tls_config(tls_config())
             .build()
             .into();
         let inner = Arc::new(Inner {
@@ -350,6 +437,7 @@ impl Client {
             agent,
             long_agent,
             runs: Mutex::new(HashMap::new()),
+            leases: Mutex::new(HashMap::new()),
             stop: AtomicBool::new(false),
             last_failure_log: Mutex::new(None),
         });
@@ -410,7 +498,21 @@ impl Client {
             let mut delay = Duration::from_millis(200);
             loop {
                 match inner.post_json(&inner.long_agent, "/api/engine/work", &body) {
-                    Ok((status, value)) if status < 300 => return Ok(value.to_string()),
+                    Ok((status, value)) if status < 300 => {
+                        let run = &value["run"];
+                        if let (Some(run_id), Some(lease)) =
+                            (run["run_id"].as_i64(), run["lease"].as_i64())
+                        {
+                            if run["kind"].as_str().unwrap_or("run") == "run" {
+                                inner
+                                    .leases
+                                    .lock()
+                                    .unwrap_or_else(|p| p.into_inner())
+                                    .insert(run_id, lease);
+                            }
+                        }
+                        return Ok(value.to_string());
+                    }
                     Ok((status, value)) => {
                         return Err(PyRuntimeError::new_err(format!(
                             "work request failed with {status}: {value}"

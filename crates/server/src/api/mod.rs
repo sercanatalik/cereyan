@@ -14,12 +14,14 @@ pub mod observability;
 pub mod pause;
 pub mod projects;
 pub mod queue;
+pub mod results;
 pub mod runs;
 pub mod schedules;
 pub mod settings;
 pub mod stream;
 pub mod task_runs;
 pub mod vocabulary;
+pub mod workers;
 
 use std::sync::Arc;
 
@@ -127,6 +129,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         engine::report,
         engine::heartbeat,
         engine::failed,
+        engine::local_path,
         engine::acquire,
         engine::release,
         schedules::list_schedules,
@@ -152,6 +155,16 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         backfills::cancel_backfill,
         settings::get_settings,
         queue::get_queue,
+        workers::register,
+        workers::heartbeat,
+        workers::list,
+        workers::timeline,
+        workers::patch,
+        workers::drain,
+        workers::resume,
+        workers::forget,
+        results::put,
+        results::get,
         settings::patch_settings,
         environment::get_environment,
         projects::list_projects,
@@ -258,6 +271,18 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         queue::InLine,
         queue::Joining,
         queue::PausedLoop,
+        queue::HostTotals,
+        workers::WorkerFlow,
+        engine::LocalPathBody,
+        workers::RegisterBody,
+        workers::RegisterResponse,
+        workers::HeartbeatBody,
+        workers::HeartbeatResponse,
+        workers::WorkerView,
+        workers::TimelineRun,
+        workers::Timeline,
+        workers::WorkerPatch,
+        cereyan_core::Worker,
         crate::supervisor::EngineView,
         settings::SettingsPatch,
         environment::Environment,
@@ -309,6 +334,17 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/health", get(health))
         .route("/api/server", get(server_info))
         .route("/api/queue", get(queue::get_queue))
+        .route("/api/workers", get(workers::list))
+        .route("/api/results/{key}", get(results::get).put(results::put))
+        .route("/api/workers/register", post(workers::register))
+        .route(
+            "/api/workers/{id}",
+            axum::routing::patch(workers::patch).delete(workers::forget),
+        )
+        .route("/api/workers/{id}/heartbeat", post(workers::heartbeat))
+        .route("/api/workers/{id}/timeline", get(workers::timeline))
+        .route("/api/workers/{id}/drain", post(workers::drain))
+        .route("/api/workers/{id}/resume", post(workers::resume))
         .route("/api/openapi.json", get(openapi))
         .route("/api/flows", get(flows::list_flows))
         .route(
@@ -452,6 +488,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/engine/report", post(engine::report))
         .route("/api/engine/heartbeat", post(engine::heartbeat))
         .route("/api/engine/failed", post(engine::failed))
+        .route("/api/engine/local-path", post(engine::local_path))
         .route(
             "/mcp",
             post(crate::mcp::handle_post)

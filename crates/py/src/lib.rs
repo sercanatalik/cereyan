@@ -711,6 +711,13 @@ fn decrypt_secret(home: &str, text: &str) -> PyResult<String> {
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
+/// A module's fingerprint under `source_dir`, the same hash the server computes,
+/// or `None` when the module cannot be found.
+#[pyfunction]
+fn module_fingerprint(source_dir: &str, module: &str) -> Option<String> {
+    cereyan_server::fingerprint::module_fingerprint(std::path::Path::new(source_dir), module)
+}
+
 /// Render a rule action's templates against a JSON context (offline rules).
 #[pyfunction]
 fn render_rule_action(action: &str, context: &str) -> PyResult<String> {
@@ -841,6 +848,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(check_state_name, m)?)?;
     m.add_function(wrap_pyfunction!(is_terminal, m)?)?;
     m.add_function(wrap_pyfunction!(decrypt_secret, m)?)?;
+    m.add_function(wrap_pyfunction!(module_fingerprint, m)?)?;
     m.add_function(wrap_pyfunction!(render_rule_action, m)?)?;
     m.add_function(wrap_pyfunction!(rule_matches, m)?)?;
     m.add_function(wrap_pyfunction!(schedule_fires, m)?)?;

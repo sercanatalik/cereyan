@@ -26,6 +26,7 @@ Resource `run`; related `flow` and the run's tags. Offline the payload is `state
 | `run.paused` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run is waiting on `wait_for_input` |
 | `run.resumed` | `state`, `state_type`, `message`, `flow`, `project`, `parameters`, `created_by` | The run was answered and its next attempt scheduled |
 | `run.report_rejected` | `seq`, `kind`, `reason` | The store refused one event of an engine's report; the rest of that report still applied |
+| `run.local_path_on_worker` | `path`, `host` | A run on a remote worker used a `LocalTarget` outside the worker's shared paths, so the file is on that machine only |
 
 `AwaitingRetry`, `AwaitingResource`, and `Cancelling` record no event.
 
@@ -93,7 +94,7 @@ Runs created by a rule record `created_by = rule:<id>`, and a rule never fires o
 
 Names with a dot-separated prefix, such as `orders.table_empty`, match rules with `events: ["orders.*"]`.
 
-The prefixes `run.`, `task_run.`, `flow.`, `schedule.`, `scheduler.`, `resource.`, `rule.`, `expectation.`, `backfill.` are the engine's. A name under one of them that is not in the catalogue above is rejected by `emit_event`, by `@app.rule`, and by the rules API, because nothing would ever emit it — a rule matching one could only ever sit silent. Every other name is yours and is never checked.
+The prefixes `run.`, `task_run.`, `flow.`, `schedule.`, `scheduler.`, `resource.`, `rule.`, `expectation.`, `backfill.`, `worker.` are the engine's. A name under one of them that is not in the catalogue above is rejected by `emit_event`, by `@app.rule`, and by the rules API, because nothing would ever emit it — a rule matching one could only ever sit silent. Every other name is yours and is never checked.
 
 ## Stream messages
 

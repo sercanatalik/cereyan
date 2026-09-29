@@ -164,6 +164,9 @@ def main(argv: list[str] | None = None) -> int:
         server = info.get("url") or f"http://{info['host']}:{info['port']}"
 
     client = _core.Client(server, args.engine_id, os.environ.get("CEREYAN_TOKEN") or None)
+    from ..client import Client as HttpClient, set_served
+
+    set_served(HttpClient(server, token=os.environ.get("CEREYAN_TOKEN") or None))
     source_dir = os.path.abspath(args.source_dir)
     if source_dir not in sys.path:
         sys.path.insert(0, source_dir)

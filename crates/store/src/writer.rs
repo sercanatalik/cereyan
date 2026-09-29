@@ -296,7 +296,14 @@ pub struct RejectedEvent {
     pub reason: String,
 }
 
+/// A write given as a closure over the connection.
+pub type ExecFn = Box<dyn FnOnce(&Connection) -> Result<serde_json::Value> + Send>;
+
 pub enum WriteCommand {
+    /// A write given as a closure over the connection, for small tables that do
+    /// not warrant a command of their own (the worker registry). It runs inside
+    /// the writer's transaction like every other command.
+    Exec(ExecFn, Reply<serde_json::Value>),
     UpsertFlow(UpsertFlow, Reply<i64>),
     SetFlowError {
         flow_id: i64,
@@ -678,6 +685,7 @@ fn ack<T: Send + 'static>(reply: Reply<T>, value: Result<T>) -> Ack {
 
 fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
     match cmd {
+        WriteCommand::Exec(f, reply) => ack(reply, f(conn)),
         WriteCommand::UpsertFlow(f, reply) => ack(reply, upsert_flow(conn, &f)),
         WriteCommand::SetFlowError {
             flow_id,

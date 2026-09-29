@@ -52,6 +52,10 @@ The Queue page shows the pool as **processors**: add or remove them there, or wi
 
 The Settings page lists the engines with their PID, module, runs done, and current run.
 
+## Workers on other machines
+
+`cereyan worker --host URL` on another machine adds that machine's processors to the same queue. The worker imports its own checkout of the project, registers the flows it can run with a fingerprint of each module, and starts engines when the server asks. Those engines take runs over the same protocol as the server's own: a run goes to a worker only when the server's processors are full, the flow does not say `runs_on="server"`, and the worker's code for the module matches the server's. Results, checkpoints and secrets stay on the server; the worker's engines never open a store of their own. The **Queue › Workers** tab lists every worker with its status, host, processors, and the runs it executed. See [Run across machines](../guides/run-across-machines.md).
+
 ## The home directory
 
 One runtime home per machine holds everything: `db.sqlite`, `db.lock`, `server.json` while a server runs, `secret.key` once a secret exists, `token` once a server bound beyond loopback has generated its API token, and `storage/` for persisted results. Only the account that created it can read it, which is what protects the store and the key alike. It resolves from `--home`, then `CEREYAN_HOME`, then `~/.cereyan`; `cereyan.toml` cannot move it, so a repository can never point the store elsewhere. Engine children inherit it through `CEREYAN_HOME`.

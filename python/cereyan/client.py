@@ -142,6 +142,28 @@ class Client:
         except urllib.error.URLError as exc:
             raise ServerUnavailable(f"cannot reach {self.base_url}: {exc.reason}") from None
 
+    def _request_bytes(self, method: str, path: str, data: bytes | None = None, params: dict | None = None) -> bytes:
+        """Send or fetch raw bytes (persisted results); raises `ApiError` on an error status."""
+        target = path
+        if params:
+            target += "?" + urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
+        headers = {"content-type": "application/octet-stream"}
+        if self.token:
+            headers["authorization"] = f"Bearer {self.token}"
+        req = urllib.request.Request(self.base_url + target, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=max(self.timeout, 120.0)) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            raw = exc.read()
+            try:
+                payload = json.loads(raw.decode("utf-8")) if raw else {}
+            except ValueError:
+                payload = {"error": raw.decode("utf-8", "replace")}
+            raise ApiError(exc.code, payload) from None
+        except urllib.error.URLError as exc:
+            raise ServerUnavailable(f"cannot reach {self.base_url}: {exc.reason}") from None
+
     def _request_unix(self, method: str, target: str, data: bytes | None, headers: dict) -> Any:
         conn = _UnixConnection(self.socket_path, self.timeout)
         try:
@@ -442,8 +464,26 @@ def default_client(home: str | None = None, token: str | None = None) -> Client:
     return client
 
 
+# Set inside an engine the server or a worker started: that process belongs to
+# one server, reached through this client, and never uses a store of its own.
+_served: Client | None = None
+
+
+def set_served(client: Client | None) -> None:
+    """Make every API in this process go through ``client`` (engine children only)."""
+    global _served
+    _served = client
+
+
+def served() -> Client | None:
+    """The server this process is an engine of, when it is one."""
+    return _served
+
+
 def find_server(home: str | None = None) -> Client | None:
     """A client for the live server of ``home``, or ``None`` when there is none; raises ``AuthRequired`` when a token is needed."""
+    if _served is not None:
+        return _served
     try:
         return default_client(home)
     except ServerUnavailable:

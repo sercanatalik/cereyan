@@ -58,6 +58,8 @@ pub struct AppState {
     pub resetting: AtomicBool,
     /// The global pause while the scheduler is paused (`scheduler.paused` in kv).
     pub pause: RwLock<Option<crate::scheduler::Pause>>,
+    /// Fingerprints of the server's own modules, recomputed when a file changes.
+    pub fingerprints: crate::fingerprint::Fingerprints,
 }
 
 /// Outcome of a transition request: the run after the change, or the current
@@ -132,6 +134,7 @@ impl AppState {
             sources: RwLock::new(sources),
             resetting: AtomicBool::new(false),
             pause: RwLock::new(None),
+            fingerprints: crate::fingerprint::Fingerprints::default(),
         };
         Ok(state)
     }
@@ -269,7 +272,10 @@ impl AppState {
                             .map(|t| t <= now_micros())
                             .unwrap_or(true)
                     {
-                        self.supervisor.enqueue_simple(run.id, key);
+                        let remote_ok =
+                            cereyan_core::FlowOptions::from_map(&flow.options).may_run_remotely();
+                        self.supervisor
+                            .enqueue_simple(run.id, flow.id, remote_ok, key);
                     }
                 }
                 StateType::Paused => {
@@ -278,10 +284,19 @@ impl AppState {
                     self.index.adopt_run(&run, key);
                 }
                 _ => {
-                    let alive = run
-                        .engine_pid
-                        .map(|p| crate::process::is_alive(p as u32))
-                        .unwrap_or(false);
+                    // A run on a worker has no process on this machine to check:
+                    // adopt it and let its heartbeats decide.
+                    let remote = run.engine_id.as_deref().is_some_and(|id| {
+                        matches!(
+                            crate::supervisor::Location::of_engine(id),
+                            crate::supervisor::Location::Worker(_)
+                        )
+                    });
+                    let alive = remote
+                        || run
+                            .engine_pid
+                            .map(|p| crate::process::is_alive(p as u32))
+                            .unwrap_or(false);
                     if alive {
                         self.index.adopt_run(&run, key.clone());
                         self.supervisor.adopt(&run, key);

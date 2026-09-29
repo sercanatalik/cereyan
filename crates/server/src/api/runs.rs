@@ -1065,8 +1065,10 @@ pub async fn run_tasks(
 pub async fn transition_run(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<TransitionBody>,
 ) -> ApiResult<Json<Run>> {
+    super::engine::check_lease(&state, id, &headers)?;
     let proposed = RunState::from_parts(
         body.state_type,
         body.name.as_deref(),

@@ -670,6 +670,10 @@ mod tests {
             backfill_id: None,
             task_counts: Default::default(),
             unique_key: None,
+            host: None,
+            processor: None,
+            lease: 0,
+            source_hash: None,
         }
     }
 

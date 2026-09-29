@@ -77,6 +77,9 @@ pub fn effective_priority(state: &AppState, flow: &Flow, run: &Run) -> i64 {
 }
 
 /// Admit a run to the dispatch queue, applying the overlap policy first.
+/// How long a replay waits for the worker that ran it before any host may take it.
+const STICKY_MICROS: i64 = 10_000_000;
+
 pub fn enqueue_run(state: &Arc<AppState>, run: &Run, flow: &Flow, not_before: Option<i64>) {
     if run.state.is_terminal() {
         return;
@@ -157,6 +160,17 @@ pub fn enqueue_run(state: &Arc<AppState>, run: &Run, flow: &Flow, not_before: Op
     }
     let mut key = EngineKey::from_flow(flow);
     key.nice = crate::supervisor::nice_for(priority);
+    // A replay (a resume, a poke, a crash rerun) prefers the worker that ran
+    // the previous attempt, where its local files and warm engine are.
+    let previous_host = run.host.clone().or_else(|| {
+        run.parent_run_id
+            .and_then(|p| state.store.get_run(p).ok().flatten())
+            .and_then(|p| p.host)
+    });
+    let prefer_worker = previous_host
+        .filter(|h| h != "server")
+        .and_then(|h| state.supervisor.worker_id(&h))
+        .filter(|_| options.may_run_remotely());
     state.supervisor.enqueue(QueuedRun {
         run_id: run.id,
         key,
@@ -164,6 +178,10 @@ pub fn enqueue_run(state: &Arc<AppState>, run: &Run, flow: &Flow, not_before: Op
         order: run.scheduled_time.unwrap_or(run.created_at),
         needs: run_needs(state, flow, &options, run),
         not_before,
+        flow_id: flow.id,
+        remote_ok: options.may_run_remotely(),
+        prefer_worker,
+        prefer_until: cereyan_core::now_micros() + STICKY_MICROS,
     });
     state.supervisor.ensure_capacity(state);
 }
@@ -405,6 +423,18 @@ pub fn flow_timeout(state: &Arc<AppState>, run_id: i64) {
     let mut s = State::named(StateName::TimedOut);
     s.message = Some(format!("timed out after {secs} s"));
     if let Ok(TransitionResult::Accepted(_)) = state.transition_run(run_id, s, false) {
+        if let Some(crate::supervisor::Location::Worker(worker_id)) = active
+            .engine_id
+            .as_deref()
+            .map(crate::supervisor::Location::of_engine)
+        {
+            // The worker ends its own engine.
+            state.supervisor.command_worker(
+                worker_id,
+                json!({"cmd": "cancel", "run_id": run_id, "engine_id": active.engine_id}),
+            );
+            return;
+        }
         if let Some(pid) = active.engine_pid {
             crate::process::terminate(pid);
             let st = state.clone();

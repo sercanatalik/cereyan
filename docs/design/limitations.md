@@ -12,7 +12,9 @@ Cereyan is built for one machine, one wheel, and pipelines that can always be re
 
 **One wheel, no runtime dependencies.** `pip install cereyan` is the whole install: the Rust core, the server, the UI, and the MCP server are inside the wheel. Nothing is pulled in at run time, so a pipeline environment gains no transitive dependencies from its orchestrator. Docs tooling and tests use dependency groups that never reach the wheel.
 
-**One process serves everything.** `cereyan serve` is the API, the UI, the scheduler, the rules engine, the MCP endpoint, and the engine supervisor. There are no separate agents, workers, or queues to run: the queue and the processors on the Queue page are the supervisor's own queue and its engine children, sized from the UI but never started by hand.
+**One process serves everything.** `cereyan serve` is the API, the UI, the scheduler, the rules engine, the MCP endpoint, the one queue, and the engine supervisor. There is no broker or separate queue to run. Other machines can add processors with `cereyan worker`, which connects out to the server, runs engines from its own checkout, and keeps nothing of its own: the store, results, secrets and the flow definitions stay on the server. See [Run across machines](../guides/run-across-machines.md).
+
+**Remote workers, decided for 3.0.** Earlier releases listed remote workers as out of scope, because distributing execution seemed to need a broker, a scheduler that knows about hosts, and a rollout story. By 3.0 the server already was the broker: engines pull their next run over HTTP with a token, and the queue picks the first run that can start. A worker is therefore an engine on another machine plus a registration: it declares which flows its checkout can run and a fingerprint per module, and a run only goes where the code matches. Work pools, per-queue routing, and shipping code to workers remain out of scope.
 
 **Two execution paths, one store.** A plain `python pipeline.py` writes the same SQLite store the server uses, under the same state rules, so a script and a served run look identical in history. When a server holds the store, scripts hand their runs to it.
 
@@ -26,7 +28,7 @@ Cereyan is built for one machine, one wheel, and pipelines that can always be re
 
 | Not provided | Reason | Instead |
 |---|---|---|
-| Remote workers, work pools, Kubernetes or Docker execution | Cereyan runs on the machine it is installed on; distributing execution would need a broker, a scheduler that knows about hosts, and a rollout story, which is the platform it set out not to be. | Run a server per machine, or call remote systems from inside tasks. |
+| Work pools, per-queue routing, Kubernetes or Docker execution, shipping code to workers | One queue serves every host, and a worker runs its own checkout; building images, choosing infrastructure per run, or copying code to machines is the platform Cereyan set out not to be. | `cereyan worker` on each machine with a checkout; `runs_on="server"` for flows that must stay on the server; call remote systems from inside tasks. |
 | Postgres or any other database | SQLite gives one file, no service, and the performance the targets need; a second backend would double the store and change the operational shape. | Retention keeps the file bounded; back it up like any file. |
 | Remote or object-store targets (S3, GCS, HDFS) | A `Target` is anything with `exists()`, so you can write one in a few lines with the client library you already use; shipping them would add dependencies to the wheel. | Write a small class with `exists()`. |
 | Integrations and connector packages | Tasks are plain Python; the library for your warehouse or API works unchanged inside one. | Import it in the task. |
@@ -39,7 +41,9 @@ Cereyan is built for one machine, one wheel, and pipelines that can always be re
 
 ## Limits worth knowing
 
-- One server per machine, because the home and its advisory lock are global.
+- One server per machine, because the home and its advisory lock are global. A machine can instead run a worker for another machine's server.
+- Workers are on the same network as the server, or reach it through a TLS proxy; the server itself does not terminate TLS. All workers share the server's token.
+- A worker's files are its own: a `LocalTarget` it writes outside its declared shared paths is on that machine only, and is reported as `run.local_path_on_worker`.
 - The engine pool bounds concurrent runs at `max_engines` (processors on the Queue page), default 1 and at most the CPU count; a run occupies an engine for its whole duration, including time spent waiting on I/O, unless it waits through `sleep`, `wait_for_event`, `wait_for_target`, or `wait_for_input`, which free the engine.
 - Artifacts are limited to 1 MB and variables to 64 KB.
 - Retention deletes logs and events older than `retain_days`, and runs older than `retain_runs_days` when that is set; persisted results under `storage/` are a cache keyed by task inputs and are not deleted per run.

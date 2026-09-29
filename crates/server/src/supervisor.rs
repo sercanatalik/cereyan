@@ -46,7 +46,33 @@ pub fn nice_for(priority: i64) -> u8 {
     }
 }
 
+/// Where an engine runs: on the server's machine or on a registered worker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Location {
+    Local,
+    Worker(i64),
+}
+
+impl Location {
+    /// Engines a worker starts are named `w<worker id>-<n>` by the server, so
+    /// their location survives a server restart; every other engine is local.
+    pub fn of_engine(engine_id: &str) -> Location {
+        engine_id
+            .strip_prefix('w')
+            .and_then(|rest| rest.split_once('-'))
+            .and_then(|(n, _)| n.parse().ok())
+            .map(Location::Worker)
+            .unwrap_or(Location::Local)
+    }
+}
+
 impl EngineKey {
+    /// The same code wherever it sits: module, isolation and niceness, not the
+    /// directory, which differs between a worker's checkout and the server's.
+    pub fn same_code(&self, other: &EngineKey) -> bool {
+        self.module == other.module && self.isolated == other.isolated && self.nice == other.nice
+    }
+
     pub fn from_flow(flow: &Flow) -> EngineKey {
         let priority = flow
             .options
@@ -102,6 +128,9 @@ pub struct Engine {
     pub run_since: Option<Instant>,
     /// Whether the engine has asked for work since it started.
     pub polled: bool,
+    pub location: Location,
+    /// The processor slot on its host, from 1.
+    pub slot: usize,
 }
 
 impl Engine {
@@ -127,6 +156,8 @@ impl Engine {
             drained_at: None,
             run_since: None,
             polled: false,
+            location: Location::Local,
+            slot: 0,
         }
     }
 
@@ -145,6 +176,10 @@ impl Engine {
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
 pub struct EngineView {
     pub id: String,
+    /// `server`, or the worker's name.
+    pub host: String,
+    /// The processor slot on that host, from 1.
+    pub slot: usize,
     /// `starting`, `idle`, `running` or `draining`.
     pub status: &'static str,
     /// The module the engine has loaded.
@@ -169,6 +204,12 @@ pub struct LineEntry {
     pub overtaken_by: u32,
 }
 
+/// How long a worker has to start an engine it was asked for.
+const REMOTE_START_TIMEOUT: Duration = Duration::from_secs(60);
+/// A worker's idle engine long-polls every 25 s; after this long without a
+/// poll it is gone.
+const REMOTE_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+
 /// A queued run's place in line: priority first (highest first), then time
 /// in line, then id.
 type QKey = (i64, i64, i64);
@@ -187,6 +228,24 @@ pub struct QueuedRun {
     pub needs: Vec<(String, f64)>,
     /// Do not dispatch before this time (microseconds); engines may pre-warm.
     pub not_before: Option<i64>,
+    /// The run's flow, for matching a worker's code.
+    pub flow_id: i64,
+    /// Whether a remote worker may take it (`runs_on` is not `server`).
+    pub remote_ok: bool,
+    /// A replay of a run last executed on this worker waits for it until
+    /// `prefer_until` (microseconds), then any host may take it.
+    pub prefer_worker: Option<i64>,
+    pub prefer_until: i64,
+}
+
+impl QueuedRun {
+    /// Whether the run is still reserved for another host than `location`.
+    fn reserved_elsewhere(&self, location: Location, now: i64) -> bool {
+        match self.prefer_worker {
+            Some(w) if now < self.prefer_until => location != Location::Worker(w),
+            _ => false,
+        }
+    }
 }
 
 /// A non-run job for an engine of a key (hooks, bulk_complete prefilter).
@@ -314,9 +373,27 @@ impl Resources {
     }
 }
 
+/// What the supervisor knows of a registered worker.
+#[derive(Debug)]
+pub struct WorkerSlot {
+    pub name: String,
+    pub processors: usize,
+    /// `online`, `draining`, or `offline`.
+    pub state: String,
+    /// Flows whose code on the worker matches the server's.
+    pub eligible: std::collections::HashSet<i64>,
+    pub last_seen: Instant,
+    /// Commands for the worker, handed over on its next heartbeat.
+    pub commands: Vec<serde_json::Value>,
+    /// Modules its engines failed to import; skipped until its checkout changes.
+    pub broken: std::collections::HashSet<String>,
+    next_engine: u64,
+}
+
 #[derive(Default)]
 struct Inner {
     engines: HashMap<String, Engine>,
+    workers: HashMap<i64, WorkerSlot>,
     /// The one queue, in dispatch order.
     queue: BTreeMap<QKey, QueuedRun>,
     /// Each queued run's place in `queue`.
@@ -349,10 +426,25 @@ impl Inner {
     /// Engines counted against the pool: every one but those told to exit
     /// while idle (they are on their way out).
     fn occupying(&self) -> usize {
+        self.occupying_at(Location::Local)
+    }
+
+    fn occupying_at(&self, location: Location) -> usize {
         self.engines
             .values()
-            .filter(|e| !e.exit_requested || e.current_run.is_some())
+            .filter(|e| e.location == location && (!e.exit_requested || e.current_run.is_some()))
             .count()
+    }
+
+    /// The lowest processor slot not taken at `location`.
+    fn free_slot(&self, location: Location) -> usize {
+        let taken: std::collections::HashSet<usize> = self
+            .engines
+            .values()
+            .filter(|e| e.location == location)
+            .map(|e| e.slot)
+            .collect();
+        (1..).find(|n| !taken.contains(n)).unwrap_or(1)
     }
 }
 
@@ -409,6 +501,11 @@ pub struct WorkItem {
     #[serde(default)]
     #[schema(value_type = Object)]
     pub payload: serde_json::Value,
+    /// The hand-off this execution belongs to. The engine sends it back as
+    /// `X-Cereyan-Lease` on reports, heartbeats and transitions; an older lease
+    /// is refused, so a run rerun elsewhere is not also finished here.
+    #[serde(default)]
+    pub lease: i64,
 }
 
 fn default_kind() -> String {
@@ -457,13 +554,21 @@ impl Supervisor {
         let n = n.clamp(1, self.cpu_cap);
         self.max_engines.store(n, Ordering::Relaxed);
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let mut live = inner.engines.values().filter(|e| !e.exit_requested).count();
+        let mut live = inner
+            .engines
+            .values()
+            .filter(|e| e.location == Location::Local && !e.exit_requested)
+            .count();
         // Growing: undo drains, most recent first.
         while live < n {
             let undo = inner
                 .engines
                 .values_mut()
-                .filter(|e| e.drained_at.is_some() && e.current_run.is_some())
+                .filter(|e| {
+                    e.location == Location::Local
+                        && e.drained_at.is_some()
+                        && e.current_run.is_some()
+                })
                 .max_by_key(|e| e.drained_at);
             match undo {
                 Some(e) => {
@@ -478,7 +583,7 @@ impl Supervisor {
         let mut live: Vec<&mut Engine> = inner
             .engines
             .values_mut()
-            .filter(|e| !e.exit_requested)
+            .filter(|e| e.location == Location::Local && !e.exit_requested)
             .collect();
         if live.len() > n {
             let excess = live.len() - n;
@@ -499,6 +604,222 @@ impl Supervisor {
         self.notify.notify_waiters();
     }
 
+    // ---- workers -----------------------------------------------------------
+
+    /// Learn or refresh a worker: its name, processors, state, and the flows
+    /// whose code matches the server's.
+    pub fn sync_worker(
+        &self,
+        worker_id: i64,
+        name: &str,
+        processors: usize,
+        state: &str,
+        eligible: std::collections::HashSet<i64>,
+    ) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let slot = inner
+            .workers
+            .entry(worker_id)
+            .or_insert_with(|| WorkerSlot {
+                name: name.to_string(),
+                processors,
+                state: state.to_string(),
+                eligible: Default::default(),
+                last_seen: Instant::now(),
+                commands: Vec::new(),
+                broken: Default::default(),
+                next_engine: 0,
+            });
+        slot.name = name.to_string();
+        slot.processors = processors.max(1);
+        slot.state = state.to_string();
+        slot.eligible = eligible;
+        slot.last_seen = Instant::now();
+        drop(inner);
+        self.notify.notify_waiters();
+    }
+
+    /// A worker's heartbeat: it is alive, and these are the engines it runs.
+    /// Engines the server expects there but the worker no longer has are
+    /// forgotten (their runs, if any, are left to the runs' own heartbeats).
+    /// Returns the commands waiting for the worker, or `None` when the server
+    /// does not know it (it should register again).
+    pub fn worker_heartbeat(
+        &self,
+        worker_id: i64,
+        engines: &[String],
+    ) -> Option<Vec<serde_json::Value>> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let slot = inner.workers.get_mut(&worker_id)?;
+        slot.last_seen = Instant::now();
+        if slot.state == "offline" {
+            slot.state = "online".into();
+        }
+        let commands = std::mem::take(&mut slot.commands);
+        let location = Location::Worker(worker_id);
+        let reported: std::collections::HashSet<&String> = engines.iter().collect();
+        let gone: Vec<String> = inner
+            .engines
+            .values()
+            .filter(|e| {
+                e.location == location
+                    && e.current_run.is_none()
+                    && !reported.contains(&e.id)
+                    && (e.polled || e.spawned_at.elapsed() > Duration::from_secs(15))
+            })
+            .map(|e| e.id.clone())
+            .collect();
+        for id in gone {
+            inner.engines.remove(&id);
+        }
+        drop(inner);
+        self.notify.notify_waiters();
+        Some(commands)
+    }
+
+    /// `online`, `draining`, or `offline`. A worker that is not online takes
+    /// no new run: its idle engines are told to exit and engines it was asked
+    /// to start but has not are forgotten.
+    pub fn set_worker_state(&self, worker_id: i64, state: &str) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(slot) = inner.workers.get_mut(&worker_id) else {
+            return;
+        };
+        slot.state = state.to_string();
+        if state != "online" {
+            slot.commands.retain(|c| c["cmd"] != "spawn");
+            let location = Location::Worker(worker_id);
+            inner
+                .engines
+                .retain(|_, e| e.location != location || e.polled || e.current_run.is_some());
+            for e in inner.engines.values_mut() {
+                if e.location == location && e.current_run.is_none() {
+                    e.exit_requested = true;
+                }
+            }
+        }
+        drop(inner);
+        self.notify.notify_waiters();
+    }
+
+    pub fn set_worker_processors(&self, worker_id: i64, processors: usize) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(slot) = inner.workers.get_mut(&worker_id) {
+            slot.processors = processors.max(1);
+        }
+        drop(inner);
+        self.notify.notify_waiters();
+    }
+
+    /// Forget a worker and every engine it had.
+    pub fn forget_worker(&self, worker_id: i64) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.workers.remove(&worker_id);
+        let location = Location::Worker(worker_id);
+        inner.engines.retain(|_, e| e.location != location);
+    }
+
+    /// A worker's engine could not import `module`: stop sending it that
+    /// module's runs until the worker reports a changed checkout.
+    pub fn mark_broken(&self, worker_id: i64, module: &str) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(slot) = inner.workers.get_mut(&worker_id) {
+            slot.broken.insert(module.to_string());
+        }
+    }
+
+    /// The worker reported new fingerprints: give its modules another chance.
+    pub fn clear_broken(&self, worker_id: i64) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(slot) = inner.workers.get_mut(&worker_id) {
+            slot.broken.clear();
+        }
+    }
+
+    /// Queue a command for a worker's next heartbeat.
+    pub fn command_worker(&self, worker_id: i64, command: serde_json::Value) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(slot) = inner.workers.get_mut(&worker_id) {
+            slot.commands.push(command);
+        }
+    }
+
+    /// Workers not heard from within `timeout`: they turn offline, and their
+    /// idle engines are forgotten. Returns the ids that changed.
+    pub fn mark_quiet_workers(&self, timeout: Duration) -> Vec<i64> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let quiet: Vec<i64> = inner
+            .workers
+            .iter()
+            .filter(|(_, s)| s.state != "offline" && s.last_seen.elapsed() > timeout)
+            .map(|(id, _)| *id)
+            .collect();
+        for id in &quiet {
+            if let Some(slot) = inner.workers.get_mut(id) {
+                slot.state = "offline".into();
+                slot.commands.clear();
+            }
+            let location = Location::Worker(*id);
+            inner
+                .engines
+                .retain(|_, e| e.location != location || e.current_run.is_some());
+        }
+        quiet
+    }
+
+    /// The worker whose engine holds `run_id`, if a worker's does.
+    pub fn run_worker(&self, run_id: i64) -> Option<i64> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner
+            .engines
+            .values()
+            .find_map(|e| match (e.current_run, e.location) {
+                (Some(r), Location::Worker(w)) if r == run_id => Some(w),
+                _ => None,
+            })
+    }
+
+    /// The engine holding `run_id`: its location and processor slot.
+    pub fn run_placement(&self, run_id: i64) -> Option<(Location, usize)> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner
+            .engines
+            .values()
+            .find(|e| e.current_run == Some(run_id))
+            .map(|e| (e.location, e.slot))
+    }
+
+    /// Per worker: (id, name, state, processors, running, idle or starting).
+    pub fn workers_snapshot(&self) -> Vec<(i64, String, String, usize, usize, usize)> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<_> = inner
+            .workers
+            .iter()
+            .map(|(id, s)| {
+                let location = Location::Worker(*id);
+                let mine = inner.engines.values().filter(|e| e.location == location);
+                let running = mine.clone().filter(|e| e.current_run.is_some()).count();
+                let idle = mine.filter(|e| e.current_run.is_none()).count();
+                (
+                    *id,
+                    s.name.clone(),
+                    s.state.clone(),
+                    s.processors,
+                    running,
+                    idle,
+                )
+            })
+            .collect();
+        out.sort_by(|a, b| a.1.cmp(&b.1));
+        out
+    }
+
+    /// The worker name for an id the supervisor knows.
+    pub fn worker_name(&self, worker_id: i64) -> Option<String> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.workers.get(&worker_id).map(|s| s.name.clone())
+    }
+
     pub fn enqueue(&self, item: QueuedRun) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.push(item);
@@ -517,7 +838,7 @@ impl Supervisor {
     }
 
     /// Convenience for callers that only know the run and key.
-    pub fn enqueue_simple(&self, run_id: i64, key: EngineKey) {
+    pub fn enqueue_simple(&self, run_id: i64, flow_id: i64, remote_ok: bool, key: EngineKey) {
         self.enqueue(QueuedRun {
             run_id,
             key,
@@ -525,6 +846,10 @@ impl Supervisor {
             order: cereyan_core::now_micros(),
             needs: Vec::new(),
             not_before: None,
+            flow_id,
+            remote_ok,
+            prefer_worker: None,
+            prefer_until: 0,
         });
     }
 
@@ -625,6 +950,11 @@ impl Supervisor {
         inner.failures.remove(&flow_id);
     }
 
+    pub fn forget_engine(&self, engine_id: &str) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.engines.remove(engine_id);
+    }
+
     pub fn forget_pid(&self, pid: u32) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.engines.retain(|_, e| e.pid != Some(pid));
@@ -709,6 +1039,11 @@ impl Supervisor {
         engine.current_run = Some(run.id);
         engine.run_since = Some(Instant::now());
         engine.polled = true;
+        engine.location = Location::of_engine(&id);
+        engine.slot = run
+            .processor
+            .map(|p| p.max(1) as usize)
+            .unwrap_or_else(|| inner.free_slot(engine.location));
         inner.engines.insert(id, engine);
     }
 
@@ -717,7 +1052,10 @@ impl Supervisor {
     /// when the pool is full.
     pub fn ensure_capacity(&self, _state: &AppState) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let mut demand: HashMap<EngineKey, usize> = HashMap::new();
+        // Demand per key: how many runs could start, and which of their flows
+        // may go to a worker.
+        let mut demand: HashMap<EngineKey, (usize, Vec<i64>)> = HashMap::new();
+        let mut preferred: Vec<(EngineKey, i64)> = Vec::new();
         let horizon = cereyan_core::now_micros() + crate::scheduler::PREWARM_SECS * 1_000_000;
         {
             let resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
@@ -728,31 +1066,47 @@ impl Supervisor {
                 if resources.can_acquire(&q.needs).is_some() {
                     continue;
                 }
-                *demand.entry(q.key.clone()).or_insert(0) += 1;
+                if let Some(w) = q
+                    .prefer_worker
+                    .filter(|_| q.prefer_until > cereyan_core::now_micros())
+                {
+                    preferred.push((q.key.clone(), w));
+                    continue;
+                }
+                let entry = demand.entry(q.key.clone()).or_default();
+                entry.0 += 1;
+                if q.remote_ok {
+                    entry.1.push(q.flow_id);
+                }
             }
         }
         for j in &inner.jobs {
-            *demand.entry(j.key.clone()).or_insert(0) += 1;
+            demand.entry(j.key.clone()).or_default().0 += 1;
         }
-        for (key, pending) in demand {
+        for (key, (pending, remote_flows)) in demand {
             let usable = inner
                 .engines
                 .values()
-                .filter(|e| e.key == key && !e.exit_requested && e.current_run.is_none())
+                .filter(|e| {
+                    e.location == Location::Local
+                        && e.key == key
+                        && !e.exit_requested
+                        && e.current_run.is_none()
+                })
                 .count();
             let mut to_spawn = pending.saturating_sub(usable);
+            // The server's own processors first: they are warm and nearest.
             while to_spawn > 0 {
                 if inner.occupying() >= self.max_engines() {
-                    // Evict one idle engine of another key.
-                    let victim = inner
-                        .engines
-                        .values_mut()
-                        .find(|e| e.key != key && e.current_run.is_none() && !e.exit_requested);
-                    match victim {
-                        Some(v) => {
-                            v.exit_requested = true;
-                        }
-                        None => break,
+                    // Evict one idle local engine of another key.
+                    let victim = inner.engines.values_mut().find(|e| {
+                        e.location == Location::Local
+                            && e.key != key
+                            && e.current_run.is_none()
+                            && !e.exit_requested
+                    });
+                    if let Some(v) = victim {
+                        v.exit_requested = true;
                     }
                     break;
                 }
@@ -761,10 +1115,10 @@ impl Supervisor {
                 match self.spawn(&id, &key) {
                     Ok(child) => {
                         let pid = Some(child.id());
-                        inner.engines.insert(
-                            id.clone(),
-                            Engine::new(id, key.clone(), pid, Some(child), false),
-                        );
+                        let mut engine =
+                            Engine::new(id.clone(), key.clone(), pid, Some(child), false);
+                        engine.slot = inner.free_slot(Location::Local);
+                        inner.engines.insert(id, engine);
                     }
                     Err(e) => {
                         eprintln!("cereyan: failed to start engine: {e}");
@@ -773,9 +1127,129 @@ impl Supervisor {
                 }
                 to_spawn -= 1;
             }
+            // What the server cannot take now spills over to workers.
+            if to_spawn > 0 && !remote_flows.is_empty() {
+                Self::spill_over(&mut inner, &key, to_spawn, &remote_flows);
+            }
+        }
+        // Replays reserved for the worker that ran them before.
+        for (key, worker_id) in preferred {
+            Self::spawn_on(&mut inner, &key, worker_id);
         }
         drop(inner);
         self.notify.notify_waiters();
+    }
+
+    /// Make sure `worker_id` has an engine for `key` idle or starting, asking it
+    /// to start one when it has a free processor.
+    fn spawn_on(inner: &mut Inner, key: &EngineKey, worker_id: i64) {
+        let location = Location::Worker(worker_id);
+        let ready = inner.engines.values().any(|e| {
+            e.location == location
+                && e.key.same_code(key)
+                && e.current_run.is_none()
+                && !e.exit_requested
+        });
+        let busy = inner.occupying_at(location);
+        let Some(slot) = inner.workers.get(&worker_id) else {
+            return;
+        };
+        if ready
+            || slot.state != "online"
+            || slot.broken.contains(&key.module)
+            || busy >= slot.processors
+        {
+            return;
+        }
+        let slot_no = inner.free_slot(location);
+        let slot = inner.workers.get_mut(&worker_id).expect("checked above");
+        slot.next_engine += 1;
+        let engine_id = format!("w{worker_id}-{}", slot.next_engine);
+        slot.commands.push(json!({
+            "cmd": "spawn", "engine_id": engine_id, "module": key.module,
+            "isolated": key.isolated, "nice": key.nice,
+        }));
+        let mut engine = Engine::new(engine_id.clone(), key.clone(), None, None, false);
+        engine.module_mtime = None;
+        engine.location = location;
+        engine.slot = slot_no;
+        inner.engines.insert(engine_id, engine);
+    }
+
+    /// The id of the worker named `name`, when the supervisor knows it.
+    pub fn worker_id(&self, name: &str) -> Option<i64> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner
+            .workers
+            .iter()
+            .find(|(_, s)| s.name == name)
+            .map(|(id, _)| *id)
+    }
+
+    /// Ask workers to start engines for `wanted` runs of `key`. Idle engines a
+    /// worker already has for the code count first; then the eligible worker
+    /// with the most free processors is asked, one engine at a time.
+    fn spill_over(inner: &mut Inner, key: &EngineKey, wanted: usize, flows: &[i64]) {
+        let eligible_for = |slot: &WorkerSlot| {
+            slot.state == "online"
+                && !slot.broken.contains(&key.module)
+                && flows.iter().any(|f| slot.eligible.contains(f))
+        };
+        let idle_remote = inner
+            .engines
+            .values()
+            .filter(|e| {
+                matches!(e.location, Location::Worker(w)
+                    if inner.workers.get(&w).is_some_and(&eligible_for))
+                    && e.key.same_code(key)
+                    && !e.exit_requested
+                    && e.current_run.is_none()
+            })
+            .count();
+        let mut wanted = wanted.saturating_sub(idle_remote);
+        while wanted > 0 {
+            let choice = inner
+                .workers
+                .iter()
+                .filter(|(_, slot)| eligible_for(slot))
+                .map(|(id, slot)| {
+                    let busy = inner.occupying_at(Location::Worker(*id));
+                    (*id, slot.processors.saturating_sub(busy))
+                })
+                .filter(|(_, free)| *free > 0)
+                .max_by_key(|(id, free)| (*free, -*id));
+            let Some((worker_id, _)) = choice else { break };
+            let location = Location::Worker(worker_id);
+            let slot_no = inner.free_slot(location);
+            let slot = inner.workers.get_mut(&worker_id).expect("chosen above");
+            slot.next_engine += 1;
+            let engine_id = format!("w{worker_id}-{}", slot.next_engine);
+            slot.commands.push(json!({
+                "cmd": "spawn", "engine_id": engine_id, "module": key.module,
+                "isolated": key.isolated, "nice": key.nice,
+            }));
+            let mut engine = Engine::new(engine_id.clone(), key.clone(), None, None, false);
+            engine.module_mtime = None;
+            engine.location = location;
+            engine.slot = slot_no;
+            inner.engines.insert(engine_id, engine);
+            wanted -= 1;
+        }
+    }
+
+    /// Spill-over alone, for tests: what `ensure_capacity` asks of workers
+    /// when no local engine can be started.
+    #[cfg(test)]
+    fn spill_for_test(&self) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut wanted: HashMap<EngineKey, Vec<i64>> = HashMap::new();
+        for q in inner.queue.values().filter(|q| q.remote_ok) {
+            wanted.entry(q.key.clone()).or_default().push(q.flow_id);
+        }
+        for (key, flows) in wanted {
+            let n = flows.len();
+            Self::spill_over(&mut inner, &key, n, &flows);
+        }
     }
 
     fn spawn(&self, id: &str, key: &EngineKey) -> std::io::Result<Child> {
@@ -824,6 +1298,83 @@ impl Supervisor {
         cmd.spawn()
     }
 
+    /// Work for an engine a worker started: the first run in line it may take.
+    /// A remote engine takes a run only when the flow allows remote execution
+    /// and the worker's code for it matches the server's. It never takes jobs
+    /// (hooks, backfill prefilters: they run on the server), and it never
+    /// gives up its slot for another module, since its worker has its own.
+    fn take_remote_work(
+        &self,
+        inner: &mut Inner,
+        engine_id: &str,
+        pid: u32,
+        key: &EngineKey,
+        worker_id: i64,
+    ) -> WorkDecision {
+        let max_runs = self.engine_max_runs;
+        let location = Location::Worker(worker_id);
+        let occupying = inner.occupying_at(location);
+        let Some(worker) = inner.workers.get(&worker_id) else {
+            // A server that restarted learns the worker again on its next heartbeat.
+            return WorkDecision::Wait;
+        };
+        let (processors, state) = (worker.processors, worker.state.clone());
+        let engine = inner.engines.get_mut(engine_id).expect("tracked above");
+        engine.last_seen = Instant::now();
+        engine.pid = Some(pid);
+        engine.polled = true;
+        engine.current_run = None;
+        engine.run_since = None;
+        engine.drained_at = None;
+        if engine.exit_requested
+            || engine.runs_done >= max_runs
+            || state != "online"
+            || (occupying > processors && engine.adopted)
+        {
+            inner.engines.remove(engine_id);
+            return WorkDecision::Exit;
+        }
+        let eligible = &inner.workers[&worker_id].eligible;
+        let broken = &inner.workers[&worker_id].broken;
+        let now = cereyan_core::now_micros();
+        let mut resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
+        let mut blocked_ahead: Vec<i64> = Vec::new();
+        let mut take: Option<QKey> = None;
+        for (k, q) in inner.queue.iter() {
+            if q.not_before.map(|t| t > now).unwrap_or(false)
+                || !q.remote_ok
+                || !eligible.contains(&q.flow_id)
+                || !q.key.same_code(key)
+                || broken.contains(&q.key.module)
+                || q.reserved_elsewhere(Location::Worker(worker_id), now)
+            {
+                continue;
+            }
+            if resources.can_acquire(&q.needs).is_some() {
+                blocked_ahead.push(q.run_id);
+                continue;
+            }
+            take = Some(*k);
+            break;
+        }
+        let Some(k) = take else {
+            return WorkDecision::Wait;
+        };
+        let item = inner.queue.remove(&k).expect("key exists");
+        inner.positions.remove(&item.run_id);
+        inner.overtaken.remove(&item.run_id);
+        for id in blocked_ahead {
+            *inner.overtaken.entry(id).or_insert(0) += 1;
+        }
+        resources.acquire(item.run_id, &item.needs);
+        inner.waiting_marked.remove(&item.run_id);
+        if let Some(engine) = inner.engines.get_mut(engine_id) {
+            engine.current_run = Some(item.run_id);
+            engine.run_since = Some(Instant::now());
+        }
+        WorkDecision::Run(item.run_id)
+    }
+
     /// Give an engine its next run, or tell it to exit. Returns Ok(None)
     /// when nothing is queued for its key.
     pub fn take_work(
@@ -835,14 +1386,18 @@ impl Supervisor {
     ) -> WorkDecision {
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let inner = &mut *guard;
+        let location = Location::of_engine(engine_id);
         let known = inner.engines.contains_key(engine_id);
         if !known {
             // An engine we did not spawn (previous server) or one that
             // reconnected after a restart: track it.
-            inner.engines.insert(
-                engine_id.to_string(),
-                Engine::new(engine_id.to_string(), key.clone(), Some(pid), None, true),
-            );
+            let mut engine = Engine::new(engine_id.to_string(), key.clone(), Some(pid), None, true);
+            engine.location = location;
+            engine.slot = inner.free_slot(location);
+            inner.engines.insert(engine_id.to_string(), engine);
+        }
+        if let Location::Worker(worker_id) = location {
+            return self.take_remote_work(inner, engine_id, pid, key, worker_id);
         }
         let max_runs = self.engine_max_runs;
         let max_engines = self.max_engines();
@@ -882,7 +1437,9 @@ impl Supervisor {
         let mut room = inner.occupying() < max_engines;
         let mut served_keys: Vec<&EngineKey> = Vec::new();
         for (k, q) in inner.queue.iter() {
-            if q.not_before.map(|t| t > now).unwrap_or(false) {
+            if q.not_before.map(|t| t > now).unwrap_or(false)
+                || q.reserved_elsewhere(Location::Local, now)
+            {
                 continue;
             }
             if resources.can_acquire(&q.needs).is_some() {
@@ -991,6 +1548,15 @@ impl Supervisor {
             .values()
             .filter(|e| !e.exit_requested || e.current_run.is_some())
             .map(|e| EngineView {
+                host: match e.location {
+                    Location::Local => "server".to_string(),
+                    Location::Worker(w) => inner
+                        .workers
+                        .get(&w)
+                        .map(|slot| slot.name.clone())
+                        .unwrap_or_else(|| format!("worker {w}")),
+                },
+                slot: e.slot,
                 id: e.id.clone(),
                 status: e.status(),
                 module: e.key.module.clone(),
@@ -1022,6 +1588,16 @@ impl Supervisor {
                     Some("backfill concurrency".to_string())
                 }
                 Some(name) => Some(format!("resource:{name}")),
+                None if !engine_free
+                    && q.remote_ok
+                    && !inner.workers.is_empty()
+                    && inner
+                        .workers
+                        .values()
+                        .all(|w| !w.eligible.contains(&q.flow_id)) =>
+                {
+                    Some("no processor with matching code".to_string())
+                }
                 None if !engine_free => Some("no processor".to_string()),
                 None => None,
             };
@@ -1100,6 +1676,20 @@ impl Supervisor {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let mut dead: Vec<String> = Vec::new();
         for e in inner.engines.values_mut() {
+            // A worker's engine has no process here to check. One that never
+            // started, or went quiet while idle, is forgotten; one holding a run
+            // is left to the run's heartbeats.
+            if e.location != Location::Local {
+                let quiet = if e.polled {
+                    e.current_run.is_none() && e.last_seen.elapsed() > REMOTE_IDLE_TIMEOUT
+                } else {
+                    e.spawned_at.elapsed() > REMOTE_START_TIMEOUT
+                };
+                if quiet {
+                    dead.push(e.id.clone());
+                }
+                continue;
+            }
             let exited = match e.child.as_mut() {
                 Some(child) => matches!(child.try_wait(), Ok(Some(_))),
                 None => e.pid.map(|p| !process::is_alive(p)).unwrap_or(true),
@@ -1171,7 +1761,17 @@ fn supervise_once(state: &Arc<AppState>) {
         let Some(pid) = active.engine_pid else {
             continue;
         };
-        if active.last_heartbeat.elapsed() > heartbeat_limit && !process::is_alive(pid) {
+        // A worker's engine is on another machine: its heartbeats are the only
+        // sign of life, never a process check here.
+        let remote = active
+            .engine_id
+            .as_deref()
+            .is_some_and(|id| Location::of_engine(id) != Location::Local);
+        if active.last_heartbeat.elapsed() > heartbeat_limit && (remote || !process::is_alive(pid))
+        {
+            if let Some(id) = active.engine_id.as_deref().filter(|_| remote) {
+                sup.forget_engine(id);
+            }
             if active.cancel_requested {
                 let _ = state.transition_run(
                     active.id,
@@ -1223,6 +1823,29 @@ fn supervise_once(state: &Arc<AppState>) {
             continue;
         };
         let elapsed = since.elapsed();
+        // On a worker, the worker ends its own engine; signalling the pid here
+        // would reach whatever process on this machine has the same number.
+        if let Some(Location::Worker(worker_id)) =
+            active.engine_id.as_deref().map(Location::of_engine)
+        {
+            if elapsed > sup.cancel_grace * 2 {
+                let _ = state.transition_run(
+                    active.id,
+                    State::new(StateType::Cancelled)
+                        .with_message("the worker did not stop the run in time"),
+                    false,
+                );
+            } else if elapsed > sup.cancel_grace && active.terminated_at.is_none() {
+                sup.command_worker(
+                    worker_id,
+                    json!({"cmd": "cancel", "run_id": active.id, "engine_id": active.engine_id}),
+                );
+                state
+                    .index
+                    .update(active.id, |r| r.terminated_at = Some(Instant::now()));
+            }
+            continue;
+        }
         if elapsed > sup.cancel_grace * 2 {
             process::kill(pid);
             let _ = state.transition_run(
@@ -1236,6 +1859,16 @@ fn supervise_once(state: &Arc<AppState>) {
                 .index
                 .update(active.id, |r| r.terminated_at = Some(Instant::now()));
         }
+    }
+    // 3b. Workers that stopped heartbeating turn offline.
+    for worker_id in sup.mark_quiet_workers(sup.heartbeat * 3) {
+        let _ = state.store.set_worker_state(worker_id, "offline");
+        let _ = state.record_engine_event(
+            EventName::WorkerOffline,
+            None,
+            None,
+            json!({"worker_id": worker_id, "name": sup.worker_name(worker_id)}),
+        );
     }
     // 4. Keep the pool sized to the queue.
     if sup.queue_len() > 0 {
@@ -1273,6 +1906,10 @@ mod tests {
             order,
             needs: Vec::new(),
             not_before: None,
+            flow_id: 1,
+            remote_ok: true,
+            prefer_worker: None,
+            prefer_until: 0,
         }
     }
 
@@ -1379,5 +2016,103 @@ mod tests {
         assert_eq!(s.max_engines(), cpu_count());
         s.set_max_engines(0);
         assert_eq!(s.max_engines(), 1);
+    }
+
+    fn worker(s: &Supervisor, id: i64, processors: usize, flows: &[i64]) {
+        s.sync_worker(
+            id,
+            &format!("w{id}"),
+            processors,
+            "online",
+            flows.iter().copied().collect(),
+        );
+    }
+
+    fn commands(s: &Supervisor, id: i64) -> Vec<serde_json::Value> {
+        s.worker_heartbeat(id, &[]).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_remote_engine_takes_only_runs_it_may_and_whose_code_matches() {
+        let s = sup(1);
+        worker(&s, 7, 2, &[1]);
+        let mut pinned = queued(1, "etl", 0, 10);
+        pinned.remote_ok = false;
+        s.enqueue(pinned);
+        let mut drifted = queued(2, "etl", 0, 20);
+        drifted.flow_id = 99;
+        s.enqueue(drifted);
+        s.enqueue(queued(3, "etl", 0, 30));
+        // runs_on="server" and a flow whose code differs are passed over.
+        assert_eq!(take(&s, "w7-1", "etl"), Some(3));
+        // The server's own engine still takes the pinned run first.
+        assert_eq!(take(&s, "a", "etl"), Some(1));
+    }
+
+    #[test]
+    fn a_full_server_spills_over_to_a_worker_with_the_code() {
+        let s = sup(1);
+        worker(&s, 7, 2, &[1]);
+        worker(&s, 8, 4, &[]);
+        assert_eq!(take(&s, "a", "etl"), None);
+        s.enqueue(queued(1, "etl", 0, 10));
+        assert_eq!(take(&s, "a", "etl"), Some(1));
+        s.enqueue(queued(2, "etl", 0, 20));
+        s.spill_for_test();
+        let sent = commands(&s, 7);
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert_eq!(sent[0]["cmd"], "spawn");
+        assert_eq!(sent[0]["module"], "etl");
+        let engine = sent[0]["engine_id"].as_str().unwrap().to_string();
+        assert!(engine.starts_with("w7-"));
+        // Worker 8 has no matching code, so nothing was asked of it.
+        assert!(commands(&s, 8).is_empty());
+        assert_eq!(take(&s, &engine, "etl"), Some(2));
+    }
+
+    #[test]
+    fn a_draining_worker_takes_nothing_new() {
+        let s = sup(1);
+        worker(&s, 7, 2, &[1]);
+        s.enqueue(queued(1, "etl", 0, 10));
+        s.set_worker_state(7, "draining");
+        assert_eq!(take(&s, "w7-1", "etl"), Some(-1));
+        s.set_worker_state(7, "online");
+        assert_eq!(take(&s, "w7-2", "etl"), Some(1));
+    }
+
+    #[test]
+    fn a_quiet_worker_turns_offline() {
+        let s = sup(1);
+        worker(&s, 7, 2, &[1]);
+        assert!(s.mark_quiet_workers(Duration::from_secs(60)).is_empty());
+        assert_eq!(s.mark_quiet_workers(Duration::from_secs(0)), vec![7]);
+        assert_eq!(s.workers_snapshot()[0].2, "offline");
+        // A heartbeat brings it back.
+        commands(&s, 7);
+        assert_eq!(s.workers_snapshot()[0].2, "online");
+    }
+
+    #[test]
+    fn a_replay_waits_for_the_worker_that_ran_it() {
+        let s = sup(1);
+        worker(&s, 7, 2, &[1]);
+        let mut replay = queued(1, "etl", 0, 10);
+        replay.prefer_worker = Some(7);
+        replay.prefer_until = cereyan_core::now_micros() + 60_000_000;
+        s.enqueue(replay);
+        assert_eq!(take(&s, "a", "etl"), None, "the server leaves it for w7");
+        assert_eq!(take(&s, "w7-1", "etl"), Some(1));
+    }
+
+    #[test]
+    fn a_module_a_worker_cannot_import_is_not_sent_there_again() {
+        let s = sup(1);
+        worker(&s, 7, 2, &[1]);
+        s.mark_broken(7, "etl");
+        s.enqueue(queued(1, "etl", 0, 10));
+        assert_eq!(take(&s, "w7-1", "etl"), None);
+        s.clear_broken(7);
+        assert_eq!(take(&s, "w7-1", "etl"), Some(1));
     }
 }

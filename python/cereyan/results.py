@@ -100,44 +100,51 @@ class ResultStore:
         """The file path for ``key``."""
         return os.path.join(self.dir, key)
 
+    def _write_bytes(self, key: str, data: bytes) -> str:
+        """Store ``data`` under ``key`` atomically; returns where it went."""
+        path = self.path(key)
+        tmp = f"{path}.tmp-{os.getpid()}"
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+        return path
+
+    def _read_bytes(self, key: str) -> bytes | None:
+        """The bytes stored under ``key``, or ``None``."""
+        try:
+            with open(self.path(key), "rb") as fh:
+                return fh.read()
+        except OSError:
+            return None
+
     def write(self, key: str, value: Any, serializer: str = "pickle", expires: timedelta | None = None) -> str:
-        """Persist ``value`` under ``key`` atomically and return the file path."""
+        """Persist ``value`` under ``key`` atomically and return where it went."""
         header = {
             "python": PYTHON_VERSION,
             "serializer": serializer,
             "created_at": time.time(),
             "expires_at": (time.time() + expires.total_seconds()) if expires else None,
         }
-        path = self.path(key)
-        tmp = f"{path}.tmp-{os.getpid()}"
-        with open(tmp, "wb") as fh:
-            fh.write(json.dumps(header).encode() + b"\n")
-            if serializer == "json":
-                fh.write(json.dumps(_params.to_json_value(value)).encode())
-            else:
-                fh.write(pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL))
-        os.replace(tmp, path)
-        return path
+        if serializer == "json":
+            body = json.dumps(_params.to_json_value(value)).encode()
+        else:
+            body = pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
+        return self._write_bytes(key, json.dumps(header).encode() + b"\n" + body)
 
     def write_encoded(self, key: str, payload: bytes, serializer: str = "pickle") -> str:
         """Persist an already encoded value (see `encode`) under ``key`` atomically."""
         header = {"python": PYTHON_VERSION, "serializer": serializer, "created_at": time.time(), "expires_at": None}
-        path = self.path(key)
-        tmp = f"{path}.tmp-{os.getpid()}"
-        with open(tmp, "wb") as fh:
-            fh.write(json.dumps(header).encode() + b"\n")
-            fh.write(payload)
-        os.replace(tmp, path)
-        return path
+        return self._write_bytes(key, json.dumps(header).encode() + b"\n" + payload)
 
     def read(self, key: str) -> tuple[bool, Any]:
         """Return (hit, value). Version mismatch and expiry count as misses."""
-        path = self.path(key)
+        data = self._read_bytes(key)
+        if data is None:
+            return False, None
+        first, _, body = data.partition(b"\n")
         try:
-            with open(path, "rb") as fh:
-                header = json.loads(fh.readline().decode())
-                body = fh.read()
-        except (OSError, ValueError):
+            header = json.loads(first.decode())
+        except ValueError:
             return False, None
         if header.get("python") != PYTHON_VERSION:
             return False, None
@@ -150,3 +157,51 @@ class ResultStore:
             return True, pickle.loads(body)
         except Exception:
             return False, None
+
+
+#: Upload chunk size: small enough for a proxy's default body limit to be raised
+#: once, not per result.
+CHUNK_BYTES = 4 * 1024 * 1024
+
+
+class ServerResultStore(ResultStore):
+    """Results kept by the server, for an engine on a remote worker: the same keys
+    and format, stored under the server's ``<home>/storage`` through its API, so a
+    rerun on any host finds the checkpoints and cache entries.
+    """
+    def __init__(self, client) -> None:  # noqa: D107 - documented on the class
+        self.client = client
+        self.dir = ""
+
+    def path(self, key: str) -> str:
+        """Where the entry lives, as the server names it."""
+        return f"/api/results/{key}"
+
+    def _write_bytes(self, key: str, data: bytes) -> str:
+        chunks = [data[i:i + CHUNK_BYTES] for i in range(0, len(data), CHUNK_BYTES)] or [b""]
+        for n, chunk in enumerate(chunks):
+            self.client._request_bytes(
+                "PUT", self.path(key), chunk, params={"part": n, "last": "true" if n == len(chunks) - 1 else "false"}
+            )
+        return self.path(key)
+
+    def _read_bytes(self, key: str) -> bytes | None:
+        from .client import ApiError
+
+        try:
+            return self.client._request_bytes("GET", self.path(key))
+        except ApiError as exc:
+            if exc.status == 404:
+                return None
+            raise
+
+
+def result_store(home: str) -> ResultStore:
+    """The result store for this process: the server's, through its API, in an engine
+    a remote worker started; the local ``<home>/storage`` everywhere else."""
+    from .client import served
+
+    client = served()
+    if client is not None and os.environ.get("CEREYAN_WORKER"):
+        return ServerResultStore(client)
+    return ResultStore(home)

@@ -20,7 +20,7 @@ from .. import masking
 from .. import logging as run_logging
 from ..config import load_project_config
 from ..exceptions import Abort, CereyanError, RunPaused, Snooze
-from ..results import ResultStore, _hash_inputs, cache_key, checkpoint_key, encode
+from ..results import _hash_inputs, cache_key, checkpoint_key, encode, result_store
 from ..runners import Future, ThreadRunner, UpstreamFailed, collect_futures, resolve_futures
 from ..schedules import retry_delay_for
 from ..targets import resolve_output
@@ -79,6 +79,13 @@ def resolved_home() -> str:
 
 def get_store() -> _core.Store:
     global _store
+    from .. import client as client_module
+
+    if client_module.served() is not None:
+        # An engine child: the store belongs to its server, which may be on
+        # another machine. Opening the local home would quietly read and write
+        # a different store (the worker's), so every API takes the server path.
+        raise _core.StoreLocked("this process is an engine of a server; it uses the server's store")
     if _store is None:
         _store = _core.Store.open(_home_override)
     return _store
@@ -630,7 +637,7 @@ def _execute_task_body(run: context.RunContext, task, args: tuple, kwargs: dict,
     store = None
     key = None
     if task.persist_result:
-        store = ResultStore(resolved_home())
+        store = result_store(resolved_home())
         if task.cache:
             key = cache_key(task.key, task.fn, task.cache, values)
             hit, cached = store.read(key) if not run.force else (False, None)
@@ -663,7 +670,7 @@ def _replay_checkpoint(run: context.RunContext, task, dynamic_key: str, input_ha
         if entry is not None:
             logger.info("task %s diverged from its checkpoint; replay ends here", dynamic_key)
         return None
-    hit, value = ResultStore(resolved_home()).read(entry["result_ref"])
+    hit, value = result_store(resolved_home()).read(entry["result_ref"])
     if not hit:
         run.stop_replaying()
         logger.info("task %s checkpoint %s is gone; replay ends here", dynamic_key, entry["result_ref"][:24])
@@ -686,7 +693,7 @@ def _write_checkpoint(run: context.RunContext, task, dynamic_key: str, external_
         return None
     key = checkpoint_key(run.external_id, external_id)
     try:
-        ResultStore(resolved_home()).write_encoded(key, payload, task.serializer)
+        result_store(resolved_home()).write_encoded(key, payload, task.serializer)
     except OSError as exc:
         logger.debug("task %s not checkpointed: %s", dynamic_key, exc)
         return None

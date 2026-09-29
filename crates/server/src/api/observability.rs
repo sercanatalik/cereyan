@@ -474,12 +474,21 @@ pub struct VariableWithRaw {
     /// Ciphertext of a secret, present only when `raw=true` was requested.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
+    /// A secret's value in the clear, present only when `decrypt=true` was
+    /// requested of a server with a token: what a remote worker's engine reads,
+    /// since the key never leaves the server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Object)]
+    pub plain: Option<Value>,
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
 pub struct VariableQuery {
     /// Return the stored ciphertext of a secret so a local client can decrypt it.
     pub raw: Option<bool>,
+    /// Return a secret decrypted, for a remote worker's engine. Refused unless
+    /// the server has a token.
+    pub decrypt: Option<bool>,
 }
 
 pub const VARIABLE_MAX_BYTES: usize = 65_536;
@@ -580,12 +589,28 @@ pub async fn get_variable(
         .store
         .get_variable(&name)?
         .ok_or_else(|| ApiError::NotFound("variable not found".into()))?;
+    let plain = if row.secret && q.decrypt.unwrap_or(false) {
+        if state.config.token.is_none() {
+            return Err(ApiError::Forbidden(
+                "decrypted secrets are served only by a server with a token".into(),
+            ));
+        }
+        let text = secrets::decrypt(&state.config.home, &raw)
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        Some(serde_json::from_str(&text).unwrap_or(Value::String(text)))
+    } else {
+        None
+    };
     let raw = if row.secret && q.raw.unwrap_or(false) {
         Some(raw)
     } else {
         None
     };
-    Ok(Json(VariableWithRaw { variable: row, raw }))
+    Ok(Json(VariableWithRaw {
+        variable: row,
+        raw,
+        plain,
+    }))
 }
 
 #[utoipa::path(patch, path = "/api/variables/{name}", params(("name" = String, Path)), request_body = VariablePatch, responses((status = 200, body = VariableRow), (status = 404)))]

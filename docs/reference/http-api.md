@@ -804,6 +804,7 @@ instead of after the rest of its delay.
 |---|---|---|---|---|
 | `name` | path | string | yes |  |
 | `raw` | query | boolean or null | no | Return the stored ciphertext of a secret so a local client can decrypt it. |
+| `decrypt` | query | boolean or null | no | Return a secret decrypted, for a remote worker's engine. Refused unless the server has a token. |
 
 | Status | Body |
 |---|---|
@@ -875,6 +876,19 @@ instead of after the rest of its delay.
 | Status | Body |
 |---|---|
 | 200 | {cancel: bool, active: bool} |
+
+### `POST /api/engine/local-path`
+
+A run on a worker used a `LocalTarget` outside the worker's shared paths.
+
+!!! note
+    Used by engine processes to report to the server; not intended for clients and not covered by compatibility promises.
+
+**Request body** (application/json): [`LocalPathBody`](#localpathbody)
+
+| Status | Body |
+|---|---|
+| 204 | no body |
 
 ### `POST /api/engine/report`
 
@@ -973,6 +987,33 @@ instead of after the rest of its delay.
 |---|---|
 | 200 | [`QueueView`](#queueview) (application/json) |
 
+### `GET /api/results/{key}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `key` | path | string | yes |  |
+
+| Status | Body |
+|---|---|
+| 200 | array of integer (int32) (application/octet-stream) |
+| 404 | no body |
+
+### `PUT /api/results/{key}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `key` | path | string | yes |  |
+| `part` | query | integer (int32) | no | The chunk number, from 0. Part 0 starts the upload over. |
+| `last` | query | boolean | no | Whether this is the last chunk: the result becomes visible when it lands. |
+
+**Request body** (application/octet-stream): array of integer (int32)
+
+| Status | Body |
+|---|---|
+| 204 | no body |
+| 400 | no body |
+| 413 | Over the size bound |
+
 ### `GET /api/scheduler`
 
 | Status | Body |
@@ -993,6 +1034,97 @@ instead of after the rest of its delay.
 | Status | Body |
 |---|---|
 | 200 | [`SchedulerStatus`](#schedulerstatus) (application/json) |
+
+### `GET /api/workers`
+
+| Status | Body |
+|---|---|
+| 200 | [`WorkerView`](#workerview)[] (application/json) |
+
+### `POST /api/workers/register`
+
+**Request body** (application/json): [`RegisterBody`](#registerbody)
+
+| Status | Body |
+|---|---|
+| 200 | [`RegisterResponse`](#registerresponse) (application/json) |
+| 403 | The server has no token |
+| 409 | Another major version |
+
+### `PATCH /api/workers/{id}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+**Request body** (application/json): [`WorkerPatch`](#workerpatch)
+
+| Status | Body |
+|---|---|
+| 200 | [`WorkerView`](#workerview)[] (application/json) |
+| 404 | no body |
+| 422 | no body |
+
+### `DELETE /api/workers/{id}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+| Status | Body |
+|---|---|
+| 204 | no body |
+| 404 | no body |
+| 409 | The worker is not offline |
+
+### `POST /api/workers/{id}/drain`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+| Status | Body |
+|---|---|
+| 200 | [`WorkerView`](#workerview)[] (application/json) |
+| 404 | no body |
+| 409 | no body |
+
+### `POST /api/workers/{id}/heartbeat`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+**Request body** (application/json): [`HeartbeatBody`](#heartbeatbody)
+
+| Status | Body |
+|---|---|
+| 200 | [`HeartbeatResponse`](#heartbeatresponse) (application/json) |
+| 409 | Unknown to this server: register again |
+
+### `POST /api/workers/{id}/resume`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+| Status | Body |
+|---|---|
+| 200 | [`WorkerView`](#workerview)[] (application/json) |
+| 404 | no body |
+| 409 | no body |
+
+### `GET /api/workers/{id}/timeline`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes | A worker id, or 0 for the server |
+| `hours` | query | integer or null (int32) | no | Hours back from now (default 6, at most 48). |
+
+| Status | Body |
+|---|---|
+| 200 | [`Timeline`](#timeline) (application/json) |
+| 404 | no body |
 
 ## Schemas
 
@@ -1270,10 +1402,12 @@ One engine as the Queue page shows it.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `host` | string | yes | `server`, or the worker's name. |
 | `id` | string | yes |  |
 | `module` | string | yes | The module the engine has loaded. |
 | `run_id` | integer or null (int64) | no |  |
 | `since_secs` | integer (int64) | yes | Seconds in the current run, or since the engine started when it has none. |
+| `slot` | integer | yes | The processor slot on that host, from 1. |
 | `status` | string | yes | `starting`, `idle`, `running` or `draining`. |
 
 ### `EnvVariable`
@@ -1411,6 +1545,7 @@ Flow-level options declared in Python and stored as JSON on the flow row.
 | `priority` | integer (int64) | no |  |
 | `resources` | object | no |  |
 | `retries` | integer (int64) | no |  |
+| `runs_on` | string or null | no | `any` (the default: the server or any matching worker) or `server`. |
 | `schedules` | [`ScheduleDecl`](#scheduledecl)[] | no |  |
 | `start_deadline` | number or null (double) | no | Seconds a run may wait to start before it is skipped; a schedule's own value wins. |
 | `timeout_seconds` | number or null (double) | no |  |
@@ -1440,12 +1575,37 @@ Type: any.
 | `start_time` | integer or null (int64) | no |  |
 | `state` | [`State`](#state) | yes |  |
 
+### `HeartbeatBody`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `engines` | array of string | no | Engine ids the worker runs now. |
+| `flows` | array or null | no | Fingerprints again when the checkout changed. |
+| `meta` | object | no | Metadata that changes: free memory, busy processors, git state. |
+
 ### `HeartbeatRequest`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `engine_id` | string | yes |  |
 | `run_id` | integer (int64) | yes |  |
+
+### `HeartbeatResponse`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `commands` | array of object | yes |  |
+| `drift` | array of string | yes |  |
+| `state` | string | yes |  |
+
+### `HostTotals`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `busy` | integer | yes |  |
+| `count` | integer | yes | Processors the host may run at once. |
+| `host` | string | yes |  |
+| `state` | string | yes | `online`, `draining`, or `offline`; the server is always `online`. |
 
 ### `Id`
 
@@ -1479,6 +1639,13 @@ Type: string.
 | `run_id` | integer (int64) | yes |  |
 | `run_name` | string | yes |  |
 | `schedule_id` | integer or null (int64) | no | The schedule that made the run, when one did. |
+
+### `LocalPathBody`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The resolved path of the `LocalTarget`, on the worker. |
+| `run_id` | integer (int64) | yes |  |
 
 ### `Log`
 
@@ -1560,6 +1727,7 @@ Type: any.
 |---|---|---|---|
 | `cap` | integer | yes | The most `count` may be: this machine's CPU count. |
 | `count` | integer | yes | Engines that may run at once. |
+| `hosts` | [`HostTotals`](#hosttotals)[] | yes | Processors per host: the server first, then each worker. |
 | `items` | [`EngineView`](#engineview)[] | yes |  |
 | `load` | number or null (double) | no | The one-minute load average over the CPU count (1.0 is every CPU busy); absent where the platform does not report one. |
 | `source` | string | yes | Where `count` came from: `flag`, `toml`, `settings`, or `default`. |
@@ -1611,6 +1779,29 @@ A fire past the look-ahead, computed from the schedule; no run exists for it yet
 | `more` | integer | yes | Runs in line past the listed ones. |
 | `paused_loops` | [`PausedLoop`](#pausedloop)[] | yes | Continuous schedules that are paused, so the page can resume them. |
 | `processors` | [`Processors`](#processors) | yes |  |
+
+### `RegisterBody`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cpus` | integer (int64) | yes |  |
+| `flows` | [`WorkerFlow`](#workerflow)[] | no |  |
+| `labels` | object | no |  |
+| `meta` | object | no |  |
+| `name` | string | yes |  |
+| `processors` | integer (int64) | no |  |
+| `shared_paths` | array of string | no |  |
+| `version` | string | yes |  |
+
+### `RegisterResponse`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `drift` | array of string | yes | Modules whose code differs from the server's: the worker takes no run of them. |
+| `heartbeat_secs` | integer (int64) | yes |  |
+| `refused` | array of string | yes | Flows the worker has that the server does not: they never run there. |
+| `state` | string | yes | `online` or `draining` (a worker drained before it restarted stays drained). |
+| `worker_id` | integer (int64) | yes |  |
 
 ### `ReleaseRequest`
 
@@ -1807,15 +1998,19 @@ Type: any.
 | `flow_id` | integer (int64) | yes |  |
 | `flow_name` | string | yes |  |
 | `group` | string | no | The flow's group, read through the flow: never stored on the run. |
+| `host` | string or null | no | Where the run executed: `server`, or a worker's name. |
 | `id` | integer (int64) | yes |  |
+| `lease` | integer (int64) | no | Incremented on every hand-off to an engine; reports under an older lease are refused. |
 | `name` | string | yes |  |
 | `parameters` | object | no |  |
 | `parent_run_id` | integer or null (int64) | no |  |
 | `priority` | integer (int64) | no |  |
+| `processor` | integer or null (int64) | no | The processor slot on that host, from 1. |
 | `project` | string | yes |  |
 | `report_seq` | integer (int64) | no |  |
 | `schedule_id` | integer or null (int64) | no |  |
 | `scheduled_time` | null or [`i64`](#i64) | no |  |
+| `source_hash` | string or null | no | Fingerprint of the module that executed the run. |
 | `start_time` | null or [`i64`](#i64) | no |  |
 | `state` | [`State`](#state) | yes |  |
 | `tags` | array of string | no |  |
@@ -1915,8 +2110,6 @@ Type: any.
 
 ### `ScheduleRow`
 
-Placeholders for later phases; defined now so the schema and API types
-are stable from the start.
 A stored schedule row: the schedule itself plus policy and bookkeeping.
 
 | Field | Type | Required | Description |
@@ -2160,6 +2353,28 @@ One entry of a run's task state store.
 | `updated_at` | integer (int64) | yes |  |
 | `value` |  | yes |  |
 
+### `Timeline`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `host` | string | yes |  |
+| `next` | [`TimelineRun`](#timelinerun)[] | yes | A forecast, not an assignment: runs in line or due within the hour that this host can take, soonest first. |
+| `runs` | [`TimelineRun`](#timelinerun)[] | yes |  |
+| `since` | integer (int64) | yes |  |
+
+### `TimelineRun`
+
+One run on a processor lane.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `end` | integer or null (int64) | no |  |
+| `flow` | string | yes |  |
+| `processor` | integer or null (int64) | no |  |
+| `run_id` | integer (int64) | yes |  |
+| `start` | integer or null (int64) | no |  |
+| `state` | string or null | no | The run's state type; `null` for a run not started yet. |
+
 ### `TransitionBody`
 
 | Field | Type | Required | Description |
@@ -2265,6 +2480,7 @@ Work handed to an engine.
 | `flow` | string | yes |  |
 | `force` | boolean | no | A forced (restated) run: the engine ignores targets, caches and checkpoints. |
 | `kind` | string | no | `run`, `hooks`, or `bulk_complete`. |
+| `lease` | integer (int64) | no | The hand-off this execution belongs to. The engine sends it back as `X-Cereyan-Lease` on reports, heartbeats and transitions; an older lease is refused, so a run rerun elsewhere is not also finished here. |
 | `options` | object | yes |  |
 | `parameters` | object | yes |  |
 | `pass` | integer (int64) | no | Which execution of the run's body this is: 0 the first time, the next after a resume. The engine counts its own retries up from here and reports it with every task run it creates. |
@@ -2292,6 +2508,48 @@ Work handed to an engine.
 |---|---|---|---|
 | `exit` | boolean | no |  |
 | `run` | null or [`WorkItem`](#workitem) | no |  |
+
+### `Worker`
+
+Placeholders for later phases; defined now so the schema and API types
+are stable from the start.
+A registered remote worker: another machine with its own checkout that adds
+processors to the server's queue.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cpus` | integer (int64) | yes |  |
+| `id` | integer (int64) | yes |  |
+| `labels` | object | no |  |
+| `last_seen_at` | [`i64`](#i64) | yes |  |
+| `meta` | object | no | Host metadata the worker reported: hostname, platform, memory, git state. |
+| `name` | string | yes |  |
+| `processors` | integer (int64) | yes | Engines it may run at once, at most `cpus`. |
+| `registered_at` | [`i64`](#i64) | yes |  |
+| `shared_paths` | array of string | no | Paths the worker shares with the server (a mounted volume, for example). |
+| `state` | string | yes | `online`, `draining`, or `offline`. |
+| `version` | string | yes | The cereyan version the worker runs. |
+
+### `WorkerFlow`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `flow` | string | yes |  |
+| `module` | string | yes |  |
+| `module_hash` | string | yes | The worker's fingerprint of the module (`_core.module_fingerprint`). |
+| `project` | string | yes |  |
+
+### `WorkerPatch`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `processors` | integer (int64) | yes | Engines the worker may run at once, 1 up to its CPU count. |
+
+### `WorkerView`
+
+A worker with what the server knows of it right now.
+
+Type: any.
 
 ### `i64`
 

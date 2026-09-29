@@ -15,6 +15,8 @@ pub enum ApiError {
     BadRequest(String),
     Unprocessable(String),
     Conflict(serde_json::Value),
+    /// 403: understood, and refused for a reason the message names.
+    Forbidden(String),
     Internal(String),
     /// 503: the server cannot take this request right now.
     Unavailable(String),
@@ -40,6 +42,7 @@ impl IntoResponse for ApiError {
                 serde_json::json!({"error": m}),
             ),
             ApiError::Conflict(v) => (StatusCode::CONFLICT, v),
+            ApiError::Forbidden(m) => (StatusCode::FORBIDDEN, serde_json::json!({"error": m})),
             ApiError::Unavailable(m) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 serde_json::json!({"error": m}),

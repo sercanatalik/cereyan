@@ -373,6 +373,12 @@ function RunDetail() {
                   },
                   { label: "Failures", value: String(r.failure_count) },
                   { label: "Crashes", value: String(r.crash_count) },
+                  {
+                    label: "Host",
+                    value: r.host
+                      ? `${r.host}${r.processor != null ? ` · processor ${r.processor}` : ""}`
+                      : "-",
+                  },
                   { label: "Engine PID", value: r.engine_pid != null ? String(r.engine_pid) : "-" },
                 ]}
               />

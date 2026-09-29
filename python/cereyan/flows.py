@@ -157,6 +157,7 @@ class Flow:
         expect_by_tz: str | None = None,
         expected_duration: "float | timedelta | None" = None,
         overdue_factor: float | None = None,
+        runs_on: str = "any",
     ) -> None:
         if not callable(fn):
             raise TypeError("@flow must decorate a callable")
@@ -205,6 +206,9 @@ class Flow:
         if on_overlap not in ("enqueue", "skip", "cancel_new", "cancel_old", "buffer_one"):
             raise ValueError("on_overlap must be 'enqueue', 'skip', 'cancel_new', 'cancel_old', or 'buffer_one'")
         self.on_overlap = on_overlap
+        if runs_on not in ("any", "server"):
+            raise ValueError(f"runs_on must be 'any' or 'server', not {runs_on!r}")
+        self.runs_on = runs_on
         if start_deadline is not None and float(start_deadline) < 0:
             raise ValueError("start_deadline must be zero or more seconds")
         self.start_deadline = float(start_deadline) if start_deadline is not None else None
@@ -297,6 +301,7 @@ class Flow:
             "expect_by_tz": self.expect_by_tz,
             "expected_duration": self.expected_duration,
             "overdue_factor": self.overdue_factor,
+            "runs_on": self.runs_on,
         }
 
     # -- parameters -------------------------------------------------------
@@ -443,6 +448,9 @@ def flow(
         mcp_tool (bool): Publish the flow as an MCP tool named ``flow__<project>__<name>`` whose
             arguments are its parameters, so an agent can start it directly.
         start_deadline (float | None): Seconds a run may wait to start before it is skipped.
+        runs_on (str): ``"any"`` (the default) lets a run execute on the server or on any remote
+            worker whose code matches; ``"server"`` keeps every run on the server's machine, for
+            flows that read or write files only the server has.
 
     Returns:
         Flow: The flow wrapping ``fn``; call it like the original function.

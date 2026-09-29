@@ -97,6 +97,15 @@ export function RunTable({
       cell: ({ row }) => (
         <span className="text-muted-foreground">
           {row.original.project}/{row.original.flow_name}
+          {row.original.host && row.original.host !== "server" ? (
+            <span
+              className="ml-2 rounded-full bg-muted px-1.5 font-mono text-[11px] text-foreground"
+              title="Ran on this remote worker"
+              data-testid="run-host"
+            >
+              {row.original.host}
+            </span>
+          ) : null}
         </span>
       ),
     },

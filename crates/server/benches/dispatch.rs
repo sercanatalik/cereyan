@@ -37,6 +37,10 @@ fn bench_take_work(c: &mut Criterion) {
                     Vec::new()
                 },
                 not_before: None,
+                flow_id: 1,
+                remote_ok: true,
+                prefer_worker: None,
+                prefer_until: 0,
             })
             .collect(),
     );
@@ -55,6 +59,10 @@ fn bench_take_work(c: &mut Criterion) {
                     order: next,
                     needs: Vec::new(),
                     not_before: None,
+                    flow_id: 1,
+                    remote_ok: true,
+                    prefer_worker: None,
+                    prefer_until: 0,
                 });
                 next += 1;
             }
@@ -62,5 +70,57 @@ fn bench_take_work(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_take_work);
+/// A worker's engine polling against 10k queued runs of which a third may go
+/// remote and half of those are for flows whose code the worker lacks: the walk
+/// passes over what it may not take.
+fn bench_remote_take_work(c: &mut Criterion) {
+    let config: ServeConfig = serde_json::from_value(serde_json::json!({
+        "home": std::env::temp_dir(),
+        "max_engines": 4,
+    }))
+    .unwrap();
+    let sup = Supervisor::new(&config);
+    sup.sync_worker(7, "w7", 4, "online", [1i64].into_iter().collect());
+    sup.sync_worker(8, "w8", 4, "online", [2i64].into_iter().collect());
+    sup.enqueue_many(
+        (0..10_000i64)
+            .map(|i| QueuedRun {
+                run_id: i,
+                key: key("etl"),
+                priority: 0,
+                order: i,
+                needs: Vec::new(),
+                not_before: None,
+                flow_id: if i % 2 == 0 { 2 } else { 1 },
+                remote_ok: i % 3 == 0,
+                prefer_worker: None,
+                prefer_until: 0,
+            })
+            .collect(),
+    );
+    let k = key("etl");
+    let mut next = 10_000i64;
+    c.bench_function("remote take_work 10k queued, 3 locations", |b| {
+        b.iter(|| {
+            if let WorkDecision::Run(id) = sup.take_work("w7-1", 1, &k, "") {
+                sup.run_finished(id);
+                sup.enqueue(QueuedRun {
+                    run_id: next,
+                    key: key("etl"),
+                    priority: 0,
+                    order: next,
+                    needs: Vec::new(),
+                    not_before: None,
+                    flow_id: 1,
+                    remote_ok: true,
+                    prefer_worker: None,
+                    prefer_until: 0,
+                });
+                next += 1;
+            }
+        })
+    });
+}
+
+criterion_group!(benches, bench_take_work, bench_remote_take_work);
 criterion_main!(benches);

@@ -96,7 +96,8 @@ fn api_error_message(e: ApiError) -> String {
         ApiError::NotFound(m)
         | ApiError::BadRequest(m)
         | ApiError::Unprocessable(m)
-        | ApiError::Unavailable(m) => m,
+        | ApiError::Unavailable(m)
+        | ApiError::Forbidden(m) => m,
         ApiError::Internal(m) => format!("internal error: {m}"),
         ApiError::Conflict(v) => v
             .get("error")
@@ -546,9 +547,11 @@ pub fn tool_list() -> Vec<Value> {
             json!({"backfill_id": {"type": "integer"}}), &["backfill_id"]),
         read_tool("get_flow_source", "The Python source of the module that registered a flow, read from the flow's own source directory and cut at 64 KB. Read-only.",
             json!({"flow": flow_prop, "project": {"type": "string"}}), &["flow"]),
-        read_tool("server_health", "The server's state in one call: engines and what they are running, processors (the engine pool size, its CPU cap, and how many engines run, idle or drain), queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Read-only.",
+        read_tool("server_health", "The server's state in one call: engines and what they are running, processors (the engine pool size, its CPU cap, and how many engines run, idle or drain), remote workers, queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Read-only.",
             json!({}), &[]),
         read_tool("list_variables", "Every variable's name, tags, and timestamps; the value only when it is not a secret. Read-only.",
+            json!({}), &[]),
+        read_tool("list_workers", "The remote workers registered with this server: each one's name, status (online, draining, offline), processors, labels, cereyan version, the modules whose code differs from the server's, and when it was last heard from. Read-only; draining, resizing and forgetting workers is done in the UI or the HTTP API.",
             json!({}), &[]),
         read_tool("list_resources", "Resource totals from [resources] and what is in use. Read-only.",
             json!({}), &[]),
@@ -703,6 +706,7 @@ async fn call_tool(
             "version": state.config.version,
             "engines": state.supervisor.engines_snapshot(),
             "processors": processors(state),
+            "workers": workers_summary(state)?,
             "queued": state.supervisor.queue_len(),
             "resources": state.supervisor.resources_snapshot(),
             "schedules": state.store.list_schedules(None)?.len(),
@@ -732,6 +736,7 @@ async fn call_tool(
             Ok(json!({"variables": items}))
         }
         "list_resources" => Ok(json!({"resources": state.supervisor.resources_snapshot()})),
+        "list_workers" => Ok(json!({"workers": workers_summary(state)?})),
         "flow_dependencies" => {
             let name = arg_str(args, "flow")
                 .ok_or_else(|| ToolError::Failed("flow is required".into()))?;
@@ -1250,6 +1255,31 @@ const CHECK_OUTPUT_CAP: u64 = 1024 * 1024;
 /// The module file that registered `flow`, read only from under the flow's
 /// own source directory and cut at `SOURCE_CAP`. Nothing here comes from the
 /// request: the directory and module were recorded at registration.
+/// The remote workers as `list_workers` and `server_health` report them.
+fn workers_summary(state: &AppState) -> Result<Vec<Value>, ToolError> {
+    let live: std::collections::HashMap<i64, (String, usize, usize)> = state
+        .supervisor
+        .workers_snapshot()
+        .into_iter()
+        .map(|(id, _, st, _, running, idle)| (id, (st, running, idle)))
+        .collect();
+    Ok(state
+        .store
+        .list_workers()?
+        .into_iter()
+        .map(|w| {
+            let (status, running, idle) =
+                live.get(&w.id).cloned().unwrap_or((w.state.clone(), 0, 0));
+            json!({
+                "name": w.name, "status": status, "processors": w.processors, "cpus": w.cpus,
+                "running": running, "idle": idle, "labels": w.labels, "version": w.version,
+                "drift": w.meta.get("drift").cloned().unwrap_or_else(|| json!([])),
+                "last_seen": w.last_seen_at,
+            })
+        })
+        .collect())
+}
+
 /// The engine pool as `server_health` reports it. Read-only: no tool sets it.
 fn processors(state: &AppState) -> Value {
     let (items, _, _) = state.supervisor.queue_snapshot(0);

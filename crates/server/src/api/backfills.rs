@@ -420,6 +420,10 @@ pub fn enqueue_all(state: &Arc<AppState>, backfill_id: i64, flow: &Flow, skip_va
                 order: run.scheduled_time.unwrap_or(run.created_at),
                 needs: crate::dispatch::run_needs(state, flow, &options, run),
                 not_before: None,
+                flow_id: flow.id,
+                remote_ok: options.may_run_remotely(),
+                prefer_worker: None,
+                prefer_until: 0,
             });
         }
         state.supervisor.enqueue_many(batch);

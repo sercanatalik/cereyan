@@ -16,6 +16,38 @@ class Target(Protocol):
         """``True`` when the output this target stands for is already present."""
 
 
+_REPORTED: set[str] = set()
+
+
+def _check_shared(path: str) -> None:
+    """On a remote worker, a file outside the worker's shared paths exists on that
+    machine only: say so once per path, in the log and as `run.local_path_on_worker`.
+    Nothing fails; the server and other hosts simply will not see the file."""
+    if not os.environ.get("CEREYAN_WORKER"):
+        return
+    resolved = os.path.abspath(path)
+    shared = [p for p in os.environ.get("CEREYAN_SHARED_PATHS", "").split(os.pathsep) if p]
+    if any(resolved == p or resolved.startswith(p.rstrip(os.sep) + os.sep) for p in shared):
+        return
+    if resolved in _REPORTED:
+        return
+    _REPORTED.add(resolved)
+    from . import context
+    from .client import served
+
+    run = context.current_run()
+    import logging
+
+    logging.getLogger("cereyan").warning(
+        "LocalTarget %s is on this worker only (not under a shared path); the server and other hosts will not see it",
+        resolved,
+    )
+    client = served()
+    if run is not None and client is not None:
+        with contextlib.suppress(Exception):
+            client._request("POST", "/api/engine/local-path", body={"run_id": run.id, "path": resolved})
+
+
 class LocalTarget:
     """A file on the local filesystem written atomically."""
 
@@ -31,6 +63,7 @@ class LocalTarget:
 
     def exists(self) -> bool:
         """``True`` when the file exists."""
+        _check_shared(self.path)
         return os.path.exists(self.path)
 
     def remove(self) -> None:
@@ -59,6 +92,7 @@ class LocalTarget:
 
     def open(self, mode: str = "r", **kwargs: Any):
         """Open the file; write modes write to a temporary path that replaces the target on close, so readers never see a partial file."""
+        _check_shared(self.path)
         if "w" in mode or "a" in mode or "x" in mode:
             return _AtomicWriter(self, mode, **kwargs)
         return open(self.path, mode, **kwargs)

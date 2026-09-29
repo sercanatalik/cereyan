@@ -15,7 +15,7 @@ use crate::state::{StateName, StateType};
 /// Prefixes the engine owns. A name under one of these MUST be a catalogue
 /// entry; a name outside them is a custom event and is not checked, which is
 /// what keeps `emit_event` open to any vocabulary a pipeline wants.
-pub const RESERVED_PREFIXES: [&str; 9] = [
+pub const RESERVED_PREFIXES: [&str; 10] = [
     "run.",
     "task_run.",
     "flow.",
@@ -25,6 +25,7 @@ pub const RESERVED_PREFIXES: [&str; 9] = [
     "rule.",
     "expectation.",
     "backfill.",
+    "worker.",
 ];
 
 /// Every event the engine records.
@@ -44,6 +45,7 @@ pub enum EventName {
     RunPaused,
     RunResumed,
     RunReportRejected,
+    RunLocalPathOnWorker,
     TaskRunRunning,
     TaskRunCompleted,
     TaskRunFailed,
@@ -70,10 +72,12 @@ pub enum EventName {
     ExpectationArmed,
     ExpectationMet,
     ExpectationLapsed,
+    WorkerRegistered,
+    WorkerOffline,
 }
 
 impl EventName {
-    pub const ALL: [EventName; 40] = [
+    pub const ALL: [EventName; 43] = [
         EventName::RunScheduled,
         EventName::RunPending,
         EventName::RunRunning,
@@ -114,6 +118,9 @@ impl EventName {
         EventName::ExpectationArmed,
         EventName::ExpectationMet,
         EventName::ExpectationLapsed,
+        EventName::RunLocalPathOnWorker,
+        EventName::WorkerRegistered,
+        EventName::WorkerOffline,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -158,6 +165,9 @@ impl EventName {
             EventName::ExpectationArmed => "expectation.armed",
             EventName::ExpectationMet => "expectation.met",
             EventName::ExpectationLapsed => "expectation.lapsed",
+            EventName::RunLocalPathOnWorker => "run.local_path_on_worker",
+            EventName::WorkerRegistered => "worker.registered",
+            EventName::WorkerOffline => "worker.offline",
         }
     }
 
@@ -178,7 +188,8 @@ impl EventName {
             | EventName::RunSkipped
             | EventName::RunPaused
             | EventName::RunResumed
-            | EventName::RunReportRejected => "run",
+            | EventName::RunReportRejected
+            | EventName::RunLocalPathOnWorker => "run",
             EventName::TaskRunRunning
             | EventName::TaskRunCompleted
             | EventName::TaskRunFailed
@@ -204,6 +215,7 @@ impl EventName {
             | EventName::ExpectationArmed
             | EventName::ExpectationMet
             | EventName::ExpectationLapsed => "rule",
+            EventName::WorkerRegistered | EventName::WorkerOffline => "worker",
         }
     }
 
@@ -251,6 +263,9 @@ impl EventName {
             EventName::ExpectationArmed => "A proactive rule's `when` event armed an expectation",
             EventName::ExpectationMet => "The expected event arrived before the deadline",
             EventName::ExpectationLapsed => "The deadline passed, or a clock-armed rule's tick found no matching event; the rule's actions run against this event",
+            EventName::RunLocalPathOnWorker => "A run on a remote worker used a `LocalTarget` outside the worker's shared paths, so the file is on that machine only",
+            EventName::WorkerRegistered => "A remote worker registered, or registered again after a restart",
+            EventName::WorkerOffline => "A remote worker missed three heartbeats; runs its engines held are crashed and rerun by their own heartbeats",
         }
     }
 
@@ -258,6 +273,9 @@ impl EventName {
     pub fn payload_fields(self) -> &'static [&'static str] {
         match self {
             EventName::RunReportRejected => &["seq", "kind", "reason"],
+            EventName::RunLocalPathOnWorker => &["path", "host"],
+            EventName::WorkerRegistered => &["worker_id", "name", "version", "refused", "drift"],
+            EventName::WorkerOffline => &["worker_id", "name"],
             EventName::RunLate => &[
                 "state",
                 "state_type",
@@ -556,6 +574,9 @@ mod tests {
             "expectation.armed",
             "expectation.met",
             "expectation.lapsed",
+            "run.local_path_on_worker",
+            "worker.registered",
+            "worker.offline",
         ];
         let actual: Vec<&str> = EventName::ALL.iter().map(|e| e.as_str()).collect();
         assert_eq!(actual, expected);

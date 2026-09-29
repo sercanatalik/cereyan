@@ -72,6 +72,55 @@ pub struct FailedRequest {
     pub traceback: String,
 }
 
+/// The header an engine carries its lease in.
+pub const LEASE_HEADER: &str = "x-cereyan-lease";
+
+/// Refuse a request about `run_id` that carries a lease older than the run's
+/// current one: the run has been handed to another engine since.
+pub fn check_lease(
+    state: &AppState,
+    run_id: i64,
+    headers: &axum::http::HeaderMap,
+) -> ApiResult<()> {
+    let Some(sent) = headers
+        .get(LEASE_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<i64>().ok())
+    else {
+        return Ok(());
+    };
+    match state.store.run_lease(run_id)? {
+        Some(current) if current != sent => Err(ApiError::Conflict(json!({
+            "error": format!("stale lease {sent}: run {run_id} was handed to another engine (lease {current})"),
+            "stale_lease": true,
+        }))),
+        _ => Ok(()),
+    }
+}
+
+/// Record where a run executes and take its next lease.
+fn claim(state: &AppState, run_id: i64) -> ApiResult<i64> {
+    let (host, slot) = match state.supervisor.run_placement(run_id) {
+        Some((crate::supervisor::Location::Worker(w), slot)) => (
+            state
+                .supervisor
+                .worker_name(w)
+                .unwrap_or_else(|| format!("worker {w}")),
+            Some(slot as i64),
+        ),
+        Some((crate::supervisor::Location::Local, slot)) => {
+            ("server".to_string(), Some(slot as i64))
+        }
+        None => ("server".to_string(), None),
+    };
+    let source_hash = state
+        .store
+        .get_run(run_id)?
+        .and_then(|r| state.store.get_flow(r.flow_id).ok().flatten())
+        .and_then(|f| state.fingerprints.get(&f.source_dir, &f.module));
+    Ok(state.store.claim_run(run_id, &host, slot, source_hash)?)
+}
+
 async fn build_work_item(state: &Arc<AppState>, run_id: i64) -> ApiResult<Option<WorkItem>> {
     let Some(run) = state.store.get_run(run_id)? else {
         return Ok(None);
@@ -101,6 +150,7 @@ async fn build_work_item(state: &Arc<AppState>, run_id: i64) -> ApiResult<Option
         force: run.tags.iter().any(|t| t == super::backfills::FORCE_TAG),
         report_seq: run.report_seq,
         payload: serde_json::Value::Null,
+        lease: run.lease,
     }))
 }
 
@@ -149,6 +199,7 @@ async fn build_job_item(
         force: false,
         report_seq: run.as_ref().map(|r| r.report_seq).unwrap_or(0),
         payload,
+        lease: 0,
     }))
 }
 
@@ -213,6 +264,10 @@ pub async fn work(
                     r.engine_id = Some(req.engine_id.clone());
                     r.last_heartbeat = std::time::Instant::now();
                 });
+                let st = state.clone();
+                tokio::task::spawn_blocking(move || claim(&st, run_id))
+                    .await
+                    .map_err(|e| ApiError::Internal(e.to_string()))??;
                 match build_work_item(&state, run_id).await? {
                     Some(item) => {
                         return Ok(Json(WorkResponse {
@@ -250,8 +305,10 @@ pub async fn work(
 #[utoipa::path(post, path = "/api/engine/report", request_body = ReportRequest, responses((status = 200, body = ReportResponse), (status = 404)))]
 pub async fn report(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<ReportRequest>,
 ) -> ApiResult<Json<ReportResponse>> {
+    check_lease(&state, req.run_id, &headers)?;
     let st = state.clone();
     let run_id = req.run_id;
     // Track previous task-run states for the counters.
@@ -345,12 +402,14 @@ pub async fn report(
 #[utoipa::path(post, path = "/api/engine/heartbeat", request_body = HeartbeatRequest, responses((status = 200, description = "{cancel: bool, active: bool}")))]
 pub async fn heartbeat(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<HeartbeatRequest>,
-) -> Json<serde_json::Value> {
-    match state.index.heartbeat(req.run_id) {
+) -> ApiResult<Json<serde_json::Value>> {
+    check_lease(&state, req.run_id, &headers)?;
+    Ok(match state.index.heartbeat(req.run_id) {
         Some(cancel) => Json(serde_json::json!({"cancel": cancel, "active": true})),
         None => Json(serde_json::json!({"cancel": false, "active": false})),
-    }
+    })
 }
 
 #[utoipa::path(post, path = "/api/engine/failed", request_body = FailedRequest, responses((status = 200, description = "Queued runs of the module failed")))]
@@ -364,6 +423,20 @@ pub async fn failed(
         isolated: req.isolated,
         nice: req.nice,
     };
+    // A worker's broken checkout is the worker's problem, not the runs': the
+    // server stops sending it that module and the runs stay queued for others.
+    if let crate::supervisor::Location::Worker(worker_id) =
+        crate::supervisor::Location::of_engine(&req.engine_id)
+    {
+        state.supervisor.mark_broken(worker_id, &req.module);
+        state.supervisor.forget_engine(&req.engine_id);
+        eprintln!(
+            "cereyan: worker {} could not import {}; its runs stay queued for other hosts",
+            state.supervisor.worker_name(worker_id).unwrap_or_default(),
+            req.module
+        );
+        return Ok(Json(json!({"failed": 0, "worker": worker_id})));
+    }
     let runs = state.supervisor.take_queued_for_key(&key, &req.engine_id);
     let summary = req
         .traceback
@@ -461,4 +534,35 @@ pub async fn release(
 ) -> Json<serde_json::Value> {
     state.supervisor.release_lease(req.run_id, req.lease);
     Json(json!({"ok": true}))
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct LocalPathBody {
+    pub run_id: i64,
+    /// The resolved path of the `LocalTarget`, on the worker.
+    pub path: String,
+}
+
+/// A run on a worker used a `LocalTarget` outside the worker's shared paths.
+#[utoipa::path(post, path = "/api/engine/local-path", request_body = LocalPathBody, responses((status = 204)))]
+pub async fn local_path(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<LocalPathBody>,
+) -> ApiResult<axum::http::StatusCode> {
+    let st = state.clone();
+    tokio::task::spawn_blocking(move || -> ApiResult<()> {
+        let Some(run) = st.store.get_run(body.run_id)? else {
+            return Ok(());
+        };
+        let _ = st.record_engine_event(
+            cereyan_core::EventName::RunLocalPathOnWorker,
+            Some(run.id),
+            Some(run.flow_id),
+            json!({"path": body.path, "host": run.host}),
+        );
+        Ok(())
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))??;
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }

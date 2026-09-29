@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.parse
 from typing import Any
@@ -80,11 +81,19 @@ class Variable:
         from .client import ApiError
 
         try:
-            data = handle._request("GET", _path(name), params={"raw": "true"})
+            # A worker's engine has no key: the server decrypts for it.
+            remote = bool(os.environ.get("CEREYAN_WORKER"))
+            data = handle._request(
+                "GET", _path(name), params={"raw": "true", "decrypt": "true" if remote else None}
+            )
         except ApiError as exc:
             if exc.status == 404:
                 return default
             raise
+        if data.get("secret") and "plain" in data:
+            value = data["plain"]
+            masking.register(value)
+            return value
         if data.get("secret"):
             raw = data.get("raw")
             if raw is None:

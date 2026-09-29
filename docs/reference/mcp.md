@@ -40,13 +40,13 @@ Every tool description states its effect so a model can decide before calling. A
 | `list_backfills` | `flow` (string) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) | Backfills, newest first, each with its counts of runs by state. Response keys: `backfills` |
 | `get_backfill` | `backfill_id` (integer, required) | One backfill with its counts of runs by state. Response keys: `backfill` |
 | `get_flow_source` | `flow` (string, required) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) | The Python source of the module that registered a flow, read from the flow's own source directory and cut at 64 KB. Response keys: `bytes`, `flow`, `module`, `path`, `project`, `source`, `truncated` |
-| `server_health` | none | The server's state in one call: engines and what they are running, processors (the engine pool size, its CPU cap, and how many engines run, idle or drain), queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Response keys: `as_of`, `auth`, `engines`, `exposed`, `paused`, `processors`, `queued`, `read_only`, `resources`, `schedules`, `served_dir`, `version` |
+| `server_health` | none | The server's state in one call: engines and what they are running, processors (the engine pool size, its CPU cap, and how many engines run, idle or drain), remote workers, queue length, resource usage, schedule count, whether the scheduler is paused, and whether a token is required or the server is exposed. Response keys: `as_of`, `auth`, `engines`, `exposed`, `paused`, `processors`, `queued`, `read_only`, `resources`, `schedules`, `served_dir`, `version`, `workers` |
 | `list_variables` | none | Every variable's name, tags, and timestamps; the value only when it is not a secret. Response keys: `variables` |
 | `list_resources` | none | Resource totals from [resources] and what is in use. Response keys: `resources` |
 | `flow_dependencies` | `flow` (string, required) — Flow name, or project/flow when the name exists in several projects<br>`project` (string) | What a flow runs after (its upstreams and batch key) and which flows run after it. Response keys: `batch_key`, `flow`, `project`, `triggers`, `upstreams` |
 | `check_flows` | none | Run `cereyan check --json` on the served directory in a child process and return its report: import failures, unknown upstreams, invalid schedules with previews, unlisted resources, and route conflicts. Takes a few seconds. Response keys: `directory`, `errors`, `findings`, `flows`, `modules`, `now`, `ok`, `routes`, `rules`, `warnings` |
 
-### Tools that change state (15)
+### Tools that change state (16)
 
 | Tool | Arguments | Returns |
 |---|---|---|
@@ -63,6 +63,7 @@ Every tool description states its effect so a model can decide before calling. A
 | `resume_scheduler` | none | End the global pause: held runs start and each schedule catches up the fires it missed under its own policy. Response keys: — |
 | `set_variable` | `name` (string, required)<br>`secret` (boolean, default `false`)<br>`tags` (array of string)<br>`value` (any JSON, required) — Any JSON | Create or overwrite a variable. Secrets are encrypted at rest and never returned in plain text. Response keys: `variable` |
 | `cancel_backfill` | `backfill_id` (integer, required) | Cancel a backfill: its queued runs are cancelled at once and its running runs are asked to stop. Response keys: `backfill`, `note` |
+| `list_workers` | none | The remote workers registered with this server: each one's name, status (online, draining, offline), processors, labels, cereyan version, the modules whose code differs from the server's, and when it was last heard from. Read-only; draining, resizing and forgetting workers is done in the UI or the HTTP API. Response keys: — |
 | `rerun_run` | `from` (string) — failure, start, or a task's dynamic key such as transform-0; omit for a fresh run<br>`run_id` (integer, required) | Start a new run of the same flow with the original run's parameters and tags. With `from`, the new run is a retry linked to the original that replays its completed tasks from their checkpoints and executes from the failure, from the start, or from the named task and everything after it. Returns the new run; follow it with get_run. Response keys: `note`, `rerun_of`, `run` |
 | `flow__agent__etl` | `day` (string, default `"2026-09-06"`)<br>`n` (integer, default `1`) | Start a run of flow agent/etl. Arguments are the flow's parameters. Returns the run; follow it with get_run. Response keys: `note`, `run` |
 
@@ -73,7 +74,7 @@ Recorded from real responses, so a model knows what it gets without a second cal
 | Tool | Key | Item fields |
 |---|---|---|
 | `check_flows` | `findings` | `flow`, `kind`, `level`, `message` |
-| `check_flows` | `flows` | `findings`, `name`, `project`, `schedules` |
+| `check_flows` | `flows` | `findings`, `fingerprint`, `name`, `project`, `runs_on`, `schedules` |
 | `compare_runs` | `artifacts` | `changed`, `key`, `kind`, `left`, `right` |
 | `compare_runs` | `parameters` | `changed`, `key`, `left`, `right` |
 | `compare_runs` | `tasks` | `delta`, `key`, `left`, `name`, `right`, `state_changed` |
@@ -84,7 +85,7 @@ Recorded from real responses, so a model knows what it gets without a second cal
 | `list_backfills` | `backfills` | `cancelled`, `concurrency`, `counts`, `created_at`, `end_value`, `external_id`, `extra_parameters`, `flow_id`, `id`, `interval_secs`, `parameter`, `start_value`, `tag`, `total` |
 | `list_events` | `events` | `external_id`, `flow_id`, `id`, `name`, `occurred`, `payload`, `related`, `resource`, `run_id`, `seq` |
 | `list_flows` | `flows` | `description`, `error`, `id`, `live`, `name`, `options`, `parameter_schema`, `project`, `tags` |
-| `list_runs` | `runs` | `attempt`, `attributes`, `backfill_id`, `crash_count`, `created_at`, `created_by`, `end_time`, `engine_id`, `engine_pid`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `group`, `id`, `name`, `parameters`, `parent_run_id`, `priority`, `project`, `report_seq`, `schedule_id`, `scheduled_time`, `start_time`, `state`, `tags`, `task_counts`, `total_run_time`, `unique_key` |
+| `list_runs` | `runs` | `attempt`, `attributes`, `backfill_id`, `crash_count`, `created_at`, `created_by`, `end_time`, `engine_id`, `engine_pid`, `external_id`, `failure_count`, `flow_id`, `flow_name`, `group`, `host`, `id`, `lease`, `name`, `parameters`, `parent_run_id`, `priority`, `processor`, `project`, `report_seq`, `schedule_id`, `scheduled_time`, `source_hash`, `start_time`, `state`, `tags`, `task_counts`, `total_run_time`, `unique_key` |
 | `list_schedules` | `schedules` | `active`, `catchup`, `catchup_max`, `flow`, `id`, `loop_state`, `next_fire`, `paused_reason`, `paused_until`, `project`, `schedule`, `source` |
 | `list_variables` | `variables` | `created_at`, `name`, `secret`, `tags`, `updated_at`, `value` |
 | `run_logs` | `logs` | `id`, `level`, `logger`, `message`, `run_id`, `task_run_id`, `timestamp` |

@@ -8,6 +8,8 @@ import { Page } from "@/components/shell";
 import { Button } from "@/components/ui/button";
 import { CardHead } from "@/components/ui/card";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { UnderlineTabs } from "@/components/ui/underline-tabs";
+import { WorkersTab } from "@/components/workers-tab";
 import { useLiveEvent } from "@/lib/live";
 import { cn, formatDuration, formatIn } from "@/lib/utils";
 
@@ -15,7 +17,12 @@ type QueueView = components["schemas"]["QueueView"];
 type EngineView = components["schemas"]["EngineView"];
 type InLine = components["schemas"]["InLine"];
 
-export const Route = createFileRoute("/queue")({ component: QueuePage });
+export const Route = createFileRoute("/queue")({
+  validateSearch: (s: Record<string, unknown>): { tab?: "workers" } => ({
+    tab: s.tab === "workers" ? "workers" : undefined,
+  }),
+  component: QueuePage,
+});
 
 const STATUS: Record<string, { label: string; pill: string; dot: string; tile: string }> = {
   running: {
@@ -52,6 +59,7 @@ export function reasonText(row: Pick<InLine, "can_start" | "reason" | "position"
   if (reason === "max_concurrent") return "At max_concurrent";
   if (reason === "backfill concurrency") return "At backfill concurrency";
   if (reason === "no processor") return "No free processor";
+  if (reason === "no processor with matching code") return "No processor with matching code";
   return reason;
 }
 
@@ -127,7 +135,11 @@ function ProcessorsCard({ view }: { view: QueueView }) {
     queryKey: ["settings"],
     queryFn: async () => unwrap(await api.GET("/api/settings", {})),
   });
-  const { count, cap, items, load } = view.processors;
+  const { count, cap, load } = view.processors;
+  const all = view.processors.items;
+  // The server's own processors; each worker's are listed below them.
+  const items = all.filter((e) => (e.host ?? "server") === "server");
+  const remote = (view.processors.hosts ?? []).filter((h) => h.host !== "server");
   const resize = useMutation({
     mutationFn: async (n: number) => unwrap(await api.PATCH("/api/settings", { body: { max_engines: n } })),
     onSuccess: () => {
@@ -226,6 +238,29 @@ function ProcessorsCard({ view }: { view: QueueView }) {
           <ProcessorTile key={t.engine?.id ?? `slot-${t.n}`} n={t.n} engine={t.engine} />
         ))}
       </div>
+      {remote.map((h) => {
+        const mine = all.filter((e) => e.host === h.host);
+        const slots: { n: number; engine?: EngineView }[] = [];
+        for (let i = 0; i < Math.max(h.count, mine.length); i++) slots.push({ n: i + 1, engine: mine[i] });
+        return (
+          <div key={h.host} className="border-t px-4 pt-3 pb-4" data-testid="host-group">
+            <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">{h.host}</span>
+              <span>
+                {h.state} · {h.busy} busy / {h.count}
+              </span>
+              <Link to="/queue" search={{ tab: "workers" }} className="underline">
+                details
+              </Link>
+            </div>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+              {slots.map((t) => (
+                <ProcessorTile key={t.engine?.id ?? `${h.host}-${t.n}`} n={t.n} engine={t.engine} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
       <p className="px-4 pb-3 text-xs text-muted-foreground">
         A processor is an engine process: it loads a flow's module when it takes that flow's run. The count is
         saved in Settings and can't go above this machine's CPU count. Removing a processor never interrupts a
@@ -277,12 +312,24 @@ function QueuePage() {
   });
   useLiveEvent("run.updated", () => client.invalidateQueries({ queryKey: ["queue"] }));
   const view = queue.data;
+  const { tab } = Route.useSearch();
+  const navigate = Route.useNavigate();
   return (
     <Page
       title="Queue"
       subtitle="Every run waits in one line. A free processor takes the first run that can start: priority first, then time in line."
     >
-      {view ? (
+      <UnderlineTabs
+        items={[
+          { value: "line", label: "Line" },
+          { value: "workers", label: "Workers" },
+        ]}
+        value={tab ?? "line"}
+        onChange={(v) => navigate({ search: v === "workers" ? { tab: "workers" } : {} })}
+      />
+      {tab === "workers" ? (
+        <WorkersTab queue={view} />
+      ) : view ? (
         <>
           <ProcessorsCard view={view} />
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">

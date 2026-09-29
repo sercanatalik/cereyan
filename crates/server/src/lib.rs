@@ -9,6 +9,7 @@ pub mod compare;
 mod custom;
 mod dispatch;
 mod events;
+pub mod fingerprint;
 mod guard;
 pub mod health;
 mod index;
@@ -391,6 +392,13 @@ impl Server {
                     state.supervisor.set_max_engines(n);
                     state.mark_edited("server.max_engines");
                 }
+            }
+        }
+        // Workers reconnect on their next heartbeat; until then they are offline.
+        // A drained worker stays drained.
+        if let Ok(workers) = state.store.list_workers() {
+            for w in workers.iter().filter(|w| w.state == "online") {
+                let _ = state.store.set_worker_state(w.id, "offline");
             }
         }
         if let Ok(Some(saved)) = state.store.kv_get("settings.resources") {

@@ -148,7 +148,12 @@ def check_directory(directory: str, now: datetime | str | None = None) -> dict[s
                 own.append(_finding("warning", "resource",
                                     f"resource '{name}' is not in [resources] of cereyan.toml", flow=label))
         findings.extend(own)
-        flow_reports.append({"project": f.project, "name": f.name, "schedules": previews, "findings": own})
+        flow_reports.append({
+            "project": f.project, "name": f.name, "schedules": previews, "findings": own,
+            # Where runs may go, and the fingerprint a remote worker's checkout must match.
+            "runs_on": getattr(f, "runs_on", "any"),
+            "fingerprint": _core.module_fingerprint(f.source_dir, f.module),
+        })
 
     specs = [
         {"id": i, "method": r.method, "path": r.path, "source": f"{r.handler.__module__}:{r.handler.__qualname__}"}

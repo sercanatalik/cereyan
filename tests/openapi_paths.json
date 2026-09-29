@@ -9,6 +9,7 @@
   "/api/database/reset",
   "/api/engine/failed",
   "/api/engine/heartbeat",
+  "/api/engine/local-path",
   "/api/engine/report",
   "/api/engine/work",
   "/api/events",
@@ -30,6 +31,7 @@
   "/api/queue",
   "/api/resources/acquire",
   "/api/resources/release",
+  "/api/results/{key}",
   "/api/rules",
   "/api/rules/{id}",
   "/api/rules/{id}/expectations",
@@ -70,5 +72,12 @@
   "/api/task-runs/{id}/logs",
   "/api/variables",
   "/api/variables/{name}",
-  "/api/vocabulary"
+  "/api/vocabulary",
+  "/api/workers",
+  "/api/workers/register",
+  "/api/workers/{id}",
+  "/api/workers/{id}/drain",
+  "/api/workers/{id}/heartbeat",
+  "/api/workers/{id}/resume",
+  "/api/workers/{id}/timeline"
 ]

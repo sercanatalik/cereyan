@@ -872,6 +872,9 @@ fn flows_written_before_the_group_column_read_as_their_project() {
              ALTER TABLE task_run DROP COLUMN input_hash; \
              DROP INDEX run_unique_key; ALTER TABLE run DROP COLUMN unique_key; \
              DROP TABLE task_state; \
+             DROP TABLE worker_flow; DROP TABLE worker; DROP INDEX run_host_start; \
+             ALTER TABLE run DROP COLUMN host; ALTER TABLE run DROP COLUMN processor; \
+             ALTER TABLE run DROP COLUMN lease; ALTER TABLE run DROP COLUMN source_hash; \
              PRAGMA user_version = 6;",
         )
         .unwrap();
@@ -949,4 +952,65 @@ fn group_filter_matches_the_resolved_group() {
         .unwrap();
     assert_eq!(plain.items.len(), 1);
     assert_eq!(plain.items[0].name, "three");
+}
+
+#[test]
+fn workers_register_claim_runs_and_are_forgotten() {
+    use cereyan_store::WorkerRegistration;
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+    let reg = |processors: i64| WorkerRegistration {
+        name: "gpu-1".into(),
+        version: "3.0.0".into(),
+        cpus: 16,
+        processors,
+        labels: serde_json::from_str(r#"{"gpu": "true"}"#).unwrap(),
+        shared_paths: vec!["/mnt/lake".into()],
+        meta: serde_json::from_str(r#"{"hostname": "gpu-box-1"}"#).unwrap(),
+    };
+    let w = store.register_worker(reg(2)).unwrap();
+    assert_eq!(
+        (w.name.as_str(), w.processors, w.state.as_str()),
+        ("gpu-1", 2, "online")
+    );
+    // The same name again updates the record.
+    let again = store.register_worker(reg(4)).unwrap();
+    assert_eq!((again.id, again.processors), (w.id, 4));
+    assert_eq!(store.list_workers().unwrap().len(), 1);
+
+    let flow_id = flow(&store, "etl", "load");
+    store
+        .set_worker_flows(w.id, vec![(flow_id, "abc".into())])
+        .unwrap();
+    assert_eq!(
+        store.all_worker_flows().unwrap(),
+        vec![(w.id, flow_id, "abc".to_string())]
+    );
+
+    store.set_worker_state(w.id, "offline").unwrap();
+    let mut meta = serde_json::Map::new();
+    meta.insert("memory_free".into(), serde_json::json!(1024));
+    store.touch_worker(w.id, meta).unwrap();
+    let touched = store.get_worker(w.id).unwrap().unwrap();
+    assert_eq!(touched.state, "online");
+    assert_eq!(touched.meta["hostname"], "gpu-box-1");
+    assert_eq!(touched.meta["memory_free"], 1024);
+
+    let (run_id, _) = store.create_run(flow_id, "r", "{}", "[]").unwrap();
+    assert_eq!(
+        store
+            .claim_run(run_id, "gpu-1", Some(2), Some("abc".into()))
+            .unwrap(),
+        1
+    );
+    assert_eq!(store.claim_run(run_id, "server", Some(1), None).unwrap(), 2);
+    let run = store.get_run(run_id).unwrap().unwrap();
+    assert_eq!(
+        (run.host.as_deref(), run.processor, run.lease),
+        (Some("server"), Some(1), 2)
+    );
+    assert_eq!(run.source_hash.as_deref(), Some("abc"));
+
+    assert!(store.delete_worker(w.id).unwrap());
+    assert!(store.all_worker_flows().unwrap().is_empty());
 }

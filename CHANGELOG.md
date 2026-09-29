@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.0.0 (not yet released)
+
+- **Remote workers.** `cereyan worker --host URL` on another machine adds its processors to the server's queue. The worker runs its own checkout, registers the flows it can run with a fingerprint of each module, and connects out: it opens no port. When the server's processors are full, a run goes to a worker whose code for the run's module matches the server's, unless the flow says `@flow(runs_on="server")`. Results, cache entries, checkpoints and secrets stay on the server; the worker's engines use it for all of them. Every run records the host and processor it ran on. The Queue page gains a Workers tab (status, host metadata, a six-hour schedule per processor, drain, resume, forget) and groups processor tiles by host; the MCP `list_workers` tool and `server_health` report workers. [Run across machines](https://sercanatalik.github.io/cereyan/guides/run-across-machines/)
+- **Leases.** Every hand-off of a run to an engine carries a lease; a report, heartbeat or transition under an older lease is refused with 409 and the engine stops the run, so a run rerun after a network split is not also finished by its first engine.
+- **Code fingerprints.** Every run records `source_hash`, the fingerprint of the module that ran it (roadmap M5.7), and `cereyan check` reports each flow's fingerprint and `runs_on`.
+- **Engines use their server for everything.** An engine started by a server or a worker reads variables, emits events outside a run and hands off subflows through its server, never through a store of its own; a worker's engine asks the server to decrypt secrets.
+- **Events** `worker.registered`, `worker.offline`, and `run.local_path_on_worker`; `worker.` is a reserved event prefix.
+- **TLS trust from the environment.** The engine client verifies certificates against `SSL_CERT_FILE` and `SSL_CERT_DIR` when set, as curl and Python do, so a worker reaches a server behind a proxy with an internal CA.
+
+**Breaking in 3.0.** The engine protocol carries a lease (`WorkItem.lease`, `X-Cereyan-Lease`); engines and servers of 2.x and 3.0 do not mix. The store migrates to schema 17 (`worker`, `worker_flow`, and `run.host`, `run.processor`, `run.lease`, `run.source_hash`). `EngineKey` matching across machines ignores the source directory. `worker.` names are reserved for events.
+
 ## Unreleased
 
 - **A Queue page, and processors you add and remove while the server runs.** A new top-bar section between Runs and Flows shows the one queue every run waits in: each run in dispatch order with why it can or cannot start and how many runs went ahead of it, the runs joining the line in the next hour, and the engine pool as processors, each running, idle, or draining, with its run and module. Add or remove processors there or with `PATCH /api/settings {"max_engines": n}`; the change applies at once, is written to `[server] max_engines`, cannot exceed the CPU count, and never interrupts a run: a busy processor that is removed finishes its run first. `GET /api/queue` returns the same view, and the MCP `server_health` tool reports the processor count. [Engines and the home directory › Processors and the queue](https://sercanatalik.github.io/cereyan/concepts/engines-and-home/#processors-and-the-queue)

@@ -5,7 +5,7 @@
 The `cereyan` command. Every subcommand accepts the global options first, for example `cereyan --home /tmp/h run pipeline.py:etl`.
 
 ```text
-cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,check,backup,backfill,retry,pause,resume,mcp,runs} ...
+cereyan [-h] [--home HOME] [--token CLIENT_TOKEN] {run,serve,worker,check,backup,backfill,retry,pause,resume,mcp,runs} ...
 ```
 
 ## Global options
@@ -63,6 +63,26 @@ cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--en
 | `--mcp-read-only` | list and allow only MCP tools that change nothing (also CEREYAN_MCP_READ_ONLY or [server] mcp_read_only). |
 | `--metrics-public` | serve /api/metrics without a token, as /api/health (also CEREYAN_METRICS_PUBLIC or [server] metrics_public). |
 | `--public-url` `PUBLIC_URL` | the address people reach the UI at, used for run links in rule templates (also CEREYAN_PUBLIC_URL or [server] public_url). |
+
+## `cereyan worker`
+
+```text
+cereyan worker [-h] [--host HOST] [--name NAME] [--processors PROCESSORS] [--labels LABELS] [--shared-path PATH] [--token WORKER_TOKEN] [--token-file TOKEN_FILE] [dir]
+```
+
+| Argument | Meaning |
+|---|---|
+| `dir` (optional) | this machine's checkout of the project (default: current directory). |
+
+| Option | Meaning |
+|---|---|
+| `--host` `HOST` | the server's URL, e.g. https://cereyan.internal (also [worker] host). |
+| `--name` `NAME` | how the server lists this worker (default: the hostname; also [worker] name). |
+| `--processors` `PROCESSORS` | engines this worker may run at once, at most its CPU count (default 1; also [worker] processors). |
+| `--labels` `LABELS` | k=v pairs shown on the Workers tab, e.g. gpu=true,zone=eu (also [worker] labels). |
+| `--shared-path` `PATH` | a path this machine shares with the server; a LocalTarget elsewhere is reported (repeat for more; also [worker] shared_paths). |
+| `--token` `WORKER_TOKEN` | the server's API token (also CEREYAN_TOKEN). |
+| `--token-file` `TOKEN_FILE` | read the server's API token from this file (also [worker] token_file). |
 
 ## `cereyan check`
 
