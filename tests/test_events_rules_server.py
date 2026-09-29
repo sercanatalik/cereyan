@@ -557,6 +557,9 @@ def test_run_url_uses_public_url(isolated_home, obs_dir, webhook):
         srv.stop()
 
 
+# Three runs held at once plus the one that emits the event: four processors,
+# and the pool is capped at the CPU count.
+@pytest.mark.skipif((os.cpu_count() or 1) < 4, reason="needs four processors")
 def test_cancel_runs_selects_by_parameter_and_spares_the_events_run(obs):
     c = obs.client
     rule = c._request("POST", "/api/rules", body={

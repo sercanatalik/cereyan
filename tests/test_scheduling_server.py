@@ -706,6 +706,8 @@ def test_settings_saturation_risk(isolated_home, sched_dir):
         assert set(s["saturation_flows"]) == {"capped", "skipper", "canceller"}
     finally:
         srv.stop()
+    if (os.cpu_count() or 1) <= 3:
+        return  # the pool is capped at the CPU count, so it can't outgrow the caps' total of 3
     srv = ServerProcess(str(isolated_home), str(sched_dir), extra=["--max-engines", "8"])
     try:
         assert srv.client.settings()["engine_saturation_risk"] is False
