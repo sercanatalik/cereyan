@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/sercanatalik/cereyan/blob/main/LICENSE)
 [![Status](https://img.shields.io/badge/status-production%20ready-brightgreen.svg)](#status)
 
-Cereyan is a minimal, local-first orchestrator for Python data pipelines. A Rust core (SQLite store, state machine, scheduler, HTTP server) sits behind a thin layer of Python decorators, and the whole thing ships as one wheel with no runtime dependencies. Decorate functions as flows and tasks, run them as plain scripts, and every run is recorded locally; `cereyan serve` adds live monitoring, schedules, retries, backfills, rules, and a built-in MCP server for agents on top of the same store.
+Cereyan is a minimal, local-first orchestrator for Python data pipelines. A Rust core (SQLite store, state machine, scheduler, HTTP server) sits behind a thin layer of Python decorators, and the whole thing ships as one wheel with no runtime dependencies. Decorate functions as flows and tasks, run them as plain scripts, and every run is recorded locally; `cereyan serve` adds live monitoring, one queue with processors you size while it runs, schedules (including continuous loops), retries, backfills, rules, and a built-in MCP server for agents on top of the same store. When one machine is not enough, `cereyan worker` on another machine adds its processors to the same queue.
 
 ```bash
 pip install cereyan
@@ -37,7 +37,8 @@ if __name__ == "__main__":
 ```bash
 python pipeline.py                                    # records a run in ~/.cereyan/db.sqlite
 cereyan run pipeline.py:etl --param day=2026-01-02    # same, with parameters and a summary
-cereyan serve .                                       # API, UI, scheduler, engines at http://127.0.0.1:4200
+cereyan serve . --token $TOKEN                        # API, UI, scheduler, engines at http://127.0.0.1:4200
+cereyan worker . --host https://cereyan.internal      # on another machine: its processors join the queue
 ```
 
 [![The cereyan dashboard beside the project and group sidebar: counts by state, a histogram, Needs attention with a paused and a failed run, Running now, and the Recently completed table](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/dashboard.png)](https://sercanatalik.github.io/cereyan/get-started/tour/#dashboard)
@@ -45,8 +46,9 @@ cereyan serve .                                       # API, UI, scheduler, engi
 <p align="center"><sub>The dashboard after <code>cereyan serve</code> &mdash; <a href="https://sercanatalik.github.io/cereyan/get-started/tour/">take the full tour</a></sub></p>
 
 - **Offline first.** A script records runs into a local SQLite file; nothing else needs to run.
-- **One process to serve.** The API, the web UI, the scheduler, a warm pool of engine processes, rules, and MCP, in one `cereyan serve`.
-- **Data-pipeline semantics.** Targets make reruns idempotent, backfills cover date ranges or listed values, resources are named semaphores that can be keyed by parameter, flows chain and fan in by key, unique keys stop duplicate runs, and rules react to events or to their absence.
+- **One process to serve.** The API, the web UI, the scheduler, one queue, a warm pool of engine processes, rules, and MCP, in one `cereyan serve`. The Queue page shows every run in line and why it waits, and lets you add or remove processors while the server runs.
+- **Workers when you need them.** `cereyan worker` runs on another machine with its own checkout and connects out to the server: when the server's processors are full, runs spill over to workers whose code matches. The store, results and secrets stay on the server, every hand-off carries a lease, and the Workers tab shows each machine's status, host and schedule.
+- **Data-pipeline semantics.** Targets make reruns idempotent, backfills cover date ranges or listed values, resources are named semaphores that can be keyed by parameter, flows chain and fan in by key, unique keys stop duplicate runs, continuous schedules run a flow again a set time after each run ends, and rules react to events or to their absence.
 - **Durable runs.** Every completed task is checkpointed, so a crash rerun or a retry from failure resumes after the last finished task; a run can sleep, wait for an event or a target, or snooze without holding an engine; and a task keeps notes that survive its retries.
 
 ## Screenshots
@@ -61,6 +63,8 @@ Every page below is described in the [tour](https://sercanatalik.github.io/cerey
 | **[Flows](https://sercanatalik.github.io/cereyan/get-started/tour/#flows)** &mdash; groups, schedules, skips, dependencies, history | **[Timeline](https://sercanatalik.github.io/cereyan/get-started/tour/#run-detail)** &mdash; the task graph of a run |
 | [![Events page with the live feed and a JSON payload viewer](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/events.png)](https://sercanatalik.github.io/cereyan/get-started/tour/#events) | [![Rules page listing when/do rules and their firing counts](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/rules.png)](https://sercanatalik.github.io/cereyan/get-started/tour/#rules) |
 | **[Events](https://sercanatalik.github.io/cereyan/get-started/tour/#events)** &mdash; what happened, as it happens | **[Rules](https://sercanatalik.github.io/cereyan/get-started/tour/#rules)** &mdash; react to events, or to their absence |
+| [![The Queue page: a Processors card with add and remove buttons and a CPU gauge, the runs in line, and the runs joining the line](https://raw.githubusercontent.com/sercanatalik/cereyan/main/docs/images/queue.png)](https://sercanatalik.github.io/cereyan/concepts/engines-and-home/#processors-and-the-queue) | |
+| **[Queue](https://sercanatalik.github.io/cereyan/concepts/engines-and-home/#processors-and-the-queue)** &mdash; one line, processors, and workers | |
 
 The UI follows your system theme; the documentation shows the [dark variants](https://sercanatalik.github.io/cereyan/get-started/tour/) too.
 
@@ -70,7 +74,7 @@ The site is at https://sercanatalik.github.io/cereyan/ (built from `docs/` with 
 
 - [Quickstart](https://sercanatalik.github.io/cereyan/get-started/quickstart/): from install to a scheduled, retried, backfilled pipeline in ten minutes.
 - [Concepts](https://sercanatalik.github.io/cereyan/concepts/app-and-projects/): the model behind flows, runs, states, schedules, targets, resources, backfills, dependencies, events, rules, artifacts, and variables.
-- [Guides](https://sercanatalik.github.io/cereyan/guides/retries-timeouts-crashes/): one goal per page, from retries to running the server as a service and using cereyan with an AI agent.
+- [Guides](https://sercanatalik.github.io/cereyan/guides/retries-timeouts-crashes/): one goal per page, from retries to running the server as a service, [running across machines](https://sercanatalik.github.io/cereyan/guides/run-across-machines/), and using cereyan with an AI agent.
 - [Reference](https://sercanatalik.github.io/cereyan/reference/python-api/): the Python API, CLI, HTTP API, MCP tools, events, states, and configuration.
 - [Design and limitations](https://sercanatalik.github.io/cereyan/design/limitations/): what cereyan does not do, and why.
 - For agents: [llms.txt](https://sercanatalik.github.io/cereyan/llms.txt) and [llms-full.txt](https://sercanatalik.github.io/cereyan/llms-full.txt).
@@ -84,7 +88,9 @@ names, signatures, defaults, routes, event payloads and the database schema — 
 Windows lacks the Unix socket and engine niceness, and cannot interrupt a flow blocked in
 most I/O; [Install](https://sercanatalik.github.io/cereyan/get-started/install/#windows)
 lists what that changes.
-Read the [changelog](https://sercanatalik.github.io/cereyan/changelog/) before upgrading.
+Read the [changelog](https://sercanatalik.github.io/cereyan/changelog/) before upgrading: 3.0 changes
+the engine protocol (servers and workers of 2.x and 3.0 do not mix), migrates the store,
+and starts a server with one processor instead of one per CPU.
 Issues and questions are welcome.
 
 ## Development
@@ -100,7 +106,7 @@ Cereyan owes its shape to two projects that came first.
 [**Prefect**](https://github.com/PrefectHQ/prefect) contributed the authoring model — flows and tasks as decorated functions, runs carrying explicit states, a server watching them — and the look of the UI. Six UI components were adapted from Prefect's, rewritten in React from the Vue originals
 
 
-Neither is a dependency, and cereyan deliberately does far less than either: one machine, one process, one wheel, no remote workers and no database to run. If you need what they do, use them. [Migrating from Prefect or Luigi](https://sercanatalik.github.io/cereyan/guides/migrate/) says what carries over and what does not.
+Neither is a dependency, and cereyan deliberately does far less than either: one queue, one process, one wheel, no database to run, and workers that are plain processes on machines you already have rather than a platform of pools and images. If you need what they do, use them. [Migrating from Prefect or Luigi](https://sercanatalik.github.io/cereyan/guides/migrate/) says what carries over and what does not.
 
 ## License
 
