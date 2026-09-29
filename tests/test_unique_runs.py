@@ -140,7 +140,9 @@ def test_rule_mcp_and_dependency_honour_the_key(srv):
     srv.wait_run(a["id"])
     b = c.run("plain", n=2)
     srv.wait_run(b["id"])
-    firings = wait_until(lambda: (lambda f: f if len(f) == 2 else None)(c._request("GET", f"/api/rules/{rule['id']}/firings")))
+    # A firing is recorded with a pending outcome before its action runs.
+    firings = wait_until(lambda: (lambda f: f if len(f) == 2 and all("detail" in x["outcomes"][0] for x in f) else None)(
+        c._request("GET", f"/api/rules/{rule['id']}/firings")))
     outcomes = sorted((f["outcomes"][0]["detail"] for f in firings), key=lambda d: "conflict" in d)
     assert "run_id" in outcomes[0] and outcomes[1]["conflict"] is True and outcomes[1]["run_id"] == outcomes[0]["run_id"]
     rule_runs = [r for r in c.runs(flow="load", limit=50)["items"] if r["created_by"] == f"rule:{rule['id']}"]
