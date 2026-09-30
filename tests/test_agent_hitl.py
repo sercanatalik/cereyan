@@ -87,6 +87,26 @@ def asks():
 @app.flow
 def asks_from_a_task():
     return asks.submit().result()
+
+from cereyan import receive, publish_state
+
+@app.flow
+def signal_flow():
+    value = receive("signal")
+    note(f"signal:{value}")
+    return value
+
+@app.flow
+def publish_and_complete():
+    publish_state("progress", {"step": 1})
+    publish_state("progress", {"step": 2})
+    return "done"
+
+@app.flow
+def timeout_flow():
+    value = receive("signal", timeout=1, default="defaulted")
+    note(f"timeout:{value}")
+    return value
 '''
 
 
@@ -260,6 +280,12 @@ def test_a_changed_prompt_at_the_same_position_asks_again():
         def get_input(self, index):
             return {"prompt": "Approve the load?", "input": {"approve": True}}
 
+        def claim_message(self, topic, index=0):
+            stored = self.get_input(index)
+            if stored is not None and stored.get("prompt") == "Approve the load?":
+                return {"claimed": True, "answer": stored}
+            return None
+
     ctx = context.RunContext(
         id=1, external_id="x", name="r", flow=None, parameters={}, backend=Stub()
     )
@@ -311,3 +337,33 @@ def test_resume_replays_an_uncached_task_from_its_checkpoint(hitl):
     assert first["result_ref"] and first["input_hash"] and first["state"]["name"] == "Completed"
     assert second["state"]["name"] == "Replayed" and second["result_ref"] is None
     assert hitl.client._request("GET", f"/api/events?run_id={run['id']}&name=task_run.replayed")["items"]
+
+
+def test_receive_topic_message_resumes_run(hitl):
+    """receive('signal') pauses; POST /messages/{topic} resumes with the payload."""
+    run = start(hitl, "signal_flow")
+    p = paused(hitl, run["id"])
+    assert p["state"]["details"]["topic"] == "signal"
+    hitl.client.send_message(run["id"], "signal", {"x": 42})
+    final = hitl.wait_run(run["id"])
+    assert final["state"]["type"] == "Completed"
+    assert lines(hitl)[-1] == "signal:{'x': 42}"
+
+
+def test_publish_state_is_readable_via_api(hitl):
+    """publish_state stores flow-level state readable from the API."""
+    run = start(hitl, "publish_and_complete")
+    final = hitl.wait_run(run["id"])
+    assert final["state"]["type"] == "Completed"
+    state = hitl.client._request("GET", f"/api/runs/{run['id']}/state")
+    progress = next((s for s in state if s["scope"] == "" and s["key"] == "progress"), None)
+    assert progress is not None
+    assert progress["value"]["step"] == 2
+
+
+def test_receive_timeout_uses_default(hitl):
+    """receive(..., timeout=1, default='x') resumes with default when no message arrives."""
+    run = start(hitl, "timeout_flow")
+    final = hitl.wait_run(run["id"])
+    assert final["state"]["type"] == "Completed"
+    assert lines(hitl)[-1] == 'timeout:"defaulted"'

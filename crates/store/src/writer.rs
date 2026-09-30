@@ -394,6 +394,26 @@ pub enum WriteCommand {
         key: String,
         reply: Reply<bool>,
     },
+    /// Insert a pending message for a run.
+    RunMessageInsert {
+        run_id: i64,
+        topic: String,
+        payload: String,
+        reply: Reply<()>,
+    },
+    /// Claim the oldest pending message for a run and topic, storing the
+    /// answer in the run's input KV so replay finds it at the same ordinal.
+    RunMessageClaim {
+        run_id: i64,
+        topic: String,
+        index: i64,
+        reply: Reply<Option<String>>,
+    },
+    /// List pending messages for a run.
+    RunMessageList {
+        run_id: i64,
+        reply: Reply<Vec<(String, String)>>,
+    },
     /// Forget the checkpoint references of terminal runs that ended before `before`.
     ClearCheckpointsBefore {
         before: i64,
@@ -893,6 +913,114 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
             )
             .map(|n| n > 0)
             .map_err(StoreError::from),
+        ),
+        WriteCommand::RunMessageInsert {
+            run_id,
+            topic,
+            payload,
+            reply,
+        } => ack(
+            reply,
+            conn.execute(
+                "INSERT INTO run_message (run_id, topic, payload, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![run_id, topic, payload, now_micros()],
+            )
+            .map(|_| ())
+            .map_err(StoreError::from),
+        ),
+        WriteCommand::RunMessageClaim {
+            run_id,
+            topic,
+            index,
+            reply,
+        } => ack(
+            reply,
+            (|| {
+                // 1. Check whether the answer is already stored in kv.
+                let answers_key = format!("run.input:{}", run_id);
+                let existing: Option<String> = conn
+                    .query_row(
+                        "SELECT value FROM kv WHERE key = ?1",
+                        params![answers_key],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                if let Some(ref raw) = existing {
+                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
+                        if let Some(answers) = value.get("answers").and_then(|a| a.as_object()) {
+                            if let Some(answer) = answers.get(&index.to_string()) {
+                                // Answer exists at this index. Return the full
+                                // answer dict (topic, prompt, input) so the
+                                // engine can check the prompt for wait_for_input.
+                                let answer_topic = answer
+                                    .get("topic")
+                                    .and_then(|t| t.as_str())
+                                    .unwrap_or("input");
+                                if answer_topic == topic {
+                                    return Ok(Some(answer.to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
+                // 2. Claim the oldest pending message for this topic.
+                let mut stmt = conn.prepare_cached(
+                    "SELECT ordinal, payload FROM run_message WHERE run_id = ?1 AND topic = ?2 AND consumed_at IS NULL ORDER BY ordinal LIMIT 1",
+                )?;
+                let row = stmt
+                    .query_row(params![run_id, topic], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                    .optional()?;
+                if let Some((ordinal, payload)) = row {
+                    let now = now_micros();
+                    conn.execute(
+                        "UPDATE run_message SET consumed_at = ?1 WHERE ordinal = ?2",
+                        params![now, ordinal],
+                    )?;
+                    // 3. Store the binding in kv so replay finds it.
+                    let mut answers: serde_json::Map<String, serde_json::Value> =
+                        serde_json::Map::new();
+                    if let Some(ref raw) = existing {
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+                            if let Some(a) = value.get("answers").and_then(|a| a.as_object()) {
+                                answers = a.clone();
+                            }
+                        }
+                    }
+                    let payload_json: serde_json::Value =
+                        serde_json::from_str(&payload).unwrap_or(serde_json::Value::String(payload));
+                    let answer = serde_json::json!({"topic": topic, "input": payload_json});
+                    answers.insert(
+                        index.to_string(),
+                        answer.clone(),
+                    );
+                    let new_value = serde_json::json!({"v": 2, "answers": answers}).to_string();
+                    conn.execute(
+                        "INSERT INTO kv (key, value, updated_at) VALUES (?1, ?2, ?3)
+                         ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                        params![answers_key, new_value, now],
+                    )?;
+                    return Ok(Some(answer.to_string()));
+                }
+                Ok(None)
+            })(),
+        ),
+        WriteCommand::RunMessageList {
+            run_id,
+            reply,
+        } => ack(
+            reply,
+            (|| {
+                let mut stmt = conn.prepare_cached(
+                    "SELECT topic, payload FROM run_message WHERE run_id = ?1 AND consumed_at IS NULL ORDER BY ordinal",
+                )?;
+                let rows = stmt
+                    .query_map(params![run_id], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(StoreError::from)?;
+                Ok(rows)
+            })(),
         ),
         WriteCommand::ClearCheckpointsBefore { before, reply } => ack(reply, {
             let cleared = conn.execute(

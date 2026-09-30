@@ -1225,25 +1225,39 @@ pub async fn resume_inner(state: &Arc<AppState>, id: i64, input: Value) -> ApiRe
     }
 }
 
-/// The answers stored for a run: question index to `{prompt, input}`. Anything
-/// else under the key, including a value without the `v` marker, holds no answers.
+/// The answers stored for a run: question index to `{topic, prompt, input}`.
+/// Anything else under the key, including a value without the `v` marker, holds
+/// no answers. `v: 1` answers (from before topics) are accepted; their topic
+/// is implicitly `"input"`.
 pub(crate) fn stored_answers(state: &AppState, id: i64) -> ApiResult<Map<String, Value>> {
     let Some(raw) = state.store.kv_get(&crate::state::run_input_key(id))? else {
         return Ok(Map::new());
     };
     let value: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
-    if value.get("v").and_then(|v| v.as_i64()) != Some(1) {
+    let v = value.get("v").and_then(|v| v.as_i64());
+    if v != Some(1) && v != Some(2) {
         return Ok(Map::new());
     }
-    Ok(value
+    let mut answers = value
         .get("answers")
         .and_then(|a| a.as_object())
         .cloned()
-        .unwrap_or_default())
+        .unwrap_or_default();
+    // Migrate v:1 answers: add topic = "input" to entries that lack one.
+    if v == Some(1) {
+        for (_, answer) in answers.iter_mut() {
+            if answer.get("topic").is_none() {
+                if let Some(obj) = answer.as_object_mut() {
+                    obj.insert("topic".into(), serde_json::json!("input"));
+                }
+            }
+        }
+    }
+    Ok(answers)
 }
 
 pub(crate) fn answers_value(answers: &Map<String, Value>) -> String {
-    serde_json::json!({"v": 1, "answers": answers}).to_string()
+    serde_json::json!({"v": 2, "answers": answers}).to_string()
 }
 
 #[derive(Deserialize, utoipa::IntoParams)]
@@ -1290,6 +1304,136 @@ pub async fn run_input(
     Ok(Json(
         serde_json::json!({"pending": pending, "answers": answers, "input": first}),
     ))
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct ReceiveQuery {
+    pub topic: String,
+    /// The question ordinal this receive call expects.
+    pub index: i64,
+}
+
+/// Atomically check the answer store and pending messages for a `receive(topic)`
+/// call. Used by the engine during replay so a message that arrives between
+/// passes is found without pausing again.
+#[utoipa::path(get, path = "/api/runs/{id}/receive", params(("id" = i64, Path), ReceiveQuery), responses((status = 200, description = "{claimed: bool, answer: {...} or null}"), (status = 404)))]
+pub async fn run_receive(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+    Query(q): Query<ReceiveQuery>,
+) -> ApiResult<Json<Value>> {
+    state
+        .store
+        .get_run(id)?
+        .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
+    let payload = tokio::task::spawn_blocking(move || {
+        state.store.run_message_claim(id, &q.topic, q.index)
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    match payload {
+        Ok(Some(text)) => {
+            let answer: Value = serde_json::from_str(&text).unwrap_or(Value::String(text));
+            Ok(Json(serde_json::json!({"claimed": true, "answer": answer})))
+        }
+        Ok(None) => Ok(Json(serde_json::json!({"claimed": false, "answer": Value::Null}))),
+        Err(e) => Err(ApiError::Internal(e.to_string())),
+    }
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+pub struct MessageBody {
+    /// The message payload: any JSON value.
+    #[schema(value_type = Value)]
+    pub payload: Value,
+}
+
+/// Send a message to a run on `topic`.
+///
+/// If the run is Paused waiting for this topic, the message is stored as the
+/// answer and the run is resumed. Otherwise the message is queued for the next
+/// `receive(topic)` call.
+#[utoipa::path(post, path = "/api/runs/{id}/messages/{topic}", params(("id" = i64, Path), ("topic" = String, Path)), request_body = MessageBody, responses((status = 200, body = Run), (status = 404), (status = 409)))]
+pub async fn send_message(
+    State(state): State<Arc<AppState>>,
+    Path((id, topic)): Path<(i64, String)>,
+    Json(body): Json<MessageBody>,
+) -> ApiResult<Json<Run>> {
+    let run = state
+        .store
+        .get_run(id)?
+        .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
+    // If the run is Paused waiting for exactly this topic, resume it.
+    if run.state.state_type == StateType::Paused {
+        let waiting_topic = run
+            .state
+            .details
+            .get("topic")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if waiting_topic == topic {
+            let flow = state
+                .store
+                .get_flow(run.flow_id)?
+                .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
+            let index = run
+                .state
+                .details
+                .get("index")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let prompt = run
+                .state
+                .details
+                .get("prompt")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let mut answers = stored_answers(&state, id)?;
+            answers.insert(
+                index.to_string(),
+                serde_json::json!({"topic": topic, "prompt": prompt, "input": body.payload}),
+            );
+            let answer = answers_value(&answers);
+            let st = state.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                st.store.kv_set(&crate::state::run_input_key(id), &answer)?;
+                let mut next = RunState::new(StateType::Scheduled);
+                next.name = "Resuming".into();
+                st.transition_run(id, next, false)
+            })
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))??;
+            return match result {
+                TransitionResult::Accepted(run) => {
+                    let run = *run;
+                    crate::dispatch::enqueue_run(&state, &run, &flow, None);
+                    Ok(Json(run))
+                }
+                TransitionResult::Rejected { reason, current } => Err(ApiError::Conflict(
+                    serde_json::to_value(TransitionRejected {
+                        error: format!("cannot resume: {reason}"),
+                        reason: reason.to_string(),
+                        current,
+                    })
+                    .unwrap_or_default(),
+                )),
+            };
+        }
+    }
+    // Run is not paused for this topic: queue the message.
+    if run.state.state_type.is_terminal() {
+        return Err(ApiError::Conflict(
+            serde_json::json!({"error": "run is terminal"}).into(),
+        ));
+    }
+    let payload_str = body.payload.to_string();
+    let st = state.clone();
+    tokio::task::spawn_blocking(move || {
+        st.store.run_message_insert(id, &topic, &payload_str)
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))??;
+    Ok(Json(run))
 }
 
 #[utoipa::path(post, path = "/api/runs/{id}/cancel", params(("id" = i64, Path)), responses((status = 200, body = Run), (status = 404)))]

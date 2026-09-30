@@ -247,6 +247,11 @@ class Client:
         """``POST /api/runs/{id}/resume``: answer a Paused run with ``input`` and schedule its next attempt."""
         return self._request("POST", f"/api/runs/{run_id}/resume", body={"input": input})
 
+    def send_message(self, run_id: int, topic: str, payload: Any) -> dict:
+        """``POST /api/runs/{id}/messages/{topic}``: send a message to a run on ``topic``."""
+        import json
+        return self._request("POST", f"/api/runs/{run_id}/messages/{topic}", body={"payload": json.loads(json.dumps(payload))})
+
     def cancel(self, run_id: int) -> dict:
         """``POST /api/runs/{id}/cancel``: cancel a queued run at once or ask a running one to stop."""
         return self._request("POST", f"/api/runs/{run_id}/cancel")

@@ -187,6 +187,8 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         observability::list_artifacts,
         runs::resume_run,
         runs::run_input,
+        runs::run_receive,
+        runs::send_message,
         observability::test_rule,
         observability::run_artifacts,
         observability::task_run_artifacts,
@@ -482,6 +484,11 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(runs::run_state).post(runs::set_run_state),
         )
         .route("/api/runs/{id}/input", get(runs::run_input))
+        .route("/api/runs/{id}/receive", get(runs::run_receive))
+        .route(
+            "/api/runs/{id}/messages/{topic}",
+            post(runs::send_message),
+        )
         .route("/api/task-runs", get(task_runs::list_task_runs))
         .route("/api/task-runs/{id}", get(task_runs::get_task_run))
         .route("/api/task-runs/{id}/logs", get(logs::task_run_logs))

@@ -11,7 +11,7 @@ from .logging import get_run_logger
 from . import artifacts, events, states, task_state
 from .events import emit_event
 from .attributes import set_attributes
-from .inputs import wait_for_input
+from .inputs import receive, wait_for_input, publish_state
 from .waits import Snooze, WaitTimeout, sleep, sleep_until, wait_for_event, wait_for_target
 from .results import INPUTS, SOURCE, CachePolicy
 from .routes import HTTPError, Request, Response
@@ -24,7 +24,9 @@ from .variables import Variable
 __version__ = "3.0.1"
 
 __all__ = [
+    "receive",
     "wait_for_input",
+    "publish_state",
     "set_attributes",
     "App",
     "CachePolicy",

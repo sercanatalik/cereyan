@@ -84,9 +84,20 @@ class Backend:
     def get_input(self, index: int = 0):
         """The answer given to question `index` of this run, or None.
 
-        The answer comes back as ``{"prompt": ..., "input": ...}``.
+        The answer comes back as ``{"topic": ..., "prompt": ..., "input": ...}``.
         """
         return None
+
+    def claim_message(self, topic: str, index: int = 0):
+        """Atomically check answers and pending messages for `topic` at `index`.
+
+        Returns the answer dict (``{"topic": ..., "input": ...}``) or None.
+        """
+        return None
+
+    def send_message(self, topic: str, payload):
+        """Send a message to this run on `topic` from outside."""
+        pass
 
 
 def _details(details: dict | None) -> str | None:
@@ -326,3 +337,23 @@ class ReporterBackend(Backend):
             return None
         answer = json.loads(text).get("answer")
         return answer if isinstance(answer, dict) else None
+
+    def claim_message(self, topic: str, index: int = 0):
+        status, text = self.client.get(
+            f"/api/runs/{self.run_id}/receive?topic={topic}&index={index}"
+        )
+        if status >= 300 or not text:
+            return None
+        data = json.loads(text)
+        if data.get("claimed"):
+            return data
+        return None
+
+    def send_message(self, topic: str, payload):
+        import json as _json
+        body = _json.dumps({"payload": payload})
+        status, text = self.client.post(
+            f"/api/runs/{self.run_id}/messages/{topic}", body
+        )
+        if status >= 300:
+            raise CereyanError(f"send_message refused ({status}): {text}")

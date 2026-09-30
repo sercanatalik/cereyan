@@ -2117,6 +2117,17 @@
         ],
         "type": "object"
       },
+      "MessageBody": {
+        "properties": {
+          "payload": {
+            "description": "The message payload: any JSON value."
+          }
+        },
+        "required": [
+          "payload"
+        ],
+        "type": "object"
+      },
       "MetricsHistory": {
         "properties": {
           "interval_secs": {
@@ -8012,6 +8023,109 @@
         },
         "tags": [
           "logs"
+        ]
+      }
+    },
+    "/api/runs/{id}/messages/{topic}": {
+      "post": {
+        "description": "If the run is Paused waiting for this topic, the message is stored as the\nanswer and the run is resumed. Otherwise the message is queued for the next\n`receive(topic)` call.",
+        "operationId": "send_message",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "topic",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": ""
+          }
+        },
+        "summary": "Send a message to a run on `topic`.",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}/receive": {
+      "get": {
+        "operationId": "run_receive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "topic",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The question ordinal this receive call expects.",
+            "in": "query",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{claimed: bool, answer: {...} or null}"
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "summary": "Atomically check the answer store and pending messages for a `receive(topic)`\ncall. Used by the engine during replay so a message that arrives between\npasses is found without pausing again.",
+        "tags": [
+          "runs"
         ]
       }
     },

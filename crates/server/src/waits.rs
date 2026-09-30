@@ -41,9 +41,15 @@ pub fn wake_run(state: &Arc<AppState>, run_id: i64, input: Value) -> Result<Run,
         .get("prompt")
         .cloned()
         .unwrap_or(Value::Null);
+    let topic = run
+        .state
+        .details
+        .get("topic")
+        .cloned()
+        .unwrap_or(Value::Null);
     let mut answers =
         crate::api::runs::stored_answers(state, run_id).map_err(|e| format!("{e:?}"))?;
-    answers.insert(index.to_string(), json!({"prompt": prompt, "input": input}));
+    answers.insert(index.to_string(), json!({"topic": topic, "prompt": prompt, "input": input}));
     state
         .store
         .kv_set(
@@ -103,15 +109,20 @@ pub fn on_timer(state: &Arc<AppState>, run_id: i64) {
     if due.is_some_and(|at| at > now_micros() + 1_000) {
         return;
     }
-    let answer = match run.state.name.as_str() {
-        "AwaitingEvent" => json!({"timeout": true}),
-        // The poke carries the wait's start so the replay can honour the timeout.
-        "AwaitingTarget" => json!({
-            "poke": true,
-            "at": now_micros(),
-            "started_at": run.state.details.get("started_at").cloned().unwrap_or(Value::Null),
-        }),
-        _ => json!({"woke": true, "at": now_micros()}),
+    let answer = if let Some(default) = run.state.details.get("default") {
+        // Message timeout: resume with the default value stored by the engine.
+        default.clone()
+    } else {
+        match run.state.name.as_str() {
+            "AwaitingEvent" => json!({"timeout": true}),
+            // The poke carries the wait's start so the replay can honour the timeout.
+            "AwaitingTarget" => json!({
+                "poke": true,
+                "at": now_micros(),
+                "started_at": run.state.details.get("started_at").cloned().unwrap_or(Value::Null),
+            }),
+            _ => json!({"woke": true, "at": now_micros()}),
+        }
     };
     let _ = wake_run(state, run_id, answer);
 }

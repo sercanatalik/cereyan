@@ -488,6 +488,10 @@ pub fn tool_list() -> Vec<Value> {
             json!({"run_id": {"type": "integer"}}), &["run_id"]),
         write_tool("resume_run", "Answer a Paused run's wait_for_input question and schedule its next attempt. The answer can be any JSON.",
             json!({"run_id": {"type": "integer"}, "input": {"description": "The answer, any JSON"}}), &["run_id", "input"]),
+        read_tool("list_waiting_runs", "Runs that are Paused waiting for input or a message, with their prompt, topic, and the flow they belong to. Read-only.",
+            json!({"flow": flow_prop, "project": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}}), &[]),
+        write_tool("send_message", "Send a message to a Paused run on a topic. Resumes the run immediately if it is waiting for this topic, or queues the message for the next receive() call.",
+            json!({"run_id": {"type": "integer"}, "topic": {"type": "string"}, "payload": {"description": "The message payload, any JSON"}}), &["run_id", "topic", "payload"]),
         write_tool("backfill", "Create one run per value of a date or datetime parameter between start and end. Defaults to a dry run that only reports how many runs would be created; pass dry_run false to create them. Can create thousands of runs.",
             json!({"flow": flow_prop, "parameter": {"type": "string"}, "start": {"type": "string", "description": "YYYY-MM-DD or RFC 3339; not needed with values"}, "end": {"type": "string"}, "interval": {"type": "string", "description": "Seconds or a duration such as 1d or 12h (default 1d)"}, "concurrency": {"type": "integer", "default": 1}, "extra_parameters": {"type": "object"}, "reverse": {"type": "boolean"},
                    "values": {"type": "array", "items": {"type": "string"}, "description": "Explicit parameter values instead of a range"},
@@ -1035,6 +1039,54 @@ async fn call_tool(
             let input = args.get("input").cloned().unwrap_or(Value::Null);
             let run = runs::resume_inner(state, id, input).await?;
             Ok(json!({"run": run}))
+        }
+        "list_waiting_runs" => {
+            use cereyan_store::ListRunsFilter;
+            let filter = ListRunsFilter {
+                state_type: Some("Paused".into()),
+                flow: arg_str(args, "flow"),
+                project: arg_str(args, "project"),
+                ..Default::default()
+            };
+            let mut filter = filter;
+            filter.limit = Some(arg_usize(args, "limit", 50, 500));
+            let st = state.clone();
+            let page = tokio::task::spawn_blocking(move || st.store.list_runs(&filter))
+                .await
+                .map_err(|e| ToolError::Failed(format!("{e:?}")))?
+                .map_err(|e| ToolError::Failed(format!("{e:?}")))?;
+            let runs: Vec<Value> = page
+                .items
+                .iter()
+                .map(|r| {
+                    let pending = if r.state.state_type == cereyan_core::StateType::Paused {
+                        json!({
+                            "prompt": r.state.details.get("prompt").cloned().unwrap_or(Value::Null),
+                            "topic": r.state.details.get("topic").and_then(|v| v.as_str()).unwrap_or("input"),
+                            "index": r.state.details.get("index").cloned().unwrap_or(json!(0)),
+                        })
+                    } else {
+                        Value::Null
+                    };
+                    json!({"id": r.id, "flow_id": r.flow_id, "state": r.state, "pending": pending})
+                })
+                .collect();
+            Ok(json!({"runs": runs, "total": page.items.len(), "next_cursor": page.next_cursor}))
+        }
+        "send_message" => {
+            let id = arg_i64(args, "run_id")?;
+            let topic = arg_str(args, "topic")
+                .ok_or_else(|| ToolError::Failed("topic is required".into()))?;
+            let payload = args.get("payload").cloned().unwrap_or(Value::Null);
+            let body = crate::api::runs::MessageBody { payload };
+            let run = crate::api::runs::send_message(
+                axum::extract::State(state.clone()),
+                axum::extract::Path((id, topic)),
+                axum::extract::Json(body),
+            )
+            .await
+            .map_err(|e| ToolError::Failed(format!("{e:?}")))?;
+            Ok(json!({"run": run.0}))
         }
         "backfill" => {
             let name = arg_str(args, "flow")

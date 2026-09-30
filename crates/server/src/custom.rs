@@ -126,6 +126,8 @@ pub const BUILTIN_PATHS: &[&str] = &[
     "/api/vocabulary",
     "/api/runs/{id}/resume",
     "/api/runs/{id}/input",
+    "/api/runs/{id}/receive",
+    "/api/runs/{id}/messages/{topic}",
     "/api/rules/{id}/expectations",
     "/api/schedules/{sid}/skips",
     "/api/schedules/{sid}/skips/{fire}",

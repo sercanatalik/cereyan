@@ -47,6 +47,8 @@
   "/api/runs/{id}/graph",
   "/api/runs/{id}/input",
   "/api/runs/{id}/logs",
+  "/api/runs/{id}/messages/{topic}",
+  "/api/runs/{id}/receive",
   "/api/runs/{id}/resume",
   "/api/runs/{id}/retry",
   "/api/runs/{id}/state",

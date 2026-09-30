@@ -409,6 +409,36 @@ impl Store {
         })
     }
 
+    /// Insert a pending message for a run.
+    pub fn run_message_insert(&self, run_id: i64, topic: &str, payload: &str) -> Result<()> {
+        self.write(|reply| WriteCommand::RunMessageInsert {
+            run_id,
+            topic: topic.into(),
+            payload: payload.into(),
+            reply,
+        })
+    }
+
+    /// Claim the oldest pending message for a run and topic, storing the
+    /// answer in the run's input KV so replay finds it at the same ordinal.
+    /// Returns the payload string when a message was claimed, None otherwise.
+    pub fn run_message_claim(&self, run_id: i64, topic: &str, index: i64) -> Result<Option<String>> {
+        self.write(|reply| WriteCommand::RunMessageClaim {
+            run_id,
+            topic: topic.into(),
+            index,
+            reply,
+        })
+    }
+
+    /// List unconsumed messages for a run.
+    pub fn run_message_list(&self, run_id: i64) -> Result<Vec<(String, String)>> {
+        self.write(|reply| WriteCommand::RunMessageList {
+            run_id,
+            reply,
+        })
+    }
+
     pub fn append_event(&self, event: writer::NewEvent) -> Result<(Event, Id)> {
         self.write(|reply| WriteCommand::AppendEvent(event, reply))
     }
