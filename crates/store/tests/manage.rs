@@ -116,7 +116,7 @@ fn an_event_about_a_run_names_its_flow() {
         .unwrap();
     let flow_id = count(
         &store,
-        &format!("SELECT flow_id FROM event WHERE id = {event}"),
+        &format!("SELECT flow_id FROM event WHERE id = {}", event.id),
     );
     assert_eq!(flow_id, f);
 }

@@ -8,6 +8,20 @@ use serde_json::{json, Map, Value};
 use crate::writer::WriteCommand;
 use crate::{Result, Store};
 
+/// Runs of one flow that started on a host, by state: what a worker's status
+/// page counts.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct HostFlowCounts {
+    pub flow: String,
+    pub completed: i64,
+    pub failed: i64,
+    pub crashed: i64,
+    pub cancelled: i64,
+    pub running: i64,
+    /// When the flow's latest completed run here ended (microseconds).
+    pub last_completed_at: Option<i64>,
+}
+
 const WORKER_COLUMNS: &str = "id, name, version, cpus, processors, labels, shared_paths, meta, \
      state, registered_at, last_seen_at";
 
@@ -185,6 +199,42 @@ impl Store {
         })
     }
 
+    /// One worker's claimed flows, with the two flow columns a fingerprint
+    /// check needs and the hash the worker reported. Filtered to `worker_id` by
+    /// the `worker_flow` primary key, so this is an index range scan rather
+    /// than a read of every worker's rows.
+    ///
+    /// A membership row whose flow no longer exists yields no row, matching the
+    /// old behaviour of skipping it.
+    pub fn worker_flow_details(&self, worker_id: i64) -> Result<Vec<(i64, String, String, String)>> {
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT wf.flow_id, f.source_dir, f.module, wf.module_hash
+                 FROM worker_flow wf JOIN flow f ON f.id = wf.flow_id
+                 WHERE wf.worker_id = ?1",
+            )?;
+            let rows = stmt
+                .query_map(params![worker_id], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// How many flows each worker has claimed, in one grouped read.
+    pub fn worker_flow_counts(&self) -> Result<Vec<(i64, i64)>> {
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT worker_id, COUNT(*) FROM worker_flow GROUP BY worker_id",
+            )?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
     /// Hand a run to an engine: record where it runs and take the next lease.
     /// Returns the new lease.
     pub fn claim_run(
@@ -256,6 +306,43 @@ impl Store {
                         r.get(4)?,
                         r.get(5)?,
                     ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Runs that started on `host` at or after `since`, counted per flow and
+    /// state, busiest flows first, at most `limit` flows.
+    pub fn runs_by_flow_on_host(
+        &self,
+        host: &str,
+        since: i64,
+        limit: usize,
+    ) -> Result<Vec<HostFlowCounts>> {
+        let host = host.to_string();
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT f.name,
+                   SUM(r.state_type = 'Completed'), SUM(r.state_type = 'Failed'),
+                   SUM(r.state_type = 'Crashed'), SUM(r.state_type = 'Cancelled'),
+                   SUM(r.state_type IN ('Running', 'Cancelling')),
+                   MAX(CASE WHEN r.state_type = 'Completed' THEN r.end_time END)
+                 FROM run r JOIN flow f ON f.id = r.flow_id
+                 WHERE r.host = ?1 AND r.start_time >= ?2
+                 GROUP BY f.name ORDER BY COUNT(*) DESC, f.name LIMIT ?3",
+            )?;
+            let rows = stmt
+                .query_map(params![host, since, limit as i64], |r| {
+                    Ok(HostFlowCounts {
+                        flow: r.get(0)?,
+                        completed: r.get(1)?,
+                        failed: r.get(2)?,
+                        crashed: r.get(3)?,
+                        cancelled: r.get(4)?,
+                        running: r.get(5)?,
+                        last_completed_at: r.get(6)?,
+                    })
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)

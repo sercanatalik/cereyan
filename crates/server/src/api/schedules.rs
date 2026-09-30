@@ -510,10 +510,14 @@ pub async fn upcoming_runs(
     })?;
     let schedules = state.scheduler.for_flow(id);
     // (schedule, fire) -> (when it was skipped, by whom)
+    // One read for every schedule being listed, rather than one per schedule.
+    let by_schedule = state
+        .store
+        .list_skip_rows_many(&schedules.iter().map(|s| s.id).collect::<Vec<_>>())?;
     let mut skips: HashMap<(i64, i64), (i64, String)> = HashMap::new();
-    for row in &schedules {
-        for (fire, at, by) in state.store.list_skip_rows(row.id)? {
-            skips.insert((row.id, fire), (at, by));
+    for (schedule_id, rows) in &by_schedule {
+        for (fire, at, by) in rows {
+            skips.insert((*schedule_id, *fire), (*at, by.clone()));
         }
     }
     let mut last: HashMap<i64, i64> = HashMap::new();

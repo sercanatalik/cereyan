@@ -14,7 +14,7 @@
 - **The server needs a token.** A server without one refuses workers, even when it is bound to loopback behind a proxy on the same machine. Start it with `--token` or set `[server] token` (see [Secure the server](secure-the-server.md)).
 - **Each worker has its own checkout** of the same project, deployed the way you deploy the server's, for example with `git pull`. The server does not ship code.
 - **The same Python environment**: the worker's engines import your modules and their dependencies.
-- **Network access from the worker to the server** over HTTP or HTTPS. The worker opens no port of its own.
+- **Network access from the worker to the server** over HTTP or HTTPS. The worker opens one port of its own, a read-only status page, on `127.0.0.1` unless you say otherwise.
 
 ## Start a worker
 
@@ -35,9 +35,13 @@ processors = 4
 labels = { gpu = "true", zone = "eu" }
 shared_paths = ["/mnt/lake"]
 token_file = "/etc/cereyan/token"
+status_host = "127.0.0.1"   # the status page; the default
+status_port = 0             # a port the OS picks; the default
 ```
 
 `--processors` is at most the worker's CPU count and can be changed later from the Workers tab. Labels are shown there; they do not route work.
+
+Each worker serves a read-only status page, styled like the rest of the UI, and logs its address at start (`status page on http://127.0.0.1:51377`); the Workers tab shows it too. The page lists the worker's state, runs completed and failed since it started, its engines, its recent messages and its host details, and it keeps working when the server cannot be reached. `status.json` returns the same data, and `healthz` answers 503 after three missed heartbeats, for a service manager or load balancer. Choose the address with `--status-host` and `--status-port`. Links on the page are relative, so a reverse proxy can serve it under any path. The page has no controls and no login. It shows the checkout path, git state, flow names and host details, so bind it beyond loopback only behind a proxy that controls access.
 
 ## Which runs go to a worker
 

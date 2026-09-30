@@ -82,6 +82,99 @@ pub struct HeartbeatResponse {
     pub commands: Vec<Value>,
     pub state: String,
     pub drift: Vec<String>,
+    /// What ran on the worker since it started, for its status page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stats: Option<HeartbeatStats>,
+}
+
+/// Runs of one flow that started on a worker since it started.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct FlowStats {
+    pub flow: String,
+    pub completed: i64,
+    pub failed: i64,
+    pub crashed: i64,
+    pub cancelled: i64,
+    pub running: i64,
+    /// When the latest completed run here ended (microseconds).
+    pub last_completed_at: Option<i64>,
+}
+
+/// One of the worker's engines and the run it is executing.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct EngineStats {
+    pub engine_id: String,
+    /// The processor slot, from 1.
+    pub slot: usize,
+    pub module: String,
+    /// `starting`, `idle`, `running` or `draining`.
+    pub status: String,
+    pub run_id: Option<i64>,
+    pub flow: Option<String>,
+    /// Seconds in the current run, or since the engine started when it has none.
+    pub since_secs: u64,
+}
+
+/// Counts the server keeps for a worker: what its status page shows.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct HeartbeatStats {
+    /// The worker's start time (microseconds): runs that started before it are not counted.
+    pub since: i64,
+    pub by_flow: Vec<FlowStats>,
+    pub engines: Vec<EngineStats>,
+}
+
+/// At most this many flows in a heartbeat's stats.
+const STATS_FLOWS: usize = 200;
+
+/// Runs by flow on the worker since its reported start, and its engines now.
+fn stats(state: &AppState, worker: &Worker) -> ApiResult<HeartbeatStats> {
+    let since = worker
+        .meta
+        .get("started_at")
+        .and_then(Value::as_i64)
+        .unwrap_or(worker.registered_at);
+    let by_flow = state
+        .store
+        .runs_by_flow_on_host(&worker.name, since, STATS_FLOWS)?
+        .into_iter()
+        .map(|c| FlowStats {
+            flow: c.flow,
+            completed: c.completed,
+            failed: c.failed,
+            crashed: c.crashed,
+            cancelled: c.cancelled,
+            running: c.running,
+            last_completed_at: c.last_completed_at,
+        })
+        .collect();
+    let views = state.supervisor.worker_engines(worker.id);
+    let run_ids: Vec<i64> = views.iter().filter_map(|e| e.run_id).collect();
+    let flows: HashMap<i64, String> = if run_ids.is_empty() {
+        HashMap::new()
+    } else {
+        // Two columns per engine's run. `get_runs` would read a whole run --
+        // 37 columns, a correlated task-count aggregate and four decoded JSON
+        // documents -- for one name, every five seconds per worker.
+        state.store.flow_names(&run_ids)
+    };
+    let engines = views
+        .into_iter()
+        .map(|e| EngineStats {
+            flow: e.run_id.and_then(|id| flows.get(&id).cloned()),
+            engine_id: e.id,
+            slot: e.slot,
+            module: e.module,
+            status: e.status.to_string(),
+            run_id: e.run_id,
+            since_secs: e.since_secs,
+        })
+        .collect();
+    Ok(HeartbeatStats {
+        since,
+        by_flow,
+        engines,
+    })
 }
 
 /// A worker with what the server knows of it right now.
@@ -162,30 +255,21 @@ fn evaluate(state: &AppState, flows: &[WorkerFlow]) -> ApiResult<Evaluation> {
 /// The eligible set and drift from the fingerprints a worker last reported,
 /// against the server's current code.
 fn evaluate_stored(state: &AppState, worker_id: i64) -> ApiResult<(HashSet<i64>, Vec<String>)> {
-    let flows: HashMap<i64, cereyan_core::Flow> = state
-        .store
-        .list_flows(None)?
-        .into_iter()
-        .map(|f| (f.id, f))
-        .collect();
+    // One read of this worker's rows, joined to the two flow columns the
+    // fingerprint needs. The heartbeat runs every few seconds per worker, so
+    // reading the whole flow and worker_flow tables here was the cost.
     let mut eligible = HashSet::new();
-    let mut drift = Vec::new();
-    for (wid, flow_id, hash) in state.store.all_worker_flows()? {
-        if wid != worker_id {
-            continue;
-        }
-        let Some(flow) = flows.get(&flow_id) else {
-            continue;
-        };
+    let mut drift: Vec<String> = Vec::new();
+    for (flow_id, source_dir, module, hash) in state.store.worker_flow_details(worker_id)? {
         if state
             .fingerprints
-            .get(&flow.source_dir, &flow.module)
+            .get(&source_dir, &module)
             .as_deref()
             == Some(hash.as_str())
         {
             eligible.insert(flow_id);
-        } else if !drift.contains(&flow.module) {
-            drift.push(flow.module.clone());
+        } else if !drift.contains(&module) {
+            drift.push(module);
         }
     }
     drift.sort();
@@ -320,6 +404,7 @@ pub async fn heartbeat(
             commands,
             state: state_now,
             drift,
+            stats: Some(stats(&st, &worker)?),
         })
     })
     .await
@@ -334,10 +419,7 @@ fn views(state: &AppState) -> ApiResult<Vec<WorkerView>> {
         .into_iter()
         .map(|(id, _, st, _, running, idle)| (id, (st, running, idle)))
         .collect();
-    let mut flows_per: HashMap<i64, usize> = HashMap::new();
-    for (wid, _, _) in state.store.all_worker_flows()? {
-        *flows_per.entry(wid).or_default() += 1;
-    }
+    let flows_per: HashMap<i64, i64> = state.store.worker_flow_counts()?.into_iter().collect();
     let mut out = Vec::new();
     for mut worker in state.store.list_workers()? {
         let (running, idle) = match live.get(&worker.id) {
@@ -352,11 +434,14 @@ fn views(state: &AppState) -> ApiResult<Vec<WorkerView>> {
             .get("drift")
             .and_then(|d| serde_json::from_value(d.clone()).ok())
             .unwrap_or_default();
+        // A flow in drift is claimed but not eligible, so it is subtracted: the
+        // number shown is the eligible count.
         let flows = flows_per
             .get(&worker.id)
             .copied()
             .unwrap_or(0)
-            .saturating_sub(drift.len());
+            .saturating_sub(drift.len() as i64)
+            .max(0) as usize;
         out.push(WorkerView {
             worker,
             running,
@@ -381,7 +466,7 @@ pub struct TimelineQuery {
 }
 
 /// One run on a processor lane.
-#[derive(Serialize, utoipa::ToSchema)]
+#[derive(Serialize, PartialEq, Eq, Debug, utoipa::ToSchema)]
 pub struct TimelineRun {
     pub run_id: i64,
     pub flow: String,
@@ -400,6 +485,90 @@ pub struct Timeline {
     /// A forecast, not an assignment: runs in line or due within the hour that
     /// this host can take, soonest first.
     pub next: Vec<TimelineRun>,
+}
+
+/// The runs a host might take next: queued and nearly-due, filtered by
+/// eligibility, capped at twenty.
+///
+/// Extracted so both branches can be tested. The flow rows are read **only when
+/// the eligibility filter will consult them** — the server's own timeline passes
+/// `None`, whose filter arm is `true`, so reading them there was 2 ms per request
+/// with no effect on the response.
+fn timeline_next(
+    state: &AppState,
+    eligible: Option<&HashSet<i64>>,
+) -> Result<Vec<TimelineRun>, cereyan_store::StoreError> {
+    // A host with no eligibility filter is offered everything.
+    let (_, line, _) = state.supervisor.queue_snapshot(200);
+    let queued: HashSet<i64> = line.iter().map(|l| l.run_id).collect();
+    let until = now_micros() + 3_600_000_000;
+    // Five columns per candidate: the id, the flow name, the flow it belongs to
+    // and when it is due. Whole runs would mean `RUN_COLUMNS` -- 37 columns and a
+    // correlated task-count aggregate each -- for at most twenty rows kept out of
+    // a few hundred.
+    let mut candidates = state
+        .store
+        .timeline_run_rows(&queued.iter().copied().collect::<Vec<_>>())?;
+    candidates.extend(
+        state
+            .store
+            .scheduled_timeline_run_rows(now_micros(), until, 100)?,
+    );
+    // Read the flows only when the filter will consult them. The server's own
+    // timeline (`id == 0`) filters on `None => true` and never looks at them, so
+    // reading the whole flow table there was 2 ms of work per request with no
+    // effect on the response. Even for a worker, only the candidates' own flows
+    // can be looked up.
+    let flows: HashMap<i64, serde_json::Map<String, serde_json::Value>> = if eligible.is_some() {
+        let mut flow_ids: Vec<i64> = candidates.iter().map(|r| r.flow_id).collect();
+        flow_ids.sort_unstable();
+        flow_ids.dedup();
+        state.store.flow_options_by_id(&flow_ids)?
+    } else {
+        HashMap::new()
+    };
+    Ok(timeline_next_from(candidates, eligible, &flows))
+}
+
+/// The forecast from a set of candidates, an eligibility filter and the flows
+/// read for it.
+///
+/// Split out from the reads so the filter can be exercised with a *populated*
+/// flow map and an empty one. The point of `eligible == None` is that the map is
+/// never consulted, and that is only checkable if a test can hand this function a
+/// full map and still get the same answer.
+///
+/// The ordering and the dedup live here rather than at the call site, so that the
+/// whole forecast — sort key, duplicate removal, eligibility, cap — is one thing
+/// with one set of tests.
+fn timeline_next_from(
+    mut candidates: Vec<cereyan_store::TimelineRunRow>,
+    eligible: Option<&HashSet<i64>>,
+    flows: &HashMap<i64, serde_json::Map<String, serde_json::Value>>,
+) -> Vec<TimelineRun> {
+    candidates.sort_by_key(|r| (r.scheduled_time.unwrap_or(r.created_at), r.id));
+    candidates.dedup_by_key(|r| r.id);
+    candidates
+        .into_iter()
+        .filter(|r| match &eligible {
+            None => true,
+            Some(set) => {
+                set.contains(&r.flow_id)
+                    && flows.get(&r.flow_id).is_some_and(|options| {
+                        cereyan_core::FlowOptions::from_map(options).may_run_remotely()
+                    })
+            }
+        })
+        .take(20)
+        .map(|r| TimelineRun {
+            run_id: r.id,
+            flow: r.flow_name,
+            processor: None,
+            state: None,
+            start: r.scheduled_time.or(Some(r.created_at)),
+            end: None,
+        })
+        .collect()
 }
 
 #[utoipa::path(get, path = "/api/workers/{id}/timeline", params(("id" = i64, Path, description = "A worker id, or 0 for the server"), TimelineQuery),
@@ -439,42 +608,7 @@ pub async fn timeline(
     } else {
         Some(evaluate_stored(&state, id)?.0)
     };
-    let (_, line, _) = state.supervisor.queue_snapshot(200);
-    let queued: HashSet<i64> = line.iter().map(|l| l.run_id).collect();
-    let until = now_micros() + 3_600_000_000;
-    let mut candidates: Vec<cereyan_core::Run> = state
-        .store
-        .get_runs(&queued.iter().copied().collect::<Vec<_>>())?;
-    candidates.extend(state.store.scheduled_between(now_micros(), until, 100)?);
-    candidates.sort_by_key(|r| (r.scheduled_time.unwrap_or(r.created_at), r.id));
-    candidates.dedup_by_key(|r| r.id);
-    let flows: HashMap<i64, cereyan_core::Flow> = state
-        .store
-        .list_flows(None)?
-        .into_iter()
-        .map(|f| (f.id, f))
-        .collect();
-    let next = candidates
-        .into_iter()
-        .filter(|r| match &eligible {
-            None => true,
-            Some(set) => {
-                set.contains(&r.flow_id)
-                    && flows.get(&r.flow_id).is_some_and(|f| {
-                        cereyan_core::FlowOptions::from_map(&f.options).may_run_remotely()
-                    })
-            }
-        })
-        .take(20)
-        .map(|r| TimelineRun {
-            run_id: r.id,
-            flow: r.flow_name,
-            processor: None,
-            state: None,
-            start: r.scheduled_time.or(Some(r.created_at)),
-            end: None,
-        })
-        .collect();
+    let next = timeline_next(&state, eligible.as_ref())?;
     Ok(Json(Timeline {
         host,
         since,
@@ -582,4 +716,246 @@ pub async fn forget(
         json!({"id": id, "deleted": true}),
     );
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+pub(crate) mod timeline_tests {
+    use super::*;
+    use cereyan_core::State;
+    use cereyan_core::StateType;
+    use cereyan_store::CreateRun;
+    use cereyan_store::TimelineRunRow;
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    /// `created_at` is given explicitly so a run with no scheduled time can be
+    /// placed *between* two that have one -- which is the only way to show the
+    /// fallback interleaves by time rather than being appended.
+    fn row_at(id: i64, flow_id: i64, flow_name: &str, due: Option<i64>, created: i64) -> TimelineRunRow {
+        TimelineRunRow {
+            id,
+            flow_name: flow_name.to_string(),
+            flow_id,
+            scheduled_time: due,
+            created_at: created,
+        }
+    }
+
+    fn row(id: i64, flow_id: i64, flow_name: &str, due: Option<i64>) -> TimelineRunRow {
+        row_at(id, flow_id, flow_name, due, 100 + id)
+    }
+
+    fn options(pairs: &[(&str, &str)]) -> serde_json::Map<String, serde_json::Value> {
+        let mut m = serde_json::Map::new();
+        for (k, v) in pairs {
+            m.insert((*k).to_string(), json!(v));
+        }
+        m
+    }
+
+    /// The load-bearing claim of this change: with no eligibility filter the flow
+    /// map is **not consulted**, so a full map and an empty one give the same
+    /// forecast. Before the change the whole flow table was read to build that map
+    /// and then thrown away — 2 ms per request on 2,000 flows.
+    #[test]
+    fn the_servers_own_forecast_does_not_consult_the_flows() {
+        let candidates = vec![
+            row_at(1, 10, "local", Some(1_000), 50),
+            row_at(2, 11, "elsewhere", None, 1_500),
+            row_at(3, 12, "server-only", Some(2_000), 50),
+        ];
+        let full: HashMap<i64, serde_json::Map<String, serde_json::Value>> = [
+            (10, options(&[])),
+            (11, options(&[("runs_on", "worker")])),
+            // Would be excluded if the map were consulted.
+            (12, options(&[("runs_on", "server")])),
+        ]
+        .into_iter()
+        .collect();
+
+        let ids = |rows: Vec<TimelineRun>| -> Vec<(i64, String, Option<i64>)> {
+            rows.into_iter()
+                .map(|r| (r.run_id, r.flow, r.start))
+                .collect()
+        };
+        assert_eq!(
+            ids(timeline_next_from(candidates.clone(), None, &HashMap::new())),
+            ids(timeline_next_from(candidates.clone(), None, &full)),
+            "a populated flow map must not change the server's forecast"
+        );
+        let without_flows = ids(timeline_next_from(candidates.clone(), None, &HashMap::new()));
+        assert_eq!(
+            without_flows.iter().map(|r| r.0).collect::<Vec<_>>(),
+            vec![1, 2, 3],
+            "every candidate is offered, in due order, including the server-only flow"
+        );
+    }
+
+    /// The same candidates, seen by a worker: now the map *is* consulted, and the
+    /// flow that may not run remotely drops out. This is what makes the previous
+    /// test meaningful — the map is not inert, it is simply unused in one branch.
+    #[test]
+    fn a_workers_forecast_drops_a_flow_that_may_not_run_remotely() {
+        let candidates = vec![
+            row(1, 10, "local", Some(1_000)),
+            row(2, 12, "server-only", Some(2_000)),
+            row(3, 13, "not-eligible", Some(3_000)),
+        ];
+        let flows: HashMap<i64, serde_json::Map<String, serde_json::Value>> = [
+            (10, options(&[])),
+            (12, options(&[("runs_on", "server")])),
+            (13, options(&[])),
+        ]
+        .into_iter()
+        .collect();
+        let eligible: HashSet<i64> = [10, 12, 13].into_iter().collect();
+
+        let shown: Vec<i64> = timeline_next_from(candidates.clone(), Some(&eligible), &flows)
+            .iter()
+            .map(|r| r.run_id)
+            .collect();
+        assert_eq!(
+            shown,
+            vec![1, 3],
+            "flow 12 is server-only, and flow 13's run is not eligible"
+        );
+        // And a flow absent from the map is treated as ineligible, not as allowed.
+        let mut without_13 = flows.clone();
+        without_13.remove(&13);
+        assert_eq!(
+            timeline_next_from(candidates.clone(), Some(&eligible), &without_13)
+                .iter()
+                .map(|r| r.run_id)
+                .collect::<Vec<_>>(),
+            vec![1],
+            "an unread flow offers nothing"
+        );
+        // A worker eligible for nothing is offered nothing.
+        assert!(
+            timeline_next_from(candidates, Some(&HashSet::new()), &flows).is_empty(),
+            "no eligibility, no forecast"
+        );
+    }
+
+    #[test]
+    fn the_forecast_is_ordered_deduplicated_and_capped() {
+        let flows = HashMap::new();
+        // Due out of order, run 2 appearing twice (it is both queued and due), and
+        // run 3 with no scheduled time at all -- due, by its creation time, between
+        // the other two.
+        let candidates = vec![
+            row_at(1, 10, "c", Some(3_000), 10),
+            row_at(2, 10, "a", Some(1_000), 10),
+            row_at(3, 10, "b", None, 2_000),
+            row_at(2, 10, "a", Some(1_000), 10),
+        ];
+        let shown = timeline_next_from(candidates.clone(), None, &flows);
+        let ids: Vec<i64> = shown.iter().map(|r| r.run_id).collect();
+        assert_eq!(
+            ids,
+            vec![2, 3, 1],
+            "by due time; run 3's creation time places it between, and the duplicate is dropped"
+        );
+
+        // 25 candidates, cap 20.
+        let many: Vec<TimelineRunRow> = (0..25).map(|i| row(i, 10, "f", Some(i))).collect();
+        assert_eq!(
+            timeline_next_from(many, None, &flows).len(),
+            20,
+            "the cap is unchanged"
+        );
+    }
+
+    // ---- over a real store ------------------------------------------------
+
+    fn state_with_scheduled_runs(dir: &TempDir) -> (Arc<AppState>, i64, i64) {
+        let home = dir.path().join("home");
+        let store = Arc::new(cereyan_store::Store::open(&home).unwrap());
+        let mut upserts = Vec::new();
+        for (name, runs_on) in [("remote-ok", None), ("server-only", Some("server"))] {
+            let mut options = serde_json::Map::new();
+            if let Some(r) = runs_on {
+                options.insert("runs_on".into(), json!(r));
+            }
+            upserts.push(cereyan_store::UpsertFlow {
+                project: "p".into(),
+                name: name.into(),
+                module: "m".into(),
+                source_dir: "/tmp".into(),
+                description: None,
+                tags: "[]".into(),
+                parameter_schema: "{}".into(),
+                options: serde_json::Value::Object(options).to_string(),
+                group: None,
+                ..Default::default()
+            });
+        }
+        let mut ids = Vec::new();
+        for u in upserts {
+            ids.push(store.upsert_flow_full(u).unwrap());
+        }
+        // Due inside the hour, so `scheduled_timeline_run_rows` finds them.
+        let now = now_micros();
+        for (i, flow_id) in ids.iter().enumerate() {
+            store
+                .create_run_full(CreateRun {
+                    flow_id: *flow_id,
+                    name: format!("run-{i}"),
+                    parameters: "{}".into(),
+                    tags: "[]".into(),
+                    created_by: "test".into(),
+                    initial_state: Some(State::new(StateType::Scheduled)),
+                    scheduled_time: Some(now + 60_000_000 * (i as i64 + 1)),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        let config: crate::ServeConfig = serde_json::from_value(json!({
+            "home": home.to_string_lossy(),
+        }))
+        .unwrap();
+        let (_tx, rx) = tokio::sync::watch::channel(false);
+        (
+            Arc::new(
+                AppState::new(config, store, None, None, "127.0.0.1:0".parse().unwrap(), rx)
+                    .unwrap(),
+            ),
+            ids[0],
+            ids[1],
+        )
+    }
+
+    /// End to end over a real store: the server's own forecast offers both runs,
+    /// including the one whose flow is server-only.
+    #[test]
+    fn the_servers_own_forecast_over_a_real_store_offers_everything() {
+        let dir = TempDir::new().unwrap();
+        let (state, remote_ok, _server_only) = state_with_scheduled_runs(&dir);
+        let next = timeline_next(&state, None).unwrap();
+        let names: Vec<&str> = next.iter().map(|r| r.flow.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["remote-ok", "server-only"],
+            "with no filter, both flows are offered, soonest first"
+        );
+    }
+
+    /// The same store, seen by a worker eligible for both flows: the server-only
+    /// one drops out. If this passes while the previous one fails to see a
+    /// difference, the map is being consulted in exactly one branch.
+    #[test]
+    fn a_workers_forecast_over_a_real_store_drops_the_server_only_flow() {
+        let dir = TempDir::new().unwrap();
+        let (state, remote_ok, server_only) = state_with_scheduled_runs(&dir);
+        let eligible: HashSet<i64> = [remote_ok, server_only].into_iter().collect();
+        let next = timeline_next(&state, Some(&eligible)).unwrap();
+        let names: Vec<&str> = next.iter().map(|r| r.flow.as_str()).collect();
+        assert_eq!(names, vec!["remote-ok"], "a server-only flow is not remote work");
+
+        // The runs the server sees are also the runs the worker draws from, so the
+        // only difference between the two forecasts is the filter.
+        let server = timeline_next(&state, None).unwrap();
+        assert_eq!(server.len(), 2, "both are candidates");
+        assert_eq!(next.len(), 1, "one survives the filter");
+    }
 }

@@ -226,12 +226,15 @@ pub fn plan_backfill_with(
     };
     if body.missing_only {
         if let Some(store) = store {
-            values.retain(|v| {
-                !matches!(
-                    store.latest_run_with_param(flow.id, &body.parameter, v),
-                    Ok(Some(run)) if run.state.state_type == StateType::Completed
-                )
-            });
+            // One query for the whole set. `values` whose latest run for this
+            // flow is Completed are the ones already done; everything else —
+            // never run, or last run failed — still needs backfilling.
+            let done = store.latest_completed_param_values(
+                flow.id,
+                &body.parameter,
+                &values,
+            )?;
+            values.retain(|v| !done.contains(v));
         }
     }
     if values.is_empty() {
@@ -435,21 +438,29 @@ pub fn enqueue_all(state: &Arc<AppState>, backfill_id: i64, flow: &Flow, skip_va
     state.supervisor.ensure_capacity(state);
 }
 
+/// Status of a backfill whose row the caller already read.
+pub fn status_of_row(
+    state: &AppState,
+    backfill: Backfill,
+) -> ApiResult<BackfillStatus> {
+    let counts = state
+        .store
+        .backfill_counts(backfill.id)?
+        .into_iter()
+        .collect();
+    Ok(BackfillStatus {
+        tag: format!("backfill:{}", backfill.id),
+        backfill,
+        counts,
+    })
+}
+
 pub fn status_of(state: &AppState, backfill_id: i64) -> ApiResult<BackfillStatus> {
     let backfill = state
         .store
         .get_backfill(backfill_id)?
         .ok_or_else(|| ApiError::NotFound("backfill not found".into()))?;
-    let counts = state
-        .store
-        .backfill_counts(backfill_id)?
-        .into_iter()
-        .collect();
-    Ok(BackfillStatus {
-        tag: format!("backfill:{backfill_id}"),
-        backfill,
-        counts,
-    })
+    status_of_row(state, backfill)
 }
 
 #[utoipa::path(get, path = "/api/backfills/{id}", params(("id" = i64, Path)), responses((status = 200, body = BackfillStatus), (status = 404)))]
@@ -465,11 +476,22 @@ pub async fn list_backfills(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Vec<BackfillStatus>>> {
+    // The rows are read once and the counts for all of them in one query, rather
+    // than re-reading each row and counting it separately.
     let rows = state.store.list_backfills(Some(id))?;
-    let mut out = Vec::new();
-    for b in rows {
-        out.push(status_of(&state, b.id)?);
-    }
+    let ids: Vec<i64> = rows.iter().map(|b| b.id).collect();
+    let all_counts = state.store.backfill_counts_many(&ids)?;
+    let out: Vec<BackfillStatus> = rows
+        .into_iter()
+        .map(|b| {
+            let counts = all_counts.get(&b.id).cloned().unwrap_or_default().into_iter().collect();
+            Ok(BackfillStatus {
+                tag: format!("backfill:{}", b.id),
+                backfill: b,
+                counts,
+            })
+        })
+        .collect::<ApiResult<Vec<_>>>()?;
     Ok(Json(out))
 }
 

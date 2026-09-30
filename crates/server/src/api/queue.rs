@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::Json;
-use cereyan_core::Run;
 use serde::Serialize;
 
 use super::error::{ApiError, ApiResult};
@@ -120,7 +119,23 @@ pub struct QueueView {
     pub paused_loops: Vec<PausedLoop>,
 }
 
-fn trigger(run: &Run) -> String {
+/// Why a nearly-due run is where it is.
+///
+/// Extracted so it can be tested directly: `render` needs an `AppState`, and this
+/// classification is the view's semantics rather than its plumbing.
+fn joining_kind(run: &cereyan_store::QueueRun) -> &'static str {
+    if run.state_name == "AwaitingRetry" {
+        "retry"
+    } else if run.created_by == "continuous" {
+        "continuous"
+    } else if run.schedule_id.is_some() {
+        "schedule"
+    } else {
+        "delayed"
+    }
+}
+
+fn trigger(run: &cereyan_store::QueueRun) -> String {
     if run.backfill_id.is_some() {
         "backfill".into()
     } else if run.schedule_id.is_some() {
@@ -151,14 +166,19 @@ pub async fn get_queue(State(state): State<Arc<AppState>>) -> ApiResult<Json<Que
     let st = state.clone();
     let (runs, scheduled) = tokio::task::spawn_blocking(move || {
         Ok::<_, cereyan_store::StoreError>((
-            st.store.get_runs(&ids)?,
+            // The nine fields the view shows, not whole runs: up to 550 of these
+            // on a page polled every five seconds, and `RUN_COLUMNS` would run a
+            // correlated task-count aggregate and decode four JSON columns for
+            // each one of them.
+            st.store.queue_runs(&ids)?,
             // Runs for later wait on the timer, not in the queue, until they are nearly due.
-            st.store.scheduled_between(now, until, JOINING_LIMIT)?,
+            st.store.scheduled_queue_runs(now, until, JOINING_LIMIT)?,
         ))
     })
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))??;
-    let mut runs: HashMap<i64, Run> = runs.into_iter().map(|r| (r.id, r)).collect();
+    let mut runs: HashMap<i64, cereyan_store::QueueRun> =
+        runs.into_iter().map(|r| (r.id, r)).collect();
     let mut soon = soon;
     for run in scheduled {
         if let std::collections::hash_map::Entry::Vacant(slot) = runs.entry(run.id) {
@@ -192,15 +212,7 @@ pub async fn get_queue(State(state): State<Arc<AppState>>) -> ApiResult<Json<Que
         .into_iter()
         .filter_map(|(id, at)| {
             let run = runs.get(&id)?;
-            let kind = if run.state.name == "AwaitingRetry" {
-                "retry"
-            } else if run.created_by == "continuous" {
-                "continuous"
-            } else if run.schedule_id.is_some() {
-                "schedule"
-            } else {
-                "delayed"
-            };
+            let kind = joining_kind(run);
             Some(Joining {
                 run_id: id,
                 run_name: run.name.clone(),
@@ -284,4 +296,86 @@ pub async fn get_queue(State(state): State<Arc<AppState>>) -> ApiResult<Json<Que
         joining,
         paused_loops,
     }))
+}
+
+#[cfg(test)]
+mod queue_class_tests {
+    use super::*;
+    use cereyan_store::QueueRun;
+
+    fn q(
+        created_by: &str,
+        backfill_id: Option<i64>,
+        schedule_id: Option<i64>,
+        state_name: &str,
+    ) -> QueueRun {
+        QueueRun {
+            id: 1,
+            name: "r".into(),
+            flow_name: "etl".into(),
+            project: "p".into(),
+            state_name: state_name.into(),
+            created_by: created_by.into(),
+            backfill_id,
+            schedule_id,
+            scheduled_time: Some(1),
+        }
+    }
+
+    /// `trigger` classifies a run by what created it, in a fixed precedence. It
+    /// changed from taking a whole `Run` to taking a projected row, and this is
+    /// the invariant that the change had to preserve — every branch, plus the
+    /// fall-through that reports an unrecognised creator verbatim.
+    #[test]
+    fn a_queued_runs_trigger_is_classified_the_same_way() {
+        // A backfill wins over everything else.
+        assert_eq!(trigger(&q("schedule", Some(3), Some(9), "Scheduled")), "backfill");
+        assert_eq!(trigger(&q("api", Some(3), None, "Scheduled")), "backfill");
+        // Then a schedule.
+        assert_eq!(trigger(&q("schedule", None, Some(9), "Scheduled")), "schedule");
+        // Then the recognised creator prefixes.
+        assert_eq!(trigger(&q("rule:alert", None, None, "Scheduled")), "rule");
+        assert_eq!(trigger(&q("run:upstream", None, None, "Scheduled")), "dependency");
+        assert_eq!(trigger(&q("crash:42", None, None, "Scheduled")), "crash rerun");
+        // And anything else is reported as itself.
+        for other in ["api", "continuous", "retry:1", "", "Rule:x", "runx"] {
+            assert_eq!(
+                trigger(&q(other, None, None, "Scheduled")),
+                other,
+                "an unrecognised creator is reported verbatim"
+            );
+        }
+        // The prefixes are exact: `crash:` is a rerun, `crashed` is not.
+        assert_eq!(trigger(&q("crashed", None, None, "Scheduled")), "crashed");
+    }
+
+    /// `joining_kind` is a precedence chain of its own, and it reads the
+    /// projected `state_name` where it used to read `run.state.name`. A run with
+    /// no state name falls back to `Scheduled` in the projection, so it must not
+    /// be mistaken for a retry.
+    #[test]
+    fn a_nearly_due_runs_kind_is_classified_the_same_way() {
+        assert_eq!(joining_kind(&q("api", None, None, "AwaitingRetry")), "retry");
+        // A retry beats a continuous creator and a schedule.
+        assert_eq!(joining_kind(&q("continuous", None, Some(9), "AwaitingRetry")), "retry");
+        assert_eq!(joining_kind(&q("api", None, Some(9), "AwaitingRetry")), "retry");
+        assert_eq!(joining_kind(&q("continuous", None, None, "Scheduled")), "continuous");
+        assert_eq!(joining_kind(&q("schedule", None, Some(9), "Scheduled")), "schedule");
+        // The distinguishing case: a continuous run *does* carry a schedule id, so
+        // only the order of the two checks separates them. Without this, swapping
+        // them would pass — an earlier version of this test had no case here.
+        assert_eq!(
+            joining_kind(&q("continuous", None, Some(9), "Scheduled")),
+            "continuous",
+            "a continuous run keeps its kind even though it has a schedule"
+        );
+        assert_eq!(joining_kind(&q("api", None, None, "Scheduled")), "delayed");
+        // A backfill id does not affect the joining kind, as before.
+        assert_eq!(joining_kind(&q("api", Some(3), None, "Scheduled")), "delayed");
+        // The empty state name a run with no transition carries, projected to
+        // `Scheduled`, is not `AwaitingRetry`.
+        assert_eq!(joining_kind(&q("api", None, None, "")), "delayed");
+        // Any other state name is not the retry state either.
+        assert_eq!(joining_kind(&q("api", None, None, "Retrying")), "delayed");
+    }
 }

@@ -1,0 +1,30 @@
+-- All runs belonging to one schedule, including runs with no scheduled time.
+--
+-- `run_schedule` is a PARTIAL unique index over rows where both schedule_id and
+-- scheduled_time are set. SQLite only considers a partial index when the query's
+-- WHERE implies its predicate, so `WHERE schedule_id = ?` cannot use it, and
+-- these two queries scanned the whole run table:
+--
+--   active_runs_of_schedule  WHERE r.schedule_id = ?1 AND (...)
+--   list_runs, by schedule    WHERE r.schedule_id = ?
+--
+-- Making the queries imply the predicate -- adding `AND scheduled_time IS NOT
+-- NULL` -- would be the tempting fix and it is wrong. A crash rerun is created
+-- with scheduled_time: None (dispatch.rs), so that clause would drop every
+-- rerun from its schedule's active set, and a Scheduled rerun would stop holding
+-- its schedule's slot.
+--
+-- So the partial index stays as it is: it enforces that a *scheduled* run has a
+-- unique time within its schedule, and it still serves future_runs_of_schedule,
+-- whose `scheduled_time > ?` does imply its predicate. This new index answers the
+-- different question -- what does this schedule own, scheduled or not.
+--
+-- Measured on 50,000 runs over 200 schedules, querying one schedule of ~250 runs:
+--   active_runs_of_schedule  2.6 ms -> 0.5 ms
+--   list_runs by schedule    2.7 ms -> 0.5 ms
+-- both from SCAN r to SEARCH r USING INDEX.
+--
+-- Cost, measured rather than assumed: 6.2% on run inserts in the production
+-- batch shape, about 0.74 us per insert, 76 KB at 8,000 rows. Accepted because
+-- it replaces a scan of every run ever created with a seek to one schedule's.
+CREATE INDEX run_schedule_id ON run (schedule_id);

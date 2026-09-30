@@ -67,7 +67,7 @@ cereyan serve [-h] [--host HOST] [--port PORT] [--max-engines MAX_ENGINES] [--en
 ## `cereyan worker`
 
 ```text
-cereyan worker [-h] [--host HOST] [--name NAME] [--processors PROCESSORS] [--labels LABELS] [--shared-path PATH] [--token WORKER_TOKEN] [--token-file TOKEN_FILE] [dir]
+cereyan worker [-h] [--host HOST] [--name NAME] [--processors PROCESSORS] [--labels LABELS] [--shared-path PATH] [--token WORKER_TOKEN] [--token-file TOKEN_FILE] [--status-host STATUS_HOST] [--status-port STATUS_PORT] [dir]
 ```
 
 | Argument | Meaning |
@@ -83,6 +83,8 @@ cereyan worker [-h] [--host HOST] [--name NAME] [--processors PROCESSORS] [--lab
 | `--shared-path` `PATH` | a path this machine shares with the server; a LocalTarget elsewhere is reported (repeat for more; also [worker] shared_paths). |
 | `--token` `WORKER_TOKEN` | the server's API token (also CEREYAN_TOKEN). |
 | `--token-file` `TOKEN_FILE` | read the server's API token from this file (also [worker] token_file). |
+| `--status-host` `STATUS_HOST` | interface for the worker's read-only status page (default 127.0.0.1; also [worker] status_host). |
+| `--status-port` `STATUS_PORT` | port for the status page (default 0: one the OS picks; also [worker] status_port). |
 
 ## `cereyan check`
 

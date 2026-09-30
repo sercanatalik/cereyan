@@ -131,6 +131,172 @@ pub fn from_micros(micros: Micros) -> DateTime<Utc> {
         .unwrap_or_else(Utc::now)
 }
 
+/// A schedule with its timezone resolved and its expression parsed, ready to walk.
+///
+/// `next_after` used to do this work on every call, and a walk calls it once per
+/// fire. For a per-minute cron over a one-day window that is 1,440 cron parses and
+/// 1,440 `readlink("/etc/localtime")` syscalls to answer a question about two
+/// timestamps. None of it varies within a walk: the expression and the zone are
+/// fixed for its duration.
+///
+/// Splitting this out is a pure hoist. Every arm is the body the corresponding
+/// `next_after` arm already had, moved.
+enum Compiled {
+    Cron {
+        cron: croner::Cron,
+        tz: Tz,
+    },
+    Interval {
+        interval: f64,
+        anchor: DateTime<Utc>,
+        tz: Tz,
+    },
+    RRule {
+        set: rrule::RRuleSet,
+        tz: Tz,
+    },
+    /// A continuous schedule has no fire times of its own.
+    None,
+}
+
+impl Schedule {
+    /// Resolve the zone and parse the expression, once.
+    fn compile(&self) -> Result<Compiled, ScheduleError> {
+        Ok(match self {
+            Schedule::Cron {
+                cron,
+                timezone,
+                day_or,
+            } => Compiled::Cron {
+                cron: parse_cron(cron, *day_or)?,
+                tz: resolve_tz(timezone.as_deref())?,
+            },
+            Schedule::Interval {
+                interval,
+                anchor,
+                timezone,
+            } => Compiled::Interval {
+                interval: *interval,
+                // A missing anchor is the Unix epoch so evaluation is deterministic;
+                // schedules created at runtime pin their anchor at creation.
+                anchor: from_micros(anchor.unwrap_or(0)),
+                tz: resolve_tz(timezone.as_deref())?,
+            },
+            Schedule::RRule { rrule, timezone } => {
+                let tz = resolve_tz(timezone.as_deref())?;
+                Compiled::RRule {
+                    set: parse_rrule(rrule, tz)?,
+                    tz,
+                }
+            }
+            Schedule::Continuous { .. } => Compiled::None,
+        })
+    }
+}
+
+impl Compiled {
+    /// The first fire strictly after `after`.
+    fn next_after(&self, after: DateTime<Utc>) -> Result<Option<DateTime<Utc>>, ScheduleError> {
+        match self {
+            Compiled::Cron { cron, tz } => {
+                let local = after.with_timezone(tz);
+                match cron.find_next_occurrence(&local, false) {
+                    Ok(next) => Ok(Some(next.with_timezone(&Utc))),
+                    Err(_) => Ok(None),
+                }
+            }
+            Compiled::Interval {
+                interval,
+                anchor,
+                tz,
+            } => {
+                let secs = *interval;
+                if secs <= 0.0 || secs.is_nan() {
+                    return Err(ScheduleError::Interval);
+                }
+                if secs < 86_400.0 {
+                    // Elapsed-time intervals: fixed seconds since the anchor.
+                    let elapsed = (after - *anchor).num_microseconds().unwrap_or(0) as f64 / 1e6;
+                    let steps = if elapsed < 0.0 {
+                        0.0
+                    } else {
+                        (elapsed / secs).floor() + 1.0
+                    };
+                    let next = *anchor + Duration::microseconds((steps * secs * 1e6) as i64);
+                    Ok(Some(next))
+                } else {
+                    // Wall-clock intervals: add whole days in the local zone so
+                    // the fire keeps its local time across DST.
+                    let days = (secs / 86_400.0).round().max(1.0) as i64;
+                    let local_anchor = anchor.with_timezone(tz);
+                    let mut candidate = local_anchor;
+                    let after_local = after.with_timezone(tz);
+                    if candidate > after_local {
+                        return Ok(Some(candidate.with_timezone(&Utc)));
+                    }
+                    let elapsed_days =
+                        (after_local.date_naive() - local_anchor.date_naive()).num_days();
+                    let first = (elapsed_days / days).max(0);
+                    for steps in (first..).take(4) {
+                        let date = local_anchor.date_naive() + Duration::days(steps * days);
+                        let naive = date.and_time(local_anchor.time());
+                        candidate = local_to_instant(*tz, naive).unwrap_or(candidate);
+                        if candidate > after_local {
+                            return Ok(Some(candidate.with_timezone(&Utc)));
+                        }
+                    }
+                    Ok(Some(candidate.with_timezone(&Utc)))
+                }
+            }
+            Compiled::RRule { set, tz } => {
+                let after_tz: DateTime<rrule::Tz> = after.with_timezone(&rrule::Tz::Tz(*tz));
+                // `after` is an inclusive filter, so asking for one occurrence
+                // answers with the cursor's own when the cursor sits on one --
+                // which is precisely what the scheduler asks once it has made a
+                // run. Look past it. A set carrying RDATEs can stack several
+                // occurrences on one instant, so one spare is not enough.
+                // `RRuleSet::after` takes `self` by value, which is why this arm
+                // re-parsed the rule text on every step. Cloning the parsed set
+                // per step is not free either, but it is a copy of a parsed
+                // structure rather than a fresh parse of the string, and the
+                // caller needed the set kept for the next step.
+                let result = set.clone().after(after_tz).all(8);
+                Ok(result
+                    .dates
+                    .into_iter()
+                    .find(|d| d.with_timezone(&Utc) > after)
+                    .map(|d| d.with_timezone(&Utc)))
+            }
+            Compiled::None => Ok(None),
+        }
+    }
+
+    /// The last fire at or before `after`, or `None` if it falls before `floor`.
+    ///
+    /// The mirror of [`Compiled::next_after`], and the direction a question about
+    /// the *most recent* fires actually needs: walking forward from a window's
+    /// start visits every fire in the window to reach its last two.
+    ///
+    /// Only the cron arm walks back. An interval is arithmetic in either
+    /// direction and an rrule set is queried, so neither is asked -- and a silent
+    /// `None` for them would read as "this schedule never fires", so the arms are
+    /// written out rather than collapsed.
+    fn previous_from(&self, after: DateTime<Utc>, floor: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        match self {
+            Compiled::Cron { cron, tz } => {
+                let local = after.with_timezone(tz);
+                let found = cron
+                    .find_previous_occurrence(&local, true)
+                    .ok()?
+                    .with_timezone(&Utc);
+                (found >= floor).then_some(found)
+            }
+            Compiled::Interval { .. } | Compiled::RRule { .. } | Compiled::None => None,
+        }
+    }
+}
+
+
 impl Schedule {
     /// Pin an interval schedule's anchor to `now` when it has none.
     pub fn with_anchor_if_missing(mut self, now: Micros) -> Schedule {
@@ -197,86 +363,13 @@ impl Schedule {
     }
 
     /// The first fire strictly after `after`.
+    ///
+    /// Compiles the schedule, then delegates. A caller that *walks* — `next_fires`,
+    /// `fires_between` — must not come through here: it would recompile per step,
+    /// which is the waste this split exists to remove. Those call `compile` once
+    /// and loop on the result.
     pub fn next_after(&self, after: DateTime<Utc>) -> Result<Option<DateTime<Utc>>, ScheduleError> {
-        match self {
-            Schedule::Cron {
-                cron,
-                timezone,
-                day_or,
-            } => {
-                let tz = resolve_tz(timezone.as_deref())?;
-                let parsed = parse_cron(cron, *day_or)?;
-                let local = after.with_timezone(&tz);
-                match parsed.find_next_occurrence(&local, false) {
-                    Ok(next) => Ok(Some(next.with_timezone(&Utc))),
-                    Err(_) => Ok(None),
-                }
-            }
-            Schedule::Interval {
-                interval,
-                anchor,
-                timezone,
-            } => {
-                let tz = resolve_tz(timezone.as_deref())?;
-                // A missing anchor is the Unix epoch so evaluation is deterministic;
-                // schedules created at runtime pin their anchor at creation.
-                let anchor = from_micros(anchor.unwrap_or(0));
-                if *interval <= 0.0 || interval.is_nan() {
-                    return Err(ScheduleError::Interval);
-                }
-                let secs = *interval;
-                if secs < 86_400.0 {
-                    // Elapsed-time intervals: fixed seconds since the anchor.
-                    let elapsed = (after - anchor).num_microseconds().unwrap_or(0) as f64 / 1e6;
-                    let steps = if elapsed < 0.0 {
-                        0.0
-                    } else {
-                        (elapsed / secs).floor() + 1.0
-                    };
-                    let next = anchor + Duration::microseconds((steps * secs * 1e6) as i64);
-                    Ok(Some(next))
-                } else {
-                    // Wall-clock intervals: add whole days in the local zone so
-                    // the fire keeps its local time across DST.
-                    let days = (secs / 86_400.0).round().max(1.0) as i64;
-                    let local_anchor = anchor.with_timezone(&tz);
-                    let mut candidate = local_anchor;
-                    let after_local = after.with_timezone(&tz);
-                    if candidate > after_local {
-                        return Ok(Some(candidate.with_timezone(&Utc)));
-                    }
-                    let elapsed_days =
-                        (after_local.date_naive() - local_anchor.date_naive()).num_days();
-                    let first = (elapsed_days / days).max(0);
-                    for steps in (first..).take(4) {
-                        let date = local_anchor.date_naive() + Duration::days(steps * days);
-                        let naive = date.and_time(local_anchor.time());
-                        candidate = local_to_instant(tz, naive).unwrap_or(candidate);
-                        if candidate > after_local {
-                            return Ok(Some(candidate.with_timezone(&Utc)));
-                        }
-                    }
-                    Ok(Some(candidate.with_timezone(&Utc)))
-                }
-            }
-            Schedule::RRule { rrule, timezone } => {
-                let tz = resolve_tz(timezone.as_deref())?;
-                let set = parse_rrule(rrule, tz)?;
-                let after_tz: DateTime<rrule::Tz> = after.with_timezone(&rrule::Tz::Tz(tz));
-                // `after` is an inclusive filter, so asking for one occurrence
-                // answers with the cursor's own when the cursor sits on one —
-                // which is precisely what the scheduler asks once it has made a
-                // run. Look past it. A set carrying RDATEs can stack several
-                // occurrences on one instant, so one spare is not enough.
-                let result = set.after(after_tz).all(8);
-                Ok(result
-                    .dates
-                    .into_iter()
-                    .find(|d| d.with_timezone(&Utc) > after)
-                    .map(|d| d.with_timezone(&Utc)))
-            }
-            Schedule::Continuous { .. } => Ok(None),
-        }
+        self.compile()?.next_after(after)
     }
 
     /// The next `count` fires strictly after `after`, in microseconds UTC, after
@@ -287,8 +380,10 @@ impl Schedule {
         let mut cursor = DateTime::<Utc>::from_timestamp_micros(after).ok_or_else(|| {
             ScheduleError::Invalid(format!("reference time {after} is out of range"))
         })?;
+        // Compiled once, not once per fire. See `Compiled`.
+        let compiled = self.compile()?;
         while out.len() < count {
-            match self.next_after(cursor)? {
+            match compiled.next_after(cursor)? {
                 Some(next) => {
                     out.push(next.timestamp_micros());
                     cursor = next;
@@ -308,14 +403,55 @@ impl Schedule {
     ) -> Result<Vec<DateTime<Utc>>, ScheduleError> {
         let mut out = Vec::new();
         let mut cursor = start;
+        // Compiled once, not once per fire. See `Compiled`.
+        let compiled = self.compile()?;
         while out.len() < max {
-            match self.next_after(cursor)? {
+            match compiled.next_after(cursor)? {
                 Some(next) if next <= end => {
                     out.push(next);
                     cursor = next;
                 }
                 _ => break,
             }
+        }
+        Ok(out)
+    }
+
+    /// The last `count` fires at or before `end` and at or after `floor`,
+    /// most recent first.
+    ///
+    /// The mirror of [`Schedule::fires_between`], for the question "when did this
+    /// last run, and when before that". Walking forward from `floor` to answer it
+    /// visits every fire in the window; walking back from `end` visits `count`.
+    ///
+    /// The bounds match `fires_between`'s: it returns fires in `(start, end]`, and
+    /// this returns fires in `[floor, end]`. The lower end differs because the two
+    /// walks cannot both be exclusive -- a backwards walk that skipped a fire
+    /// exactly at `floor` would drop the oldest one it was asked for.
+    ///
+    /// Returns fewer than `count` when the schedule has not fired that often
+    /// inside the window, and none for a schedule with no backwards walk.
+    pub fn fires_before(
+        &self,
+        end: DateTime<Utc>,
+        floor: DateTime<Utc>,
+        count: usize,
+    ) -> Result<Vec<DateTime<Utc>>, ScheduleError> {
+        let compiled = self.compile()?;
+        let mut out = Vec::with_capacity(count.min(64));
+        let mut cursor = end;
+        while out.len() < count {
+            let Some(previous) = compiled.previous_from(cursor, floor) else {
+                break;
+            };
+            if out.last().is_some_and(|last: &DateTime<Utc>| *last == previous) {
+                // A schedule that fires twice in the same instant would otherwise
+                // loop here forever. Not reachable for a cron, which has a
+                // one-second resolution, but the walk must terminate.
+                break;
+            }
+            out.push(previous);
+            cursor = previous - Duration::microseconds(1);
         }
         Ok(out)
     }
@@ -727,5 +863,188 @@ mod tests {
             serde_json::json!({"kind": "continuous", "delay": 1800.0})
         );
         assert!(Schedule::Continuous { delay: -1.0 }.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod walk_cost {
+    use super::*;
+    use std::time::Instant;
+
+    fn utc(s: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    }
+
+    /// The backwards walk must agree with the forwards one, or the health check is
+    /// showing a different deadline than it used to.
+    ///
+    /// Compared over expressions that fire at very different rates, in zones with
+    /// and without daylight saving, because the two walks go through croner's
+    /// opposite search directions and a disagreement would hide in the easy cases.
+    #[test]
+    fn walking_back_agrees_with_walking_forward() {
+        let end = utc("2026-09-30T12:34:56Z");
+        let cases: [(&str, Option<&str>); 8] = [
+            ("* * * * *", None),
+            ("*/7 * * * *", None),
+            ("0 * * * *", None),
+            ("0 3 * * *", Some("Europe/Istanbul")),
+            ("0 0 1 1 *", None),
+            ("30 2 * * SUN", Some("America/New_York")),
+            ("0 0 * * *", Some("Australia/Lord_Howe")),
+            ("15 14 1 * *", None),
+        ];
+        for (expr, tz) in cases {
+            let s = Schedule::Cron {
+                cron: expr.to_string(),
+                timezone: tz.map(|t| t.to_string()),
+                day_or: true,
+            };
+            // A window wide enough to hold a useful number of fires for even the
+            // rarest expression, and one narrow enough to hold almost none -- both
+            // ends matter, since a bug at either boundary loses a fire.
+            // The forwards walk is capped, so over a wide window on a dense
+            // expression it returns the *first* `CAP` fires and its "last four" are
+            // months old. Comparing against that would be comparing against
+            // nonsense -- which is how the first version of this test failed,
+            // reporting the correct backwards answer as wrong. Where it truncates,
+            // the forwards walk cannot be an oracle at all, so only the invariants
+            // are checked there.
+            const CAP: usize = 100_000;
+            for days in [1i64, 3, 40, 400, 900] {
+                let floor = end - Duration::days(days);
+                let backwards = s.fires_before(end, floor, 4).unwrap();
+                let forwards = s.fires_between(floor, end, CAP).unwrap();
+
+                // Invariants that hold either way.
+                assert!(
+                    backwards.len() <= 4,
+                    "{expr} over {days} days: asked for 4, got {}",
+                    backwards.len()
+                );
+                for f in &backwards {
+                    assert!(
+                        *f > floor && *f <= end,
+                        "{expr} over {days} days: {f} is outside ({floor}, {end}]"
+                    );
+                }
+                for w in backwards.windows(2) {
+                    assert!(w[0] > w[1], "{expr}: most recent first, got {w:?}");
+                }
+
+                if forwards.len() >= CAP {
+                    assert!(
+                        forwards.iter().all(|f| *f <= end),
+                        "the capped forwards walk should still only return fires in the window"
+                    );
+                    continue;
+                }
+                let mut expected: Vec<DateTime<Utc>> =
+                    forwards.iter().rev().copied().take(4).collect();
+                // The backwards walk includes a fire exactly at `floor`; the
+                // forwards one excludes a fire exactly at its `start`. Align them.
+                expected.retain(|f| *f > floor);
+
+                assert_eq!(
+                    backwards, expected,
+                    "{expr} in {tz:?} over {days} days: backwards {backwards:?} vs \
+                     forwards' last {} {expected:?}",
+                    forwards.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_backwards_walk_stops_at_the_floor() {
+        let s = Schedule::Cron {
+            cron: "0 0 1 1 *".into(),
+            timezone: None,
+            day_or: true,
+        };
+        let end = utc("2026-09-30T00:00:00Z");
+        // One fire per year, so a 400-day window holds at most one.
+        let fires = s.fires_before(end, end - Duration::days(400), 4).unwrap();
+        assert!(fires.len() <= 1, "a yearly cron cannot fire twice in 400 days: {fires:?}");
+        for f in &fires {
+            assert!(*f >= end - Duration::days(400), "nothing before the floor");
+        }
+        // And a window with no fire at all yields nothing.
+        let none = s.fires_before(end, end - Duration::days(10), 4).unwrap();
+        assert!(none.is_empty(), "no fire in the last ten days: {none:?}");
+    }
+
+    #[test]
+    fn a_continuous_schedule_has_no_fires_in_either_direction() {
+        let s = Schedule::Continuous { delay: 30.0 };
+        let end = utc("2026-09-30T00:00:00Z");
+        assert!(s.fires_before(end, end - Duration::days(800), 2).unwrap().is_empty());
+        assert!(s.fires_between(end - Duration::days(800), end, 10).unwrap().is_empty());
+    }
+
+    /// How much of a walk is the walk, and how much is re-resolving the zone and
+    /// re-parsing the expression on every step?
+    ///
+    /// Opt-in: `CEREYAN_BENCH_REPORT=1 cargo test --release -p cereyan-core --lib walk_cost -- --nocapture`
+    #[test]
+    fn report_fires_between_cost() {
+        if std::env::var("CEREYAN_BENCH_REPORT").is_err() {
+            return;
+        }
+        let s = Schedule::Cron {
+            cron: "* * * * *".into(),
+            timezone: None,
+            day_or: true,
+        };
+        let end = from_micros(1_757_000_000_000_000i64);
+        let start = end - Duration::days(1);
+
+        let t = Instant::now();
+        let fires = s.fires_between(start, end, 100_000).unwrap();
+        let compiled_walk = t.elapsed().as_secs_f64() * 1e3;
+        let n = fires.len().max(1) as i64;
+
+        // What the same walk cost when each step recompiled: `next_after` through
+        // a schedule it is called on, which is the shape the health check used.
+        let per_step = |f: &dyn Fn() -> f64| {
+            let t = Instant::now();
+            for _ in 0..n {
+                std::hint::black_box(f());
+            }
+            t.elapsed().as_secs_f64() * 1e3
+        };
+        let parse = per_step(&|| {
+            std::hint::black_box(parse_cron("* * * * *", true).unwrap());
+            0.0
+        });
+        let tz = per_step(&|| {
+            std::hint::black_box(resolve_tz(None).unwrap());
+            0.0
+        });
+
+        // And the two answers the health check actually wanted.
+        let t = Instant::now();
+        let back = s
+            .fires_before(end, end - Duration::days(800), 2)
+            .unwrap();
+        let backwards = t.elapsed().as_secs_f64() * 1e3;
+
+        println!(
+            "per-minute cron, one-day window, {} fires:\n  \
+             fires_between, compiled once   {compiled_walk:8.3} ms  ({:.2} us/fire)\n  \
+             of which parse_cron x{n}         {parse:8.3} ms  ({:.2} us each)\n  \
+             of which resolve_tz x{n}         {tz:8.3} ms  ({:.2} us each)\n  \
+             fires_before(.., 2) -- the two   {backwards:8.3} ms  ({back:?})",
+            fires.len(),
+            compiled_walk * 1000.0 / n as f64,
+            parse * 1000.0 / n as f64,
+            tz * 1000.0 / n as f64,
+        );
+        println!(
+            "  the old deadline_window walked these {} fires and re-parsed on each \
+             step: about {:.1} ms",
+            fires.len(),
+            parse + tz + compiled_walk
+        );
     }
 }

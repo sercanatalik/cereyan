@@ -9,7 +9,7 @@ use cereyan_core::schedule::{from_micros, to_micros, CatchupPolicy, Schedule};
 use cereyan_core::{
     now_micros, EventName, Flow, FlowOptions, Run, ScheduleDecl, ScheduleRow, State, StateType,
 };
-use cereyan_store::{CreateRun, ScheduleWrite};
+use cereyan_store::{CreateRun, ScheduleRunMark, ScheduleWrite};
 use chrono::Utc;
 use serde_json::json;
 use tokio::sync::watch;
@@ -92,19 +92,24 @@ pub fn resume_all(state: &Arc<AppState>) -> Option<(usize, usize)> {
         materialize(state, row.id);
         schedules += 1;
     }
+    // One read of the marks for the runs the index says are waiting, rather than
+    // a whole `Run` per run to ask whether it was skipped and when it is due.
+    let waiting: Vec<i64> = state
+        .index
+        .active_runs()
+        .into_iter()
+        .filter(|r| r.state.state_type == StateType::Scheduled && r.engine_pid.is_none())
+        .map(|r| r.id)
+        .collect();
+    let marks = state.store.run_marks(waiting.iter().copied());
     let mut held = 0;
-    for run in state.index.active_runs() {
-        if run.state.state_type != StateType::Scheduled || run.engine_pid.is_some() {
+    for id in waiting {
+        let Some(mark) = marks.get(&id) else { continue };
+        if is_mark_skip(&mark.details) {
             continue;
         }
-        let Some(stored) = state.store.get_run(run.id).ok().flatten() else {
-            continue;
-        };
-        if is_marked(&stored) {
-            continue;
-        }
-        if stored.scheduled_time.is_some_and(|t| t <= now) {
-            state.timer.push(now, TimerEvent::Due(run.id));
+        if mark.scheduled_time.is_some_and(|t| t <= now) {
+            state.timer.push(now, TimerEvent::Due(id));
             held += 1;
         }
     }
@@ -123,13 +128,22 @@ pub fn held_runs(state: &Arc<AppState>) -> usize {
         return 0;
     }
     let now = now_micros();
-    state
+    let waiting: Vec<i64> = state
         .index
         .active_runs()
         .into_iter()
         .filter(|r| r.state.state_type == StateType::Scheduled && r.engine_pid.is_none())
-        .filter_map(|r| state.store.get_run(r.id).ok().flatten())
-        .filter(|r| !is_marked(r) && r.scheduled_time.is_some_and(|t| t <= now))
+        .map(|r| r.id)
+        .collect();
+    if waiting.is_empty() {
+        return 0;
+    }
+    // One batched read of the marks, rather than a whole `Run` per waiting run.
+    state
+        .store
+        .run_marks(waiting.iter().copied())
+        .values()
+        .filter(|m| !is_mark_skip(&m.details) && m.scheduled_time.is_some_and(|t| t <= now))
         .count()
 }
 
@@ -159,8 +173,19 @@ pub const SKIP_MARK: &str = "skip";
 const SKIP_BY_PERSON: &str = "user";
 
 /// Whether a waiting run belongs to a fire a person skipped.
+///
+/// Takes a whole `Run`, which most callers have. The scheduler's fire path holds
+/// only a [`cereyan_store::ScheduleRunMark`] and asks the same question, so the
+/// rule itself lives in [`is_mark_skip`] and this is a one-line delegate. One
+/// definition of "skipped by a person", two shapes to apply it to — the second is
+/// not a second rule.
 pub fn is_marked(run: &Run) -> bool {
-    run.state.details.get(SKIP_MARK).and_then(|v| v.as_str()) == Some(SKIP_BY_PERSON)
+    is_mark_skip(&run.state.details)
+}
+
+/// The skip mark rule, over just the state details it reads. See [`is_marked`].
+fn is_mark_skip(details: &serde_json::Map<String, serde_json::Value>) -> bool {
+    details.get(SKIP_MARK).and_then(|v| v.as_str()) == Some(SKIP_BY_PERSON)
 }
 
 #[derive(Default)]
@@ -202,6 +227,20 @@ impl Scheduler {
         v
     }
 
+    /// The schedules of several flows at once, keyed by flow id and ordered by
+    /// id within each flow — the same contents and order as calling `for_flow`
+    /// for each, from one pass over the table instead of one pass per flow.
+    pub fn for_flows(
+        &self,
+        flow_ids: &[i64],
+    ) -> HashMap<i64, Vec<ScheduleRow>> {
+        if flow_ids.is_empty() {
+            return HashMap::new();
+        }
+        let schedules = self.schedules.read().unwrap_or_else(|e| e.into_inner());
+        group_by_flow(schedules.values(), flow_ids)
+    }
+
     fn put(&self, row: ScheduleRow) {
         self.schedules
             .write()
@@ -216,6 +255,26 @@ impl Scheduler {
             .remove(&id);
     }
 }
+
+/// Group schedules by flow, keeping only `flow_ids` and ordering each group by
+/// id — the same contents and order as `Scheduler::for_flow` per flow.
+fn group_by_flow<'a, I>(schedules: I, flow_ids: &[i64]) -> HashMap<i64, Vec<ScheduleRow>>
+where
+    I: Iterator<Item = &'a ScheduleRow>,
+{
+    let wanted: HashSet<i64> = flow_ids.iter().copied().collect();
+    let mut by_flow: HashMap<i64, Vec<ScheduleRow>> = HashMap::new();
+    for s in schedules {
+        if wanted.contains(&s.flow_id) {
+            by_flow.entry(s.flow_id).or_default().push(s.clone());
+        }
+    }
+    for rows in by_flow.values_mut() {
+        rows.sort_by_key(|s| s.id);
+    }
+    by_flow
+}
+
 
 /// Bring code-declared schedules of a flow in line with its declarations.
 /// Register a flow's code-declared schedules, returning the ids of those whose
@@ -578,9 +637,11 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
         let _ = state.store.delete_skips_before(row.id, now);
     }
     let skips: HashSet<i64> = all_skips.into_iter().filter(|t| *t > now).collect();
+    // Marks, not runs: a schedule may hold up to LOOKAHEAD_MAX of these and the
+    // loop reads only the id, the scheduled time and the skip mark from each.
     let mut existing = state
         .store
-        .future_runs_of_schedule(row.id, now)
+        .future_run_marks(row.id, now)
         .unwrap_or_default();
     let mut cursor = existing
         .iter()
@@ -591,7 +652,7 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
     let horizon = Utc::now() + chrono::Duration::seconds(LOOKAHEAD_MIN_SECS);
     // Skipped fires do not count: the look-ahead keeps LOOKAHEAD_RUNS runs that
     // will start and extends past skips, bounded by LOOKAHEAD_MAX in all.
-    let mut starting = existing.iter().filter(|r| !is_marked(r)).count();
+    let mut starting = existing.iter().filter(|r| !is_mark_skip(&r.details)).count();
     let mut created = 0;
     while existing.len() < LOOKAHEAD_MAX && (starting < LOOKAHEAD_RUNS || cursor < horizon) {
         let next = match row.schedule.next_after(cursor) {
@@ -610,7 +671,15 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
             if !skip {
                 starting += 1;
             }
-            existing.push(run);
+            // A newly created run is converted rather than read back: it was
+            // just written, so its mark is already in hand. This clones one
+            // small JSON map per *created* run, against a full run projection
+            // per *existing* run before.
+            existing.push(ScheduleRunMark {
+                id: run.id,
+                scheduled_time: run.scheduled_time,
+                details: run.state.details.clone(),
+            });
             created += 1;
         } else {
             break;
@@ -620,18 +689,19 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
         }
     }
     let flow_deadline = FlowOptions::from_map(&flow.options).start_deadline;
-    for run in &existing {
-        if let Some(fire) = run.scheduled_time {
+    for mark in &existing {
+        if let Some(fire) = mark.scheduled_time {
+            let marked = is_mark_skip(&mark.details);
             let due = fire + jitter_offset(row.id, fire, row.jitter);
-            arm_run(state, run.id, due, is_marked(run));
+            arm_run(state, mark.id, due, marked);
             let deadline = row
                 .start_deadline
                 .or_else(|| flow_deadline.map(|d| d.round() as i64));
             if let Some(seconds) = deadline.filter(|d| *d > 0) {
-                if !is_marked(run) {
+                if !marked {
                     state
                         .timer
-                        .push(due + seconds * 1_000_000, TimerEvent::StartDeadline(run.id));
+                        .push(due + seconds * 1_000_000, TimerEvent::StartDeadline(mark.id));
                 }
             }
         }
@@ -643,7 +713,7 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
     }
     let next_fire = existing
         .iter()
-        .filter(|r| !is_marked(r))
+        .filter(|r| !is_mark_skip(&r.details))
         .filter_map(|r| r.scheduled_time)
         .min();
     let mut updated = row.clone();
@@ -760,10 +830,16 @@ pub fn join_now(state: &Arc<AppState>, schedule_id: i64) -> Result<i64, String> 
 /// A deterministic offset in `[0, jitter)` seconds, as microseconds, from the
 /// schedule id and the fire time (FNV-1a), so a run keeps its due time across
 /// restarts. Zero jitter is zero offset.
+///
+/// Uses rejection sampling to eliminate modulo bias: hash values in the range
+/// `[2^64 - (2^64 % m), 2^64)` are rejected and rehashed.
 pub fn jitter_offset(schedule_id: i64, fire: i64, jitter_secs: i64) -> i64 {
     if jitter_secs <= 0 {
         return 0;
     }
+    let modulus = jitter_secs as u64 * 1_000_000;
+    // Rejection threshold: values >= this are rejected to avoid modulo bias.
+    let threshold = u64::MAX - (u64::MAX % modulus);
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in schedule_id
         .to_le_bytes()
@@ -773,7 +849,13 @@ pub fn jitter_offset(schedule_id: i64, fire: i64, jitter_secs: i64) -> i64 {
         hash ^= byte as u64;
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
-    (hash % (jitter_secs as u64 * 1_000_000)) as i64
+    // Rejection sampling: rehash if the value falls in the biased range.
+    while hash >= threshold {
+        hash ^= hash >> 33;
+        hash = hash.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        hash ^= hash >> 33;
+    }
+    (hash % modulus) as i64
 }
 
 /// Arm a Scheduled run's due, late-check and pre-warm timers.
@@ -1247,5 +1329,218 @@ mod jitter_tests {
             .map(|i| jitter_offset(1, i * 300_000_000, 60) / 1_000_000)
             .collect();
         assert!(spread.len() > 10, "offsets should spread across the window");
+    }
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+
+    /// A schedule row with only the fields `group_by_flow` reads set
+    /// meaningfully; the rest take their defaults, since grouping looks at
+    /// nothing but `id` and `flow_id`.
+    fn row(id: i64, flow_id: i64) -> ScheduleRow {
+        ScheduleRow {
+            id,
+            external_id: cereyan_core::new_id(),
+            flow_id,
+            schedule: cereyan_core::schedule::Schedule::Cron {
+                cron: "0 * * * *".into(),
+                timezone: None,
+                day_or: true,
+            },
+            catchup: CatchupPolicy::default(),
+            catchup_max: 0,
+            catchup_window: None,
+            jitter: 0,
+            start_deadline: None,
+            active: true,
+            paused_reason: None,
+            paused_until: None,
+            source: "code".into(),
+            code_key: None,
+            persist: false,
+            created_at: 0,
+            updated_at: 0,
+            next_fire: None,
+            skipped: 0,
+            loop_state: None,
+        }
+    }
+
+    /// The per-flow read, kept as the oracle.
+    fn for_flow_the_old_way(all: &[ScheduleRow], flow_id: i64) -> Vec<ScheduleRow> {
+        let mut v: Vec<ScheduleRow> = all
+            .iter()
+            .filter(|s| s.flow_id == flow_id)
+            .cloned()
+            .collect();
+        v.sort_by_key(|s| s.id);
+        v
+    }
+
+    #[test]
+    fn grouping_matches_the_per_flow_read() {
+        // Deliberately out of id order, and interleaved across flows.
+        let all = vec![
+            row(7, 2),
+            row(3, 1),
+            row(9, 3),
+            row(1, 1),
+            row(5, 2),
+            row(2, 1),
+        ];
+        let got = group_by_flow(all.iter(), &[1, 2, 3]);
+        for f in [1, 2, 3] {
+            assert_eq!(
+                got.get(&f).cloned().unwrap_or_default(),
+                for_flow_the_old_way(&all, f),
+                "grouping differs for flow {f}"
+            );
+        }
+    }
+
+    #[test]
+    fn each_group_is_ordered_by_id() {
+        let all = vec![row(9, 1), row(2, 1), row(5, 1)];
+        let got = group_by_flow(all.iter(), &[1]);
+        let ids: Vec<i64> = got[&1].iter().map(|s| s.id).collect();
+        assert_eq!(ids, vec![2, 5, 9], "groups must be ordered by id");
+    }
+
+    #[test]
+    fn a_flow_with_no_schedules_has_no_group() {
+        let all = vec![row(1, 1)];
+        let got = group_by_flow(all.iter(), &[1, 2]);
+        assert!(got.contains_key(&1));
+        assert!(!got.contains_key(&2), "an empty flow should have no group");
+    }
+
+    #[test]
+    fn only_the_wanted_flows_are_grouped() {
+        let all = vec![row(1, 1), row(2, 2), row(3, 3)];
+        let got = group_by_flow(all.iter(), &[2]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[&2][0].id, 2, "another flow's schedule leaked in");
+    }
+
+    #[test]
+    fn no_flows_means_nothing_grouped() {
+        let all = vec![row(1, 1)];
+        assert!(group_by_flow(all.iter(), &[]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod skip_mark_tests {
+    use super::*;
+
+    /// The rule that decides whether a fire was skipped by a person. It is now
+    /// the single definition behind both `is_marked` and the fire path's
+    /// `is_mark_skip`, and it had no test before this — which is why the wrong
+    /// key passed the suite when injected.
+    #[test]
+    fn only_a_user_skip_marks_a_run() {
+        let mut d = serde_json::Map::new();
+        assert!(!is_mark_skip(&d), "empty details are not a mark");
+
+        d.insert(SKIP_MARK.into(), serde_json::Value::String("user".into()));
+        assert!(is_mark_skip(&d), "skip=user is the mark");
+
+        for other in ["system", "scheduler", "User", "user ", ""] {
+            let mut d = serde_json::Map::new();
+            d.insert(SKIP_MARK.into(), serde_json::Value::String(other.into()));
+            assert!(
+                !is_mark_skip(&d),
+                "skip={other:?} is not a person's skip"
+            );
+        }
+
+        // A non-string value is not a mark either.
+        let mut d = serde_json::Map::new();
+        d.insert(SKIP_MARK.into(), serde_json::Value::Bool(true));
+        assert!(!is_mark_skip(&d), "skip=true is not a mark");
+        d.insert(SKIP_MARK.into(), serde_json::Value::Null);
+        assert!(!is_mark_skip(&d), "skip=null is not a mark");
+
+        // The key must be the mark key, not the value.
+        let mut d = serde_json::Map::new();
+        d.insert("user".into(), serde_json::Value::String("skip".into()));
+        assert!(
+            !is_mark_skip(&d),
+            "the key is the mark key; a `user` key must not mark a run"
+        );
+    }
+
+    /// `is_marked` and `is_mark_skip` are one rule over two shapes. If they ever
+    /// drift, a run read whole and the same run read as a mark would be treated
+    /// differently — which is exactly the bug the fire path would then have.
+    ///
+    /// The runs come from a real store rather than a hand-built struct: `Run` has
+    /// thirty-nine required fields and no `Default`, and a literal here would be a
+    /// second thing to keep in step when the struct changes.
+    #[test]
+    fn the_two_shapes_of_the_rule_agree() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let store = cereyan_store::Store::open(dir.path()).unwrap();
+        let flow = store
+            .upsert_flow(
+                "p",
+                "etl",
+                "m",
+                &dir.path().to_string_lossy(),
+                None,
+                "[]",
+                "{}",
+            )
+            .unwrap();
+
+        // One run per shape of the rule, so both are exercised against real
+        // decoded state details rather than a literal.
+        for (i, details) in [
+            "{\"skip\":\"user\"}",
+            "{\"skip\":\"system\"}",
+            "{}",
+            "{\"other\":1}",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let (id, _) = store
+                .create_run_full(cereyan_store::CreateRun {
+                    flow_id: flow,
+                    name: format!("r{i}"),
+                    parameters: "{}".into(),
+                    tags: "[]".into(),
+                    created_by: "test".into(),
+                    initial_state: Some(State::from_parts(
+                        StateType::Scheduled,
+                        Some("skipped"),
+                        None,
+                        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+                            details,
+                        )
+                        .unwrap(),
+                    )),
+                    ..Default::default()
+                })
+                .unwrap();
+            let run = store.get_run(id).unwrap().unwrap();
+            let from_mark = is_mark_skip(&run.state.details);
+            assert_eq!(
+                is_marked(&run),
+                from_mark,
+                "the two shapes disagree for {:?}",
+                run.state.details
+            );
+            // And against the store's own mark, which the fire path reads.
+            let marks = store.run_marks([id]);
+            assert_eq!(
+                marks[&id].details,
+                run.state.details,
+                "the mark's details differ from the run's"
+            );
+            assert_eq!(is_mark_skip(&marks[&id].details), from_mark);
+        }
     }
 }

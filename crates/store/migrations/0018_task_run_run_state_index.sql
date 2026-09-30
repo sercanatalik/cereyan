@@ -1,0 +1,16 @@
+-- Covering index for a run's `task_counts`, which every run read computes:
+--
+--   SELECT COALESCE(state_type,'Pending'), COUNT(*)
+--   FROM task_run WHERE run_id = ? GROUP BY state_type
+--
+-- The only index already leading with `run_id` is the UNIQUE(run_id,
+-- dynamic_key) autoindex, which does not carry `state_type`. So the aggregate
+-- had to visit the table once per task run of the run, which the planner showed
+-- as `SEARCH task_run USING INDEX` rather than `USING COVERING INDEX`. Carrying
+-- the state type in the index removes that visit, and the planner now reports a
+-- covering search. Reads on 40k task runs measured ~40% faster for a 500-row
+-- page; the cost is ~20 bytes per task run and no measurable insert cost.
+--
+-- `run_id` leads because the aggregate filters on it. The existing unique index
+-- is unaffected and still enforces UNIQUE(run_id, dynamic_key).
+CREATE INDEX task_run_run_state ON task_run (run_id, state_type);

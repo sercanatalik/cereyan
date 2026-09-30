@@ -5,6 +5,7 @@ import { ApiError, api, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
 import { Button } from "@/components/ui/button";
 import { CardHead } from "@/components/ui/card";
+import { HostCard, metaText as meta, Pill, STATE_COLOUR, workerStatus } from "@/components/worker-status";
 import { useLiveEvent } from "@/lib/live";
 import { cn, formatDuration, formatStamp, relativeTime } from "@/lib/utils";
 
@@ -14,124 +15,6 @@ type QueueView = components["schemas"]["QueueView"];
 
 /** The server as a row of the list: id 0, as the timeline route takes it. */
 const SERVER_ID = 0;
-
-const STATUS: Record<string, { label: string; pill: string; dot: string }> = {
-  server: { label: "Server", pill: "bg-muted text-foreground", dot: "bg-foreground" },
-  online: {
-    label: "Online",
-    pill: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-200",
-    dot: "bg-emerald-500",
-  },
-  draining: {
-    label: "Draining",
-    pill: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
-    dot: "bg-amber-500",
-  },
-  offline: {
-    label: "Offline",
-    pill: "bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200",
-    dot: "bg-red-500",
-  },
-  drift: {
-    label: "Older code",
-    pill: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
-    dot: "bg-amber-500",
-  },
-};
-
-/** How a worker's status reads: offline and draining first, then code drift. */
-export function workerStatus(w: Pick<WorkerView, "state" | "drift">): keyof typeof STATUS {
-  if (w.state === "offline") return "offline";
-  if (w.state === "draining") return "draining";
-  if (w.drift.length > 0) return "drift";
-  return "online";
-}
-
-function Pill({ status }: { status: keyof typeof STATUS }) {
-  const s = STATUS[status];
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium",
-        s.pill,
-      )}
-      data-testid="worker-status"
-    >
-      <span className={cn("size-1.5 rounded-full", s.dot)} />
-      {s.label}
-    </span>
-  );
-}
-
-const meta = (w: WorkerView, key: string): string | null => {
-  const v = (w.meta as Record<string, unknown>)[key];
-  if (v == null || v === "") return null;
-  if (Array.isArray(v)) return v.length ? v.join(", ") : null;
-  return String(v);
-};
-
-const bytes = (n: unknown): string | null =>
-  typeof n === "number" && n > 0 ? `${Math.round(n / 1024 ** 3)} GB` : null;
-
-/** The host card: what the worker reported about its machine. */
-function HostCard({ w }: { w: WorkerView }) {
-  const memTotal = bytes((w.meta as Record<string, unknown>).memory_total);
-  const memFree = bytes((w.meta as Record<string, unknown>).memory_available);
-  const rows: [string, string | null][] = [
-    ["Hostname", meta(w, "hostname")],
-    ["Address", meta(w, "address")],
-    ["Platform", meta(w, "platform")],
-    ["Architecture", [meta(w, "arch"), meta(w, "gpus")].filter(Boolean).join(" · ") || null],
-    ["CPUs", String(w.cpus)],
-    ["Memory", memTotal ? (memFree ? `${memTotal} (${memFree} free)` : memTotal) : null],
-    ["Python", meta(w, "python")],
-    ["cereyan", w.version],
-    ["Process", meta(w, "pid") ? `pid ${meta(w, "pid")}` : null],
-    ["Checkout", meta(w, "checkout")],
-    ["Git", meta(w, "git")],
-    [
-      "Labels",
-      Object.entries(w.labels ?? {})
-        .map(([k, v]) => `${k}=${v}`)
-        .join(", ") || null,
-    ],
-    ["Shared paths", w.shared_paths?.length ? w.shared_paths.join(", ") : "none declared"],
-    ["Connection", meta(w, "connection")],
-    ["Auth", meta(w, "auth")],
-  ];
-  return (
-    <section className="rounded-lg border bg-card" aria-label="Host">
-      <CardHead title="Host" aside="reported at registration and on every heartbeat" />
-      <dl className="grid grid-cols-3">
-        {rows.map(([k, v]) => (
-          <div key={k} className="min-w-0 border-t px-4 py-2.5 [&:nth-child(-n+3)]:border-t-0">
-            <dt className="text-xs text-muted-foreground">{k}</dt>
-            <dd
-              className={cn(
-                "truncate font-mono text-[13px]",
-                (k === "Shared paths" && v === "none declared") || (k === "Git" && v?.includes("dirty"))
-                  ? "text-amber-700 dark:text-amber-400"
-                  : "",
-              )}
-              title={v ?? ""}
-            >
-              {v ?? "-"}
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </section>
-  );
-}
-
-const STATE_COLOUR: Record<string, string> = {
-  Completed: "bg-emerald-500",
-  Failed: "bg-red-500",
-  Crashed: "bg-orange-500",
-  Cancelled: "bg-zinc-400",
-  Running: "bg-sky-500",
-  Pending: "bg-sky-300",
-};
 
 /** Lanes per processor over the window, and the forecast after now. */
 function Schedule({ t, processors }: { t: Timeline; processors: number }) {
@@ -436,7 +319,8 @@ export function WorkersTab({ queue }: { queue: QueueView | undefined }) {
               {`cereyan worker ./pipelines \\\n  --host ${origin} \\\n  --token-file /etc/cereyan/token \\\n  --processors 2`}
             </pre>
             <span className="text-xs text-muted-foreground">
-              The worker connects out and opens no port. It appears here on its first heartbeat.
+              The worker connects out and opens one port, a read-only status page on 127.0.0.1 (see
+              --status-host and --status-port). It appears here on its first heartbeat.
             </span>
           </div>
         </section>
@@ -455,3 +339,5 @@ export function WorkersTab({ queue }: { queue: QueueView | undefined }) {
     </div>
   );
 }
+
+export { workerStatus };

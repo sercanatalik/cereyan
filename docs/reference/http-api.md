@@ -1396,6 +1396,20 @@ A flow that runs after the skipped one, directly or further down its chain.
 | `resource` | null or [`Resource`](#resource) | no |  |
 | `run_id` | integer or null (int64) | no |  |
 
+### `EngineStats`
+
+One of the worker's engines and the run it is executing.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `engine_id` | string | yes |  |
+| `flow` | string or null | no |  |
+| `module` | string | yes |  |
+| `run_id` | integer or null (int64) | no |  |
+| `since_secs` | integer (int64) | yes | Seconds in the current run, or since the engine started when it has none. |
+| `slot` | integer | yes | The processor slot, from 1. |
+| `status` | string | yes | `starting`, `idle`, `running` or `draining`. |
+
 ### `EngineView`
 
 One engine as the Queue page shows it.
@@ -1551,6 +1565,20 @@ Flow-level options declared in Python and stored as JSON on the flow row.
 | `timeout_seconds` | number or null (double) | no |  |
 | `unique` | null or [`UniqueSpec`](#uniquespec) | no |  |
 
+### `FlowStats`
+
+Runs of one flow that started on a worker since it started.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cancelled` | integer (int64) | yes |  |
+| `completed` | integer (int64) | yes |  |
+| `crashed` | integer (int64) | yes |  |
+| `failed` | integer (int64) | yes |  |
+| `flow` | string | yes |  |
+| `last_completed_at` | integer or null (int64) | no | When the latest completed run here ended (microseconds). |
+| `running` | integer (int64) | yes |  |
+
 ### `FlowSummary`
 
 Type: any.
@@ -1597,6 +1625,17 @@ Type: any.
 | `commands` | array of object | yes |  |
 | `drift` | array of string | yes |  |
 | `state` | string | yes |  |
+| `stats` | null or [`HeartbeatStats`](#heartbeatstats) | no |  |
+
+### `HeartbeatStats`
+
+Counts the server keeps for a worker: what its status page shows.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `by_flow` | [`FlowStats`](#flowstats)[] | yes |  |
+| `engines` | [`EngineStats`](#enginestats)[] | yes |  |
+| `since` | integer (int64) | yes | The worker's start time (microseconds): runs that started before it are not counted. |
 
 ### `HostTotals`
 

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
-use cereyan_core::{now_micros, Run, State, StateType, TaskRun};
+use cereyan_core::{now_micros, Event, Run, State, StateType, TaskRun};
 use cereyan_store::{Store, StoreError};
 use serde_json::json;
 use tokio::sync::watch;
@@ -60,6 +60,144 @@ pub struct AppState {
     pub pause: RwLock<Option<crate::scheduler::Pause>>,
     /// Fingerprints of the server's own modules, recomputed when a file changes.
     pub fingerprints: crate::fingerprint::Fingerprints,
+    /// Backfills whose completion event has been emitted. Reset on server start.
+    pub backfill_emitted: std::sync::Mutex<std::collections::HashSet<i64>>,
+    /// Cached dependency graph: maps upstream flow IDs to the flows depending on
+    /// them. Invalidated on flow create/update/delete and on project deletion,
+    /// rebuilt lazily and exactly once on next access.
+    pub dep_graph: DepGraphCache,
+    /// Runs whose overdue event has been reported. Reset on server start.
+    pub overdue_reported: std::sync::Mutex<std::collections::HashSet<i64>>,
+}
+
+/// The dependency graph: upstream flow id → the flows that depend on it.
+///
+/// Shared behind an `Arc` because it is read on every run admission and is
+/// immutable once built. The inner `Arc<[i64]>` means a caller wanting one
+/// upstream's dependents clones a slice handle, not a `Vec`.
+/// The flows that declare a dependency on one upstream, and the highest priority
+/// any of them declares.
+///
+/// The ids are behind an `Arc` because they are read far more often than they
+/// change, and the priority is precomputed because `effective_priority` only ever
+/// wants the maximum. Both come from the same `FlowOptions`, parsed once while the
+/// graph is built — which is why the read path needs no store read for either.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Dependents {
+    pub ids: Box<[i64]>,
+    pub max_priority: i64,
+}
+
+/// While the graph is being built: a mutable accumulator that becomes a
+/// [`Dependents`]. Split so the public type can hold a boxed slice, which is
+/// cheaper to share and cannot be appended to by a reader.
+#[derive(Default)]
+struct DependentsBeingBuilt {
+    ids: Vec<i64>,
+    max_priority: i64,
+}
+
+impl DependentsBeingBuilt {
+    /// Record a dependent, keeping the highest priority seen.
+    fn push(&mut self, id: i64, priority: i64) {
+        self.ids.push(id);
+        self.max_priority = self.max_priority.max(priority);
+    }
+
+    fn finish(self) -> Dependents {
+        Dependents {
+            ids: self.ids.into_boxed_slice(),
+            max_priority: self.max_priority,
+        }
+    }
+}
+
+/// Upstream flow id → the flows that declared `after=` it.
+pub type DepGraph = std::sync::Arc<std::collections::HashMap<i64, std::sync::Arc<Dependents>>>;
+
+/// Holds the dependency graph and rebuilds it at most once after an
+/// invalidation, however many threads ask at the same time.
+#[derive(Default)]
+pub struct DepGraphCache {
+    slot: RwLock<Option<DepGraph>>,
+    /// Held while a rebuild runs, so a burst of lookups after an invalidation
+    /// costs one build rather than one per caller. Separate from `slot` so
+    /// readers are never blocked by an in-flight build.
+    building: std::sync::Mutex<()>,
+}
+
+impl DepGraphCache {
+    /// The graph, calling `build` only if it is missing or was invalidated.
+    ///
+    /// Rebuilds are serialised by `building`, then re-checked: the first thread
+    /// through builds and publishes, and the rest find the warm cache and return
+    /// without building. Without the re-check a burst after an invalidation
+    /// would run one store read per caller.
+    pub fn get_or_build(&self, build: impl FnOnce() -> DepGraph) -> DepGraph {
+        if let Some(cached) = self.slot.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            return cached.clone();
+        }
+        let _guard = self.building.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = self.slot.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            return cached.clone();
+        }
+        let built = build();
+        *self.slot.write().unwrap_or_else(|e| e.into_inner()) = Some(built.clone());
+        built
+    }
+
+    /// Forget the graph; the next lookup rebuilds it.
+    pub fn invalidate(&self) {
+        *self.slot.write().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// Is a graph currently held?
+    pub fn is_populated(&self) -> bool {
+        self.slot.read().unwrap_or_else(|e| e.into_inner()).is_some()
+    }
+}
+
+/// Build the dependency graph from the flows: upstream flow id → dependents.
+///
+/// Every upstream a flow declares counts, not just the first, so this agrees
+/// with `dispatch::trigger_dependents_at`. An upstream that does not exist has
+/// no id, so the edge is skipped.
+pub fn dep_graph_from_flows(
+    flows: &[cereyan_core::Flow],
+) -> std::collections::HashMap<i64, Dependents> {
+    let mut graph: std::collections::HashMap<i64, DependentsBeingBuilt> =
+        std::collections::HashMap::new();
+    // (project, name) → id, from the same slice, so resolving an upstream is a
+    // map lookup rather than a query.
+    let by_key: std::collections::HashMap<(&str, &str), i64> = flows
+        .iter()
+        .map(|f| ((f.project.as_str(), f.name.as_str()), f.id))
+        .collect();
+    for flow in flows {
+        let opts = cereyan_core::FlowOptions::from_map(&flow.options);
+        let Some(after) = opts.after else { continue };
+        // `opts.priority` is already parsed here, on the same object that yielded
+        // `after`. Recording it costs nothing and saves every admission a store
+        // read per dependent — `FlowOptions.priority` defaults to 0, and a
+        // `max` against 0 cannot raise a priority above zero, so an undeclared
+        // priority behaves exactly as the old read path gave it.
+        let priority = opts.priority;
+        let mut seen: Vec<String> = Vec::new();
+        for upstream in after.upstreams() {
+            // A hand-written spec can repeat a name; list the dependent once.
+            if seen.iter().any(|s| *s == upstream) {
+                continue;
+            }
+            seen.push(upstream.clone());
+            if let Some(id) = by_key.get(&(flow.project.as_str(), upstream.as_str())) {
+                graph.entry(*id).or_default().push(flow.id, priority);
+            }
+        }
+    }
+    graph
+        .into_iter()
+        .map(|(id, d)| (id, d.finish()))
+        .collect()
 }
 
 /// Outcome of a transition request: the run after the change, or the current
@@ -135,6 +273,9 @@ impl AppState {
             resetting: AtomicBool::new(false),
             pause: RwLock::new(None),
             fingerprints: crate::fingerprint::Fingerprints::default(),
+            backfill_emitted: std::sync::Mutex::new(std::collections::HashSet::new()),
+            dep_graph: DepGraphCache::default(),
+            overdue_reported: std::sync::Mutex::new(std::collections::HashSet::new()),
         };
         Ok(state)
     }
@@ -184,6 +325,28 @@ impl AppState {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .is_some()
+    }
+
+    /// Invalidate the dependency graph cache. Called on flow create/update/delete.
+    pub fn invalidate_dep_graph(&self) {
+        self.dep_graph.invalidate();
+    }
+
+    /// The dependency graph: upstream flow id → the flows that depend on it.
+    ///
+    /// Returned behind an `Arc` because this is read on every run admission, and
+    /// the graph is immutable once built. An invalidated graph is rebuilt once
+    /// even if several threads ask at the same time.
+    pub fn dep_graph(&self) -> DepGraph {
+        self.dep_graph.get_or_build(|| {
+            let flows = self.store.list_flows(None).unwrap_or_default();
+            std::sync::Arc::new(
+                dep_graph_from_flows(&flows)
+                    .into_iter()
+                    .map(|(k, v)| (k, std::sync::Arc::new(v)))
+                    .collect(),
+            )
+        })
     }
 
     pub fn exposed(&self) -> bool {
@@ -246,7 +409,7 @@ impl AppState {
         self.index.load_counts(
             self.store.run_counts()?,
             self.store.task_run_counts()?,
-            flows.iter().map(|f| (f.id, f.project.clone())).collect(),
+            flows.iter().map(|f| (f.id, std::sync::Arc::<str>::from(f.project.as_str()))).collect(),
         );
         // A server that comes up inside a global pause must not dispatch runs
         // whose time passed while it was down; resuming re-arms them.
@@ -330,8 +493,8 @@ impl AppState {
         } else {
             Some(previous.state.clone())
         };
-        match self.store.transition_run(run_id, state, force) {
-            Ok(_) => {}
+        let new_state = match self.store.transition_run(run_id, state, force) {
+            Ok(s) => s,
             Err(StoreError::RejectedWith { reason, current }) => {
                 return Ok(TransitionResult::Rejected { reason, current });
             }
@@ -342,11 +505,12 @@ impl AppState {
                 });
             }
             Err(e) => return Err(e),
-        }
-        let run = self
-            .store
-            .get_run(run_id)?
-            .ok_or(StoreError::NotFound("run"))?;
+        };
+        // The write returns the state as persisted, so the row is not read
+        // back: `previous` already carries every other field, and `get_run`
+        // would run a per-row task-count aggregate for nothing.
+        let mut run = previous.clone();
+        run.state = new_state;
         let was_active = self.index.get(run_id).is_some();
         if !was_active && !previous.state.is_terminal() {
             // Runs created before the index knew them (rare): insert first.
@@ -427,7 +591,10 @@ impl AppState {
         let mut related = Vec::new();
         let mut payload = payload;
         if let Some(rid) = run_id {
-            if let Ok(Some(run)) = self.store.get_run(rid) {
+            // Only the six values the event is built from. A whole `Run` would
+            // mean a correlated task_counts aggregate and four decoded JSON
+            // columns per event, on the path every recorded event takes.
+            if let Ok(Some(run)) = self.store.run_event_context(rid) {
                 resource = cereyan_core::Resource {
                     kind: "run".into(),
                     id: run.external_id.to_string(),
@@ -449,7 +616,7 @@ impl AppState {
                     obj.entry("project")
                         .or_insert(serde_json::Value::String(run.project.clone()));
                     obj.entry("state")
-                        .or_insert(serde_json::Value::String(run.state.name.clone()));
+                        .or_insert(serde_json::Value::String(run.state_name.clone()));
                 }
             }
         } else if let Some(fid) = flow_id {
@@ -476,22 +643,36 @@ impl AppState {
     }
 
     pub fn record_event_full(&self, event: cereyan_store::NewEvent) -> Result<i64, StoreError> {
-        let (id, _) = self.store.append_event(event)?;
-        self.after_event(id);
+        let (event, _) = self.store.append_event(event)?;
+        let id = event.id;
+        self.after_event(event);
         Ok(id)
     }
 
     /// Publish a stored event and evaluate rules against it.
-    pub fn after_event(&self, id: i64) {
+    ///
+    /// Takes the event as written rather than an id: the caller already has
+    /// every column, so reading the row back would be a wasted round trip on
+    /// the hottest path in the server.
+    pub fn after_event(&self, event: Event) {
+        self.stream.publish(
+            "event.created",
+            event.id.to_string(),
+            serde_json::to_value(&event).unwrap_or_default(),
+        );
+        if let Some(me) = self.self_ref() {
+            crate::rules::on_event(&me, event);
+        }
+    }
+
+    /// Publish and evaluate an event known only by id.
+    ///
+    /// Only for events appended inside a writer transaction, which report ids
+    /// rather than rows. Every other caller has the event in hand and should
+    /// call `after_event`.
+    pub fn after_event_id(&self, id: i64) {
         if let Ok(Some(event)) = self.store.get_event(id) {
-            self.stream.publish(
-                "event.created",
-                id.to_string(),
-                serde_json::to_value(&event).unwrap_or_default(),
-            );
-            if let Some(me) = self.self_ref() {
-                crate::rules::on_event(&me, event);
-            }
+            self.after_event(event);
         }
     }
 
@@ -554,6 +735,414 @@ impl AppState {
         let _ = std::fs::remove_file(self.discovery_path());
         if let Some(path) = &self.config.socket {
             let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+#[cfg(test)]
+mod dep_graph_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// The dependent ids the graph records for one upstream. The graph's value
+    /// also carries the highest priority among them; `priority` below reads that,
+    /// and the tests that assert ids use this so neither half is checked by
+    /// accident in the other's place.
+    fn ids(
+        g: &std::collections::HashMap<i64, std::sync::Arc<Dependents>>,
+        upstream: i64,
+    ) -> Vec<i64> {
+        g.get(&upstream).map(|d| d.ids.to_vec()).unwrap_or_default()
+    }
+
+    /// The highest dependent priority the graph records for one upstream.
+    fn priority(
+        g: &std::collections::HashMap<i64, std::sync::Arc<Dependents>>,
+        upstream: i64,
+    ) -> i64 {
+        g.get(&upstream).map(|d| d.max_priority).unwrap_or(0)
+    }
+
+    /// The same two, over the plain map `dep_graph_from_flows` returns, before
+    /// `AppState::dep_graph` puts each value behind an `Arc`.
+    fn ids_of(g: &std::collections::HashMap<i64, Dependents>, upstream: i64) -> Vec<i64> {
+        g.get(&upstream).map(|d| d.ids.to_vec()).unwrap_or_default()
+    }
+
+    fn priority_of(g: &std::collections::HashMap<i64, Dependents>, upstream: i64) -> i64 {
+        g.get(&upstream).map(|d| d.max_priority).unwrap_or(0)
+    }
+
+    fn flow(id: i64, project: &str, name: &str, options: serde_json::Value) -> cereyan_core::Flow {
+        let options = match options {
+            serde_json::Value::Object(m) => m,
+            _ => unreachable!("options is built as an object"),
+        };
+        cereyan_core::Flow {
+            id,
+            external_id: cereyan_core::new_id(),
+            project: project.into(),
+            name: name.into(),
+            module: "m".into(),
+            source_dir: "/tmp".into(),
+            description: None,
+            tags: vec![],
+            group: None,
+            parameter_schema: serde_json::json!({}),
+            options,
+            error: None,
+            created_at: 0,
+            last_seen_at: 0,
+            live: false,
+        }
+    }
+
+    fn after(name: &str) -> serde_json::Value {
+        serde_json::json!({ "after": { "flow": name } })
+    }
+
+    fn fan_in(names: &[&str]) -> serde_json::Value {
+        serde_json::json!({ "after": { "flow": names[0], "flows": names } })
+    }
+
+    fn no_after() -> serde_json::Value {
+        serde_json::json!({})
+    }
+
+    #[test]
+    fn a_single_upstream_dependency_is_recorded() {
+        let flows = vec![
+            flow(1, "p", "etl", no_after()),
+            flow(2, "p", "daily", after("etl")),
+        ];
+        let g = dep_graph_from_flows(&flows);
+        assert_eq!(ids_of(&g, 1), vec![2]);
+        assert!(!g.contains_key(&2), "a dependent is not an upstream here");
+    }
+
+    /// The bug this fixes: only `after.flow` was used, so a fan-in declaration
+    /// registered under its first upstream alone.
+    #[test]
+    fn a_fan_in_dependency_is_recorded_under_every_upstream() {
+        let flows = vec![
+            flow(1, "p", "a", no_after()),
+            flow(2, "p", "b", no_after()),
+            flow(3, "p", "join", fan_in(&["a", "b"])),
+        ];
+        let g = dep_graph_from_flows(&flows);
+        assert_eq!(ids_of(&g, 1), vec![3], "first upstream missing the edge");
+        assert_eq!(ids_of(&g, 2), vec![3], "second upstream missing the edge");
+    }
+
+    #[test]
+    fn a_repeated_upstream_is_listed_once() {
+        // `flow` and `flows` both naming the same flow must not double the edge.
+        let flows = vec![
+            flow(1, "p", "a", no_after()),
+            flow(2, "p", "join", fan_in(&["a", "a"])),
+        ];
+        let g = dep_graph_from_flows(&flows);
+        assert_eq!(ids_of(&g, 1), vec![2], "dependent listed twice");
+    }
+
+    #[test]
+    fn dependencies_stay_within_a_project() {
+        let flows = vec![
+            flow(1, "a", "etl", no_after()),
+            flow(2, "b", "etl", no_after()),
+            flow(3, "b", "daily", after("etl")),
+        ];
+        let g = dep_graph_from_flows(&flows);
+        assert!(!g.contains_key(&1), "crossed into another project");
+        assert_eq!(ids_of(&g, 2), vec![3]);
+    }
+
+    #[test]
+    fn a_dependency_on_a_missing_upstream_is_skipped() {
+        let flows = vec![flow(1, "p", "daily", after("ghost"))];
+        assert!(dep_graph_from_flows(&flows).is_empty());
+    }
+
+    /// The invariant the dependent-triggering path now rests on.
+    ///
+    /// It used to read every flow in the upstream's project and keep those whose
+    /// `after` declared this flow; it now asks the graph. This asserts the two
+    /// produce the same ids in the same order, over a set covering every case the
+    /// two could plausibly disagree on: several dependents, none, a fan-in over
+    /// two upstreams, a repeated name, the bare-name shorthand, an unknown
+    /// upstream, a name in another project, and a flow carrying an error.
+    #[test]
+    fn the_graph_agrees_with_scanning_the_project() {
+        /// The old way: read the project's flows and filter by `depends_on`.
+        fn by_scan(flows: &[cereyan_core::Flow], upstream: &cereyan_core::Flow) -> Vec<i64> {
+            flows
+                .iter()
+                .filter(|f| f.project == upstream.project)
+                .filter(|f| {
+                    let opts = cereyan_core::FlowOptions::from_map(&f.options);
+                    opts.after
+                        .as_ref()
+                        .is_some_and(|a| a.depends_on(&upstream.name))
+                })
+                .map(|f| f.id)
+                .collect()
+        }
+
+        let mut errored = flow(9, "p", "broken", after("etl"));
+        errored.error = Some("boom".into());
+        let flows = vec![
+            flow(1, "p", "etl", no_after()),
+            flow(2, "p", "first", after("etl")),
+            flow(3, "p", "second", after("etl")),
+            flow(4, "p", "join", fan_in(&["etl", "first"])),
+            flow(5, "p", "repeated", fan_in(&["etl", "etl"])),
+            flow(6, "p", "ghosted", after("nobody")),
+            flow(7, "q", "elsewhere", after("etl")),
+            flow(8, "p", "lonely", no_after()),
+            errored,
+        ];
+        let g = dep_graph_from_flows(&flows);
+
+        // Every upstream, including ones with no dependents.
+        for upstream in &flows {
+            let scanned = by_scan(&flows, upstream);
+            let from_graph = ids_of(&g, upstream.id);
+            assert_eq!(
+                from_graph, scanned,
+                "the graph and the scan disagree for flow {} ({})",
+                upstream.id, upstream.name
+            );
+        }
+
+        // And the interesting case is actually populated, so the comparison above
+        // is not passing because both sides are empty.
+        assert_eq!(
+            ids_of(&g, 1),
+            vec![2, 3, 4, 5, 9],
+            "everything that declared `after=etl`, in flow order"
+        );
+        assert_eq!(
+            ids_of(&g, 2),
+            vec![4],
+            "the fan-in flow also depends on `first`, which is flow 2"
+        );
+        assert!(
+            !g.contains_key(&4),
+            "nothing declares `after=join`, so it has no dependents"
+        );
+        assert!(!g.contains_key(&6), "a ghosted dependency has no upstream");
+        assert!(!g.contains_key(&7), "a cross-project name does not cross");
+    }
+
+    #[test]
+    fn several_dependents_are_all_listed() {
+        let flows = vec![
+            flow(1, "p", "etl", no_after()),
+            flow(2, "p", "a", after("etl")),
+            flow(3, "p", "b", after("etl")),
+        ];
+        let g = dep_graph_from_flows(&flows);
+        assert_eq!(ids_of(&g, 1), vec![2, 3]);
+    }
+
+    // ---- the recorded priority ---------------------------------------------
+
+    /// A dependent's declared priority, carried through the `after` fixture.
+    fn after_at(name: &str, priority: i64) -> serde_json::Value {
+        serde_json::json!({ "after": { "flow": name }, "priority": priority })
+    }
+
+    #[test]
+    fn the_recorded_priority_is_the_highest_among_the_dependents() {
+        let flows = vec![
+            flow(1, "p", "etl", no_after()),
+            flow(2, "p", "low", after_at("etl", 1)),
+            flow(3, "p", "high", after_at("etl", 9)),
+            flow(4, "p", "middle", after_at("etl", 4)),
+        ];
+        let g = dep_graph_from_flows(&flows);
+        assert_eq!(ids_of(&g, 1), vec![2, 3, 4], "the ids, in flow order");
+        assert_eq!(
+            priority_of(&g, 1),
+            9,
+            "the greatest declared priority among them"
+        );
+    }
+
+    #[test]
+    fn a_negative_priority_does_not_lose_to_an_undeclared_one() {
+        // `FlowOptions.priority` is `#[serde(default)]`, so an undeclared priority
+        // is 0 -- which the old `priority.max(opts.priority)` treated as 0 too.
+        let flows = vec![
+            flow(1, "p", "etl", no_after()),
+            flow(2, "p", "negative", after_at("etl", -5)),
+        ];
+        let g = dep_graph_from_flows(&flows);
+        assert_eq!(priority_of(&g, 1), 0, "an undeclared priority counts as zero");
+    }
+
+    #[test]
+    fn the_priority_is_accumulated_across_a_flows_fan_in() {
+        // One dependent naming two upstreams contributes its priority to both.
+        let mut join = flow(3, "p", "join", no_after());
+        join.options = serde_json::json!({
+            "after": { "flow": "a", "flows": ["a", "b"] },
+            "priority": 6,
+        })
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+        let flows = vec![flow(1, "p", "a", no_after()), flow(2, "p", "b", no_after()), join];
+        let g = dep_graph_from_flows(&flows);
+        assert_eq!(ids_of(&g, 1), vec![3], "`join` is recorded under `a`");
+        assert_eq!(ids_of(&g, 2), vec![3], "and under `b`");
+        assert_eq!(
+            priority_of(&g, 1),
+            6,
+            "the same dependent contributes its own priority to each upstream"
+        );
+        assert_eq!(priority_of(&g, 2), 6);
+
+        // And a second dependent of `a` at a lower priority does not lower it.
+        let mut low = flow(4, "p", "low", no_after());
+        low.options = serde_json::json!({ "after": { "flow": "a" }, "priority": 2 })
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        let mut all = flows;
+        all.push(low);
+        let g = dep_graph_from_flows(&all);
+        assert_eq!(ids_of(&g, 1), vec![3, 4]);
+        assert_eq!(priority_of(&g, 1), 6, "the maximum, not the last one seen");
+        assert_eq!(priority_of(&g, 2), 6, "`b` has only the one dependent");
+    }
+
+    #[test]
+    fn the_ids_and_the_priority_come_from_the_same_dependents() {
+        // The two halves must describe the same set, or the graph would report a
+        // priority declared by a flow it does not list.
+        let flows = vec![
+            flow(1, "p", "etl", no_after()),
+            flow(2, "p", "a", after_at("etl", 5)),
+            flow(3, "p", "b", no_after()),
+            flow(4, "p", "c", after_at("etl", 2)),
+        ];
+        let g = dep_graph_from_flows(&flows);
+        let listed = ids_of(&g, 1);
+        assert_eq!(listed, vec![2, 4], "`b` declares no dependency");
+        assert_eq!(priority_of(&g, 1), 5, "and so cannot have set the maximum");
+    }
+
+    #[test]
+    fn a_flow_with_no_dependents_records_no_priority() {
+        let flows = vec![
+            flow(1, "p", "etl", no_after()),
+            flow(2, "p", "daily", after_at("etl", 9)),
+        ];
+        let g = dep_graph_from_flows(&flows);
+        assert!(!g.contains_key(&2), "`daily` has no dependents");
+        assert_eq!(priority_of(&g, 2), 0, "so it has no priority either");
+    }
+
+    #[test]
+    fn the_cache_hands_back_the_recorded_priority() {
+        let cache = DepGraphCache::default();
+        let g = cache.get_or_build(|| {
+            sample(1)
+        });
+        assert_eq!(ids(&g, 1), vec![1]);
+        assert_eq!(priority(&g, 1), 7, "the priority survives the cache");
+    }
+
+    #[test]
+    fn an_empty_flow_list_yields_an_empty_graph() {
+        assert!(dep_graph_from_flows(&[]).is_empty());
+    }
+
+    // ---- the cache itself -------------------------------------------------
+
+    fn sample(id: i64) -> DepGraph {
+        std::sync::Arc::new(
+            [(
+                id,
+                std::sync::Arc::new(Dependents {
+                    ids: vec![id].into_boxed_slice(),
+                    max_priority: 7,
+                }),
+            )]
+            .into_iter()
+            .collect(),
+        )
+    }
+
+    #[test]
+    fn a_warm_cache_never_rebuilds() {
+        let cache = DepGraphCache::default();
+        let builds = AtomicUsize::new(0);
+        for _ in 0..5 {
+            let g = cache.get_or_build(|| {
+                builds.fetch_add(1, Ordering::SeqCst);
+                sample(1)
+            });
+            assert_eq!(ids(&g, 1), vec![1]);
+        }
+        assert_eq!(builds.load(Ordering::SeqCst), 1, "rebuilt on a warm cache");
+    }
+
+    #[test]
+    fn invalidating_forces_one_rebuild() {
+        let cache = DepGraphCache::default();
+        let builds = AtomicUsize::new(0);
+        let mut build = || {
+            builds.fetch_add(1, Ordering::SeqCst);
+            sample(1)
+        };
+        cache.get_or_build(&mut build);
+        assert!(cache.is_populated());
+        cache.invalidate();
+        assert!(!cache.is_populated(), "invalidate left the graph in place");
+        cache.get_or_build(&mut build);
+        cache.get_or_build(&mut build);
+        assert_eq!(builds.load(Ordering::SeqCst), 2, "expected exactly one rebuild");
+    }
+
+    #[test]
+    fn the_graph_is_shared_not_copied() {
+        let cache = DepGraphCache::default();
+        let a = cache.get_or_build(|| sample(7));
+        let b = cache.get_or_build(|| sample(7));
+        assert!(
+            std::sync::Arc::ptr_eq(&a, &b),
+            "a warm lookup returned a different Arc, so the graph was copied"
+        );
+    }
+
+    /// The double check means one build wins, not one per racing thread.
+    #[test]
+    fn concurrent_lookups_after_invalidation_build_once() {
+        let cache = std::sync::Arc::new(DepGraphCache::default());
+        let builds = std::sync::Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let cache = std::sync::Arc::clone(&cache);
+            let builds = std::sync::Arc::clone(&builds);
+            handles.push(std::thread::spawn(move || {
+                cache.get_or_build(|| {
+                    builds.fetch_add(1, Ordering::SeqCst);
+                    // Widen the window a racing thread could slip through.
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    sample(1)
+                })
+            }));
+        }
+        let graphs: Vec<DepGraph> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(
+            builds.load(Ordering::SeqCst),
+            1,
+            "more than one thread built the graph"
+        );
+        for g in &graphs {
+            assert!(std::sync::Arc::ptr_eq(g, &graphs[0]), "threads disagreed");
         }
     }
 }

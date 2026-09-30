@@ -677,6 +677,65 @@ mod tests {
         }
     }
 
+    /// A rule matching `events`, with a distinct id so several can be indexed.
+    fn rule_for(id: i64, events: &[&str]) -> RuleRow {
+        let mut r = rule(RuleSpec {
+            when: RuleMatch {
+                events: events.iter().map(|e| e.to_string()).collect(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        r.id = id;
+        r
+    }
+
+    /// `candidates` must return ids in ascending order and without duplicates:
+    /// the server's event path binary-searches this list to decide whether a rule
+    /// applies, so losing the sort would silently stop rules from being tracked.
+    #[test]
+    fn candidates_are_sorted_and_deduplicated() {
+        let rules = vec![
+            rule_for(9, &["run.failed"]),
+            rule_for(3, &["run.*"]),
+            rule_for(7, &["run.*"]),
+            rule_for(1, &["task_run.completed"]),
+            rule_for(5, &["run.*"]),
+        ];
+        let idx = RuleIndex::build(&rules);
+
+        let c = idx.candidates("run.failed");
+        assert_eq!(c, vec![3, 5, 7, 9], "exact and prefix matches, ascending");
+        let mut sorted = c.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(c, sorted, "candidates must be sorted and deduplicated");
+
+        // A name nothing matches yields an empty list, which is also sorted.
+        assert!(idx.candidates("nothing.here").is_empty());
+    }
+
+    /// The server filters candidates with `binary_search`; this pins that the
+    /// search agrees with a linear scan on the same list.
+    #[test]
+    fn binary_search_over_candidates_agrees_with_a_scan() {
+        let rules = vec![
+            rule_for(9, &["run.failed"]),
+            rule_for(3, &["run.*"]),
+            rule_for(7, &["run.*"]),
+            rule_for(5, &["orders.cancelled"]),
+        ];
+        let idx = RuleIndex::build(&rules);
+        let c = idx.candidates("run.failed");
+        for id in 0..12i64 {
+            assert_eq!(
+                c.binary_search(&id).is_ok(),
+                c.contains(&id),
+                "binary search and scan disagree for {id}"
+            );
+        }
+    }
+
     fn rule(spec: RuleSpec) -> RuleRow {
         RuleRow {
             id: 7,

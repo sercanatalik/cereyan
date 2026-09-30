@@ -30,5 +30,8 @@ benches/soak-report.json
 
 # Spec-driven workflow and AI-assistant scaffolding: kept locally, not published
 openspec/
+.opencode/
 .claude/
 CLAUDE.md
+progress.md
+planning/

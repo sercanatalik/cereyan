@@ -97,28 +97,45 @@ pub fn saturation(state: &AppState) -> (bool, Vec<String>, Option<String>) {
     };
     let mut capped: Vec<(String, i64)> = Vec::new();
     let mut short: Vec<String> = Vec::new();
-    for f in flows.iter().filter(|f| state.is_live(f.id)) {
+    // The uncapped flows are the ones that need measuring — and a flow that
+    // declares no cap is the default, so this is usually all of them. Measure
+    // them all in one read and take their schedules in one pass, rather than a
+    // query and a schedule scan per flow.
+    let uncapped: Vec<cereyan_core::Flow> = flows
+        .iter()
+        .filter(|f| state.is_live(f.id))
+        .filter(|f| {
+            FlowOptions::from_map(&f.options)
+                .max_concurrent
+                .is_none_or(|c| c <= 0)
+        })
+        .cloned()
+        .collect();
+    let medians = state
+        .store
+        .median_run_duration_many(&uncapped.iter().map(|f| f.id).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let schedules = state
+        .scheduler
+        .for_flows(&uncapped.iter().map(|f| f.id).collect::<Vec<_>>());
+    for f in &uncapped {
         let o = FlowOptions::from_map(&f.options);
         if let Some(c) = o.max_concurrent {
+            // A zero cap is not a cap, so a flow only lands here with a real one.
             if c > 0 {
                 capped.push((f.name.clone(), c));
             }
-        } else {
-            // Uncapped flow whose schedule is shorter than its median duration.
-            let median = state
-                .store
-                .median_run_duration(f.id)
-                .ok()
-                .flatten()
-                .unwrap_or(0);
-            if median > 0 {
-                for row in state.scheduler.for_flow(f.id) {
-                    if let cereyan_core::schedule::Schedule::Interval { interval, .. } =
-                        row.schedule
-                    {
-                        if (interval * 1e6) < median as f64 {
-                            short.push(f.name.clone());
-                        }
+            continue;
+        }
+        // Uncapped flow whose schedule is shorter than its median duration.
+        // A missing median means either no timed runs or a store error, both of
+        // which the old per-flow read turned into 0 and so skipped the check.
+        let median = medians.get(&f.id).copied().unwrap_or(0);
+        if median > 0 {
+            for row in schedules.get(&f.id).map(|v| v.as_slice()).unwrap_or(&[]) {
+                if let cereyan_core::schedule::Schedule::Interval { interval, .. } = row.schedule {
+                    if (interval * 1e6) < median as f64 {
+                        short.push(f.name.clone());
                     }
                 }
             }

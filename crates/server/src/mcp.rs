@@ -926,7 +926,11 @@ async fn call_tool(
             })?;
             Ok(json!({"artifacts": page.items, "next_cursor": page.next_cursor}))
         }
-        "list_rules" => Ok(json!({"rules": state.rules.all()})),
+        "list_rules" => {
+            // Serialised straight from the shared rows; the JSON is the same.
+            let rules = state.rules.all();
+            Ok(json!({ "rules": crate::rules::RuleList(rules) }))
+        }
         "explain_failure" => {
             let id = arg_i64(args, "run_id")?;
             let run = state

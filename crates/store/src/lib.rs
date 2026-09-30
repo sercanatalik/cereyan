@@ -18,10 +18,12 @@ pub use manage::{ProjectCounts, ProjectRow, TableCounts, BACKUP_DIR};
 pub use migrations::latest_version as latest_schema_version;
 pub use read::{
     checkpoint_seed_key, ArtifactFilter, ArtifactsPage, Checkpoint, EventFilter, EventsPage,
+    FlowLabel, LatestRunMark, QueueRun, RecentRun, RunEventContext, ScheduleRunMark,
     TaskStateRow,
+    TimelineRunRow,
 };
 pub use read::{ListRunsFilter, ListTaskRunsFilter, LogFilter, LogsPage, RunsPage, TaskRunsPage};
-pub use workers::WorkerRegistration;
+pub use workers::{HostFlowCounts, WorkerRegistration};
 pub use writer::{
     ArmExpectation, CreateBackfill, CreateRun, CreateTaskRun, DeletedCounts, FlowRows, NewEvent,
     NewLog, ReportEvent, ReportOutcome, ResetScope, RuleWrite, SchedulePatch, ScheduleWrite,
@@ -32,7 +34,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use cereyan_core::{Id, State};
+use cereyan_core::{Event, Id, State};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use rusqlite::Connection;
 
@@ -43,12 +45,25 @@ pub const LOCK_FILE: &str = "db.lock";
 /// Database file name inside the home directory.
 pub const DB_FILE: &str = "db.sqlite";
 
-const READ_POOL_SIZE: usize = 4;
+/// Read-only connection pool size. Sized to handle concurrent API requests
+/// (dashboard polling, SSE streams, rule evaluation) without opening ad-hoc
+/// connections. Each connection uses ~2MB of cache; 12 connections ≈ 24MB.
+const READ_POOL_SIZE: usize = 12;
+
+/// How long a read waits for a pooled connection before opening one instead.
+///
+/// Far longer than any read here performs — the slowest holds a connection
+/// across three statements — and far shorter than a request timeout, so a
+/// saturated pool degrades to opening a connection instead of wedging callers.
+const READER_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
 
 pub struct Store {
     home: PathBuf,
     writer: Sender<WriteCommand>,
     readers: Mutex<Vec<Connection>>,
+    /// Signalled whenever a read returns a connection, so a waiting read takes
+    /// it instead of opening another.
+    reader_returned: std::sync::Condvar,
     _lock: std::fs::File,
     writer_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     commits: Arc<AtomicU64>,
@@ -70,6 +85,7 @@ impl Store {
         for _ in 0..READ_POOL_SIZE {
             readers.push(open::open_reader(&db_path)?);
         }
+        let reader_returned = std::sync::Condvar::new();
 
         let (tx, rx) = bounded::<WriteCommand>(16_384);
         let commits = Arc::new(AtomicU64::new(0));
@@ -84,6 +100,7 @@ impl Store {
             home: home.to_path_buf(),
             writer: tx,
             readers: Mutex::new(readers),
+            reader_returned,
             _lock: lock,
             writer_thread: Mutex::new(Some(handle)),
             commits,
@@ -135,20 +152,66 @@ impl Store {
     }
 
     /// Borrow a read-only connection from the pool.
+    ///
+    /// When the pool is empty the read waits for a connection to come back
+    /// rather than opening one. Opening is not free — the four PRAGMAs and the
+    /// schema parse cost far more than a small query, and the connection would
+    /// then be closed rather than pooled, so the next read pays it again. The
+    /// wait is bounded, so a saturated pool degrades to opening a connection
+    /// instead of blocking the caller indefinitely.
     pub fn with_reader<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let conn = {
             let mut pool = self.readers.lock().unwrap_or_else(|e| e.into_inner());
-            match pool.pop() {
-                Some(c) => c,
-                None => open::open_reader(&self.home.join(DB_FILE))?,
+            loop {
+                if let Some(c) = pool.pop() {
+                    break c;
+                }
+                let (guard, _timed_out) = self
+                    .reader_returned
+                    .wait_timeout(pool, READER_WAIT)
+                    .unwrap_or_else(|e| e.into_inner());
+                pool = guard;
+                if _timed_out.timed_out() {
+                    // Nobody returned one in time. Degrade to an ad-hoc
+                    // connection rather than wait without bound.
+                    break open::open_reader(&self.home.join(DB_FILE))?;
+                }
             }
         };
-        let out = f(&conn);
+        // Guard returns the connection to the pool on drop, even if `f` panics,
+        // and wakes a waiting read either way.
+        struct ConnGuard<'a> {
+            conn: Option<Connection>,
+            store: &'a Store,
+        }
+        impl Drop for ConnGuard<'_> {
+            fn drop(&mut self) {
+                if let Some(conn) = self.conn.take() {
+                    let mut pool = self.store.readers.lock().unwrap_or_else(|e| e.into_inner());
+                    if pool.len() < READ_POOL_SIZE {
+                        pool.push(conn);
+                    }
+                    // Signalled after the push, and outside the `if` above: a
+                    // connection opened as an overflow is not pooled, but the
+                    // waiter should still re-check in case room appeared.
+                    self.store.reader_returned.notify_one();
+                }
+            }
+        }
+        let mut guard = ConnGuard {
+            conn: Some(conn),
+            store: self,
+        };
+        let result = f(guard.conn.as_ref().expect("conn is Some"));
+        // On success, return the connection to the pool explicitly.
+        let conn = guard.conn.take().expect("conn is Some");
         let mut pool = self.readers.lock().unwrap_or_else(|e| e.into_inner());
         if pool.len() < READ_POOL_SIZE {
             pool.push(conn);
         }
-        out
+        drop(pool);
+        self.reader_returned.notify_one();
+        result
     }
 
     // ---- write helpers -----------------------------------------------------
@@ -346,12 +409,12 @@ impl Store {
         })
     }
 
-    pub fn append_event(&self, event: writer::NewEvent) -> Result<(i64, Id)> {
+    pub fn append_event(&self, event: writer::NewEvent) -> Result<(Event, Id)> {
         self.write(|reply| WriteCommand::AppendEvent(event, reply))
     }
 
     /// Append many events in one writer round trip.
-    pub fn append_events(&self, events: Vec<writer::NewEvent>) -> Result<Vec<(i64, Id)>> {
+    pub fn append_events(&self, events: Vec<writer::NewEvent>) -> Result<Vec<(Event, Id)>> {
         if events.is_empty() {
             return Ok(Vec::new());
         }
@@ -595,6 +658,176 @@ impl Drop for Store {
             .take()
         {
             let _ = handle.join();
+        }
+    }
+}
+
+#[cfg(test)]
+mod reader_pool_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn store() -> (tempfile::TempDir, Arc<Store>) {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path()).unwrap();
+        (dir, Arc::new(s))
+    }
+
+    /// Take every pooled connection out, so the next read has to wait or open.
+    fn drain(store: &Store) -> Vec<Connection> {
+        let mut pool = store.readers.lock().unwrap_or_else(|e| e.into_inner());
+        (0..pool.len()).filter_map(|_| pool.pop()).collect()
+    }
+
+    fn pooled(store: &Store) -> usize {
+        store
+            .readers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
+    }
+
+    fn seed(store: &Store) -> i64 {
+        let f = store
+            .upsert_flow("p", "etl", "m", "/tmp", None, "[]", "{}")
+            .unwrap();
+        store
+            .write(|reply| {
+                crate::writer::WriteCommand::CreateRun(
+                    crate::writer::CreateRun {
+                        flow_id: f,
+                        name: "r1".into(),
+                        parameters: "{}".into(),
+                        tags: "[]".into(),
+                        created_by: "test".into(),
+                        ..Default::default()
+                    },
+                    reply,
+                )
+            })
+            .map(|(id, _)| id)
+            .unwrap()
+    }
+
+    /// The point of waiting: reads far above the pool size must not each open a
+    /// connection, and the pool must be whole afterwards.
+    #[test]
+    fn reads_above_the_pool_size_leave_the_pool_intact() {
+        let (_d, store) = store();
+        let run = seed(&store);
+        let threads: Vec<_> = (0..64)
+            .map(|_| {
+                let store = Arc::clone(&store);
+                std::thread::spawn(move || {
+                    for _ in 0..5 {
+                        assert_eq!(store.get_run(run).unwrap().unwrap().id, run);
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().expect("reader thread");
+        }
+        assert_eq!(pooled(&store), READ_POOL_SIZE, "connections were lost");
+    }
+
+    /// A read that finds the pool empty waits: it cannot finish while every
+    /// connection is held elsewhere.
+    #[test]
+    fn a_read_waits_for_a_connection_rather_than_proceeding() {
+        let (_d, store) = store();
+        let run = seed(&store);
+        let mut held = drain(&store);
+        assert_eq!(held.len(), READ_POOL_SIZE);
+
+        let reader = {
+            let store = Arc::clone(&store);
+            std::thread::spawn(move || store.get_run(run).unwrap().map(|r| r.id))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(!reader.is_finished(), "the read did not wait");
+
+        // Hand one back and signal it.
+        {
+            let mut pool = store.readers.lock().unwrap_or_else(|e| e.into_inner());
+            pool.push(held.pop().unwrap());
+        }
+        store.reader_returned.notify_one();
+        assert_eq!(reader.join().expect("reader thread"), Some(run));
+        drop(held);
+    }
+
+    /// The signal has to be on the panic path too, or the next reader waits out
+    /// the whole timeout for a connection that is already free.
+    ///
+    /// One connection is left in the pool so the panicking read takes a *pooled*
+    /// one; if the panic path failed to return it, the pool would be left empty.
+    #[test]
+    fn a_panicking_read_returns_its_connection() {
+        let (_d, store) = store();
+        let mut held = drain(&store);
+        {
+            let mut pool = store.readers.lock().unwrap_or_else(|e| e.into_inner());
+            pool.push(held.pop().unwrap());
+        }
+        assert_eq!(pooled(&store), 1);
+
+        let panicking = {
+            let store = Arc::clone(&store);
+            std::thread::spawn(move || {
+                store.with_reader(|_| -> Result<()> {
+                    panic!("boom")
+                });
+            })
+        };
+        assert!(panicking.join().is_err(), "the read was supposed to panic");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert_eq!(
+            pooled(&store),
+            1,
+            "a panicking read did not return its pooled connection"
+        );
+        drop(held);
+    }
+
+    /// A read must not block forever: with the pool drained and nothing to
+    /// return a connection, it proceeds on one of its own.
+    #[test]
+    fn the_wait_is_bounded() {
+        let (_d, store) = store();
+        let run = seed(&store);
+        let _held = drain(&store);
+        let started = std::time::Instant::now();
+        let got = store.get_run(run).unwrap().map(|r| r.id);
+        let elapsed = started.elapsed();
+        assert_eq!(got, Some(run), "the read did not produce its result");
+        assert!(
+            elapsed >= READER_WAIT,
+            "returned after {elapsed:?}, before the wait could expire"
+        );
+        assert!(
+            elapsed < READER_WAIT * 4,
+            "waited {elapsed:?}, far beyond the bound"
+        );
+    }
+
+    /// Results must not depend on whether a read waited or opened.
+    #[test]
+    fn results_are_the_same_whether_waiting_or_opening() {
+        let (_d, store) = store();
+        let run = seed(&store);
+        store.create_task_run(run, "orders", "t", "orders", 0).unwrap();
+        let expected = store.get_run(run).unwrap().expect("row");
+
+        let _held = drain(&store);
+        let threads: Vec<_> = (0..24)
+            .map(|_| {
+                let store = Arc::clone(&store);
+                std::thread::spawn(move || store.get_run(run).unwrap())
+            })
+            .collect();
+        for t in threads {
+            assert_eq!(t.join().expect("reader thread"), Some(expected.clone()));
         }
     }
 }

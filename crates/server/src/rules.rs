@@ -26,7 +26,15 @@ pub trait RuleDispatcher: Send + Sync {
 
 #[derive(Default)]
 pub struct RulesState {
-    rules: RwLock<Vec<RuleRow>>,
+    /// Two levels on purpose: the outer Arc is shared by every reader and only
+    /// changes on reload, while each rule behind its own Arc can be replaced on
+    /// a firing without copying the rest. A single-level `Arc<Vec<RuleRow>>`
+    /// would force a deep clone of every rule's spec to change one counter.
+    ///
+    /// A `Vec` rather than a slice: `Arc<[T]>` has no `DerefMut`, so updating
+    /// through it means converting to a `Vec`, which clones every inner `Arc`
+    /// and would make the per-rule copy unconditional.
+    rules: RwLock<Arc<Vec<Arc<RuleRow>>>>,
     index: RwLock<RuleIndex>,
     guards: Mutex<HashMap<i64, GuardState>>,
     /// Last evaluated tick of each clock-armed rule (microseconds).
@@ -45,12 +53,62 @@ fn clock_schedule(rule: &RuleRow) -> Option<Schedule> {
 
 const CLOCK_LAST_PREFIX: &str = "rules.clock_last:";
 
+/// The whole rule set, serialised straight from the shared rows.
+///
+/// `GET /api/rules` and the MCP `list_rules` tool both want to *serialise* the
+/// rules, and both were cloning every `RuleRow` to do it — a `RuleSpec` holds a
+/// `RuleMatch`, a `Vec<RuleAction>` with its own parameter maps, and two optional
+/// sub-structs, so a rule with a few actions costs dozens of allocations to copy.
+/// The rules page polls that endpoint every five seconds per browser tab.
+///
+/// This wrapper exists because the copy was forced by the declared return type
+/// `Json<Vec<RuleRow>>`, not by serde: `serde` only implements `Serialize` for
+/// `Arc<T>` under its `rc` feature, which this workspace does not enable, and
+/// enabling it workspace-wide for one call site is a worse trade than collecting
+/// the slice through references.
+///
+/// The OpenAPI schema comes from the utoipa annotation `body = Vec<RuleRow>`,
+/// not from the Rust return type, so the schema and the generated client types
+/// are unchanged — and the serialised bytes are identical, which a test checks.
+/// Owns the shared set so it can cross an async handler boundary: a handler's
+/// future must own everything it returns. Holding the `Arc` is a refcount bump,
+/// not a copy — the rows behind it are shared with the store.
+pub struct RuleList(pub Arc<Vec<Arc<RuleRow>>>);
+
+impl serde::Serialize for RuleList {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_seq(self.0.iter().map(|r| r.as_ref()))
+    }
+}
+
 impl RulesState {
-    pub fn all(&self) -> Vec<RuleRow> {
+    /// The whole rule set, shared. Callers read fields through `Deref`; the
+    /// ones that need owned rows flatten it themselves.
+    pub fn all(&self) -> Arc<Vec<Arc<RuleRow>>> {
         self.rules.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
+
+    /// Set one rule's fire count and last-fired time.
+    ///
+    /// Costs at most one rule copy.
+    ///
+    /// `Arc::make_mut` on the outer `Vec` copies the *vector* — a pointer per
+    /// rule, no deep copy — and only if a reader still holds the outer Arc.
+    /// Because the elements are moved rather than cloned, the inner `Arc`s keep
+    /// their refcounts, so the per-rule `make_mut` below is free unless that
+    /// specific rule is the one being read. An unknown id changes nothing.
+    pub fn update_counters(&self, id: i64, fire_count: i64, last_fired: Option<i64>) {
+        let mut guard = self.rules.write().unwrap_or_else(|e| e.into_inner());
+        let Some(index) = guard.iter().position(|r| r.id == id) else {
+            return;
+        };
+        let rules = Arc::make_mut(&mut *guard);
+        let row = Arc::make_mut(&mut rules[index]);
+        row.fire_count = fire_count;
+        row.last_fired = last_fired;
+    }
     pub fn get(&self, id: i64) -> Option<RuleRow> {
-        self.all().into_iter().find(|r| r.id == id)
+        self.all().iter().find(|r| r.id == id).map(|r| r.as_ref().clone())
     }
 }
 
@@ -59,7 +117,8 @@ impl RulesState {
 pub fn load(state: &AppState) {
     let rules = state.store.list_rules().unwrap_or_default();
     *state.rules.index.write().unwrap_or_else(|e| e.into_inner()) = RuleIndex::build(&rules);
-    *state.rules.rules.write().unwrap_or_else(|e| e.into_inner()) = rules.clone();
+    *state.rules.rules.write().unwrap_or_else(|e| e.into_inner()) =
+        Arc::new(rules.iter().cloned().map(Arc::new).collect::<Vec<_>>());
     for rule in rules
         .iter()
         .filter(|r| r.enabled && r.spec.is_clock_armed())
@@ -96,7 +155,7 @@ pub fn start(state: &Arc<AppState>) {
                 .push(e.deadline.max(now), TimerEvent::Expectation(e.id));
         }
     }
-    for rule in state.rules.all() {
+    for rule in state.rules.all().iter() {
         if !rule.enabled || !rule.spec.is_clock_armed() {
             continue;
         }
@@ -141,6 +200,19 @@ fn expectation_key(event: &Event, ctx: &RunContext) -> Option<(String, Option<i6
     Some((format!("flow:{flow_id}"), None, Some(flow_id)))
 }
 
+/// Is `id` among the candidate rules for an event?
+///
+/// `candidates` comes from `RuleIndex::candidates`, which returns ids sorted and
+/// deduplicated, so a binary search is valid and allocation-free. `contains`
+/// would be a linear scan repeated for every rule, making this filter
+/// O(rules × candidates) on the event path. The sortedness is pinned by a test
+/// in the `cereyan-rules` crate, so removing it there fails there rather than
+/// silently changing which rules are tracked here.
+#[inline]
+fn is_candidate(candidates: &[i64], id: i64) -> bool {
+    candidates.binary_search(&id).is_ok()
+}
+
 /// Arm and disarm expectations for one event. Runs before the reactive path.
 fn track_expectations(state: &Arc<AppState>, event: &Event, ctx: &RunContext, candidates: &[i64]) {
     let Some((key, run_id, flow_id)) = expectation_key(event, ctx) else {
@@ -149,8 +221,8 @@ fn track_expectations(state: &Arc<AppState>, event: &Event, ctx: &RunContext, ca
     for rule in state
         .rules
         .all()
-        .into_iter()
-        .filter(|r| candidates.contains(&r.id) && r.enabled && r.spec.is_proactive())
+        .iter()
+        .filter(|r| is_candidate(candidates, r.id) && r.enabled && r.spec.is_proactive())
     {
         let Some(unless) = &rule.spec.unless else {
             continue;
@@ -372,12 +444,11 @@ fn lapse(state: &Arc<AppState>, rule: &RuleRow, ctx: RunContext, exp: Option<&Ex
         },
         related,
     };
-    let Ok((id, _)) = state.store.append_event(event) else {
+    // The write returns the stored event, so there is no need to read it back.
+    let Ok((event, _)) = state.store.append_event(event) else {
         return;
     };
-    let Some(event) = state.store.get_event(id).ok().flatten() else {
-        return;
-    };
+    let id = event.id;
     state.stream.publish(
         "event.created",
         id.to_string(),
@@ -436,7 +507,7 @@ pub fn on_event(state: &Arc<AppState>, event: Event) {
     let mut to_fire: Vec<RuleRow> = Vec::new();
     {
         let mut guards = state.rules.guards.lock().unwrap_or_else(|e| e.into_inner());
-        for rule in rules
+        for rule in rules.iter()
             .into_iter()
             .filter(|r| candidates.contains(&r.id) && !r.spec.is_proactive())
         {
@@ -447,7 +518,7 @@ pub fn on_event(state: &Arc<AppState>, event: Event) {
             match cereyan_rules::check_guards(&rule, &event, &ctx, g, now) {
                 GuardDecision::Fire => {
                     g.record(ctx.run.as_ref().map(|r| r.id), now);
-                    to_fire.push(rule);
+                    to_fire.push(rule.as_ref().clone());
                 }
                 GuardDecision::Skip(_) => {}
             }
@@ -586,11 +657,7 @@ pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunConte
         }
     }
     if let Ok(Some(updated)) = state.store.get_rule(rule.id) {
-        let mut rules = state.rules.rules.write().unwrap_or_else(|e| e.into_inner());
-        if let Some(slot) = rules.iter_mut().find(|r| r.id == rule.id) {
-            slot.fire_count = updated.fire_count;
-            slot.last_fired = updated.last_fired;
-        }
+        state.rules.update_counters(rule.id, updated.fire_count, updated.last_fired);
         state.stream.publish(
             "rule.updated",
             rule.id.to_string(),
@@ -746,30 +813,34 @@ pub fn execute(
             let own = ctx.run.as_ref().map(|r| r.id);
             let mut cancelled = Vec::new();
             let mut skipped = Vec::new();
-            for active in state.index.active_runs() {
-                if Some(active.id) == own
-                    || flow_id.is_some_and(|id| id != active.flow_id)
-                    || active.state.is_terminal()
-                    || (!states.is_empty() && !states.contains(&active.state.state_type))
-                {
+            // One query for the candidates, projecting only what this action
+            // reads. Previously the whole active index was deep-cloned and then
+            // each surviving run read in full — including a per-row task_counts
+            // aggregate — to get these same two fields.
+            for (run_id, parameters, engine_pid) in
+                state
+                    .store
+                    .cancellable_runs(flow_id, &states)
+                    .map_err(|e| e.to_string())?
+            {
+                if Some(run_id) == own {
                     continue;
                 }
-                let Some(run) = state.store.get_run(active.id).ok().flatten() else {
-                    continue;
-                };
-                if !parameters_match(&action.parameters, &run.parameters) {
+                let run_params: serde_json::Map<String, serde_json::Value> =
+                    serde_json::from_str(&parameters).unwrap_or_default();
+                if !parameters_match(&action.parameters, &run_params) {
                     continue;
                 }
-                let immediate = state.supervisor.dequeue(run.id) || run.engine_pid.is_none();
+                let immediate = state.supervisor.dequeue(run_id) || engine_pid.is_none();
                 let next = if immediate {
                     State::new(StateType::Cancelled)
                         .with_message(format!("cancelled by rule {}", rule.name))
                 } else {
                     State::new(StateType::Cancelling)
                 };
-                match state.transition_run(run.id, next, false) {
-                    Ok(TransitionResult::Accepted(_)) => cancelled.push(run.id),
-                    _ => skipped.push(run.id),
+                match state.transition_run(run_id, next, false) {
+                    Ok(TransitionResult::Accepted(_)) => cancelled.push(run_id),
+                    _ => skipped.push(run_id),
                 }
             }
             Ok(json!({"cancelled": cancelled, "count": cancelled.len(), "skipped": skipped}))
@@ -1016,8 +1087,13 @@ pub(crate) fn find_flow(
             return Ok(f);
         }
     }
-    let flows = state.store.list_flows(None).map_err(|e| e.to_string())?;
-    let matches: Vec<Flow> = flows.into_iter().filter(|f| f.name == flow_name).collect();
+    // Bounded to flows with this name, rather than reading every flow and
+    // filtering in Rust — this path runs on every firing of a rule that names a
+    // flow from another project.
+    let matches: Vec<Flow> = state
+        .store
+        .flows_by_name(&flow_name)
+        .map_err(|e| e.to_string())?;
     match matches.len() {
         1 => Ok(matches.into_iter().next().unwrap()),
         0 => Err(format!("flow {name:?} is not registered")),
@@ -1158,5 +1234,387 @@ mod signing_tests {
             hex,
             "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
         );
+    }
+}
+
+#[cfg(test)]
+mod arc_tests {
+    use super::*;
+    use cereyan_core::{RuleAction, RuleMatch, RuleSpec};
+    use std::sync::Arc;
+
+    fn rule(id: i64) -> RuleRow {
+        RuleRow {
+            id,
+            external_id: cereyan_core::new_id(),
+            name: format!("rule-{id}"),
+            enabled: true,
+            source: "ui".into(),
+            module: None,
+            spec: RuleSpec {
+                when: RuleMatch {
+                    events: vec!["run.failed".into(), "run.cancelled".into()],
+                    states: vec!["Failed".into()],
+                    ..Default::default()
+                },
+                actions: vec![RuleAction {
+                    kind: "run_flow".into(),
+                    flow: Some("notify".into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            fire_count: 0,
+            last_fired: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    fn state_with(ids: &[i64]) -> RulesState {
+        let st = RulesState::default();
+        *st.rules.write().unwrap() = Arc::new(
+            ids.iter().copied().map(|i| Arc::new(rule(i))).collect::<Vec<_>>(),
+        );
+        st
+    }
+
+    /// The point of the two-level Arc: a counters update must not copy every
+    /// rule. `Arc::ptr_eq` on the untouched rules is the direct assertion.
+    #[test]
+    fn an_update_copies_only_the_rule_it_changes() {
+        let st = state_with(&[1, 2, 3, 4, 5]);
+        let before: Vec<Arc<RuleRow>> = st.all().to_vec();
+
+        st.update_counters(3, 42, Some(999));
+
+        let after = st.all();
+        assert_eq!(after.len(), 5, "a rule was lost");
+        for (i, r) in after.iter().enumerate() {
+            let id = r.id;
+            if id == 3 {
+                assert!(!Arc::ptr_eq(r, &before[i]), "the changed rule was not copied");
+            } else {
+                assert!(
+                    Arc::ptr_eq(r, &before[i]),
+                    "rule {id} was copied even though it did not change"
+                );
+            }
+        }
+    }
+
+    /// With no reader in between, the rule's `Arc` is uniquely held, so
+    /// `make_mut` writes in place and its allocation is reused.
+    ///
+    /// Addresses are captured rather than the `Arc`s themselves: holding an `Arc`
+    /// across the update would raise the refcount and make `make_mut` clone,
+    /// which is the *other* test's point.
+    #[test]
+    fn a_quiet_update_copies_nothing() {
+        let st = state_with(&[1, 2, 3]);
+        let addrs: Vec<*const RuleRow> = st.all().iter().map(|r| Arc::as_ptr(r)).collect();
+        st.update_counters(2, 7, Some(1));
+        let after = st.all();
+        for (i, a) in addrs.iter().enumerate() {
+            assert_eq!(
+                Arc::as_ptr(&after[i]),
+                *a,
+                "rule {} was copied although no reader held it",
+                after[i].id
+            );
+        }
+    }
+
+    /// Holding a rule's `Arc` does force that one rule to be copied, and only it.
+    #[test]
+    fn holding_one_rule_copies_only_that_rule() {
+        let st = state_with(&[1, 2, 3]);
+        let held = st.all().iter().find(|r| r.id == 2).unwrap().clone();
+        let others: Vec<*const RuleRow> = st
+            .all()
+            .iter()
+            .filter(|r| r.id != 2)
+            .map(|r| Arc::as_ptr(r))
+            .collect();
+        st.update_counters(2, 9, Some(9));
+        let after = st.all();
+        let same: Vec<*const RuleRow> = after
+            .iter()
+            .filter(|r| r.id != 2)
+            .map(|r| Arc::as_ptr(r))
+            .collect();
+        assert_eq!(same, others, "an unheld rule was copied");
+        // The held one is a distinct allocation, and the caller's copy is intact.
+        let fresh = after.iter().find(|r| r.id == 2).unwrap();
+        assert_eq!(fresh.fire_count, 9);
+        assert_eq!(held.fire_count, 0, "the caller's snapshot was mutated");
+    }
+
+    #[test]
+    fn the_updated_rule_carries_the_stored_counters() {
+        let st = state_with(&[1, 2]);
+        st.update_counters(1, 17, Some(1234));
+        let all = st.all();
+        let r = all.iter().find(|r| r.id == 1).unwrap();
+        assert_eq!(r.fire_count, 17);
+        assert_eq!(r.last_fired, Some(1234));
+        // The other rule is untouched.
+        let other = all.iter().find(|r| r.id == 2).unwrap();
+        assert_eq!(other.fire_count, 0);
+        assert_eq!(other.last_fired, None);
+    }
+
+    /// A reader holding the outer Arc keeps a coherent snapshot.
+    #[test]
+    fn a_reader_keeps_its_snapshot_across_an_update() {
+        let st = state_with(&[1, 2]);
+        let held = st.all();
+        assert_eq!(held.iter().find(|r| r.id == 1).unwrap().fire_count, 0);
+        st.update_counters(1, 5, Some(9));
+        // The held snapshot is unchanged...
+        assert_eq!(
+            held.iter().find(|r| r.id == 1).unwrap().fire_count,
+            0,
+            "a held snapshot mutated underneath its reader"
+        );
+        // ...and a fresh read sees the update.
+        assert_eq!(
+            st.all().iter().find(|r| r.id == 1).unwrap().fire_count,
+            5
+        );
+    }
+
+    #[test]
+    fn an_unknown_id_changes_nothing() {
+        let st = state_with(&[1, 2]);
+        let before = st.all();
+        st.update_counters(99, 3, Some(4));
+        let after = st.all();
+        assert_eq!(after.len(), 2);
+        for (b, a) in before.iter().zip(after.iter()) {
+            assert!(Arc::ptr_eq(b, a), "an unknown id disturbed the rules");
+        }
+    }
+
+    /// The point of `RuleList`: it serialises the shared rows, and what it emits
+    /// is byte-for-byte what cloning every rule first would have emitted. The two
+    /// sides differ in only the thing under test, so this catches a missing
+    /// `skip_serializing_if`, a nesting change from the `flatten`, or a field
+    /// left out of the wrapper.
+    ///
+    /// The rule set deliberately spans the shapes that could differ: a rule with
+    /// no module and no last-fired time, a rule carrying an action with
+    /// parameters, a proactive rule with `unless` and `within`, and a clock rule
+    /// with `at`.
+    #[test]
+    fn rule_list_serialises_exactly_what_cloning_would() {
+        for shape in ["bare", "full", "proactive", "clock"] {
+            let st = RulesState::default();
+            let mut r = rule(1);
+            r.name = format!("rule-{shape}");
+            match shape {
+                "proactive" => {
+                    r.spec.unless = Some(RuleMatch {
+                        events: vec!["run.completed".into()],
+                        ..Default::default()
+                    });
+                    r.spec.within = Some(600.0);
+                }
+                "clock" => {
+                    r.spec.at = Some(cereyan_core::RuleClock {
+                        cron: "0 * * * *".into(),
+                        tz: Some("UTC".into()),
+                    });
+                }
+                "full" => {
+                    r.module = Some("pipeline".into());
+                    r.spec.actions = vec![
+                        RuleAction {
+                            kind: "run_flow".into(),
+                            flow: Some("notify".into()),
+                            parameters: [("channel".to_string(), serde_json::json!("#ops"))]
+                                .into_iter()
+                                .collect(),
+                            ..Default::default()
+                        },
+                        RuleAction {
+                            kind: "set_variable".into(),
+                            ..Default::default()
+                        },
+                    ];
+                    r.spec.within = Some(30.0);
+                }
+                _ => {}
+            }
+            *st.rules.write().unwrap() =
+                Arc::new(vec![Arc::new(r.clone()), Arc::new(rule(2)), Arc::new(rule(3))]);
+            st.update_counters(2, 11, Some(22));
+
+            let rules = st.all();
+            // The oracle: clone every row, then serialise the plain rows.
+            let cloned: Vec<RuleRow> = rules.iter().map(|r| r.as_ref().clone()).collect();
+            assert_eq!(
+                serde_json::to_string(&RuleList(rules.clone())).unwrap(),
+                serde_json::to_string(&cloned).unwrap(),
+                "the {shape} rule set serialises differently through RuleList"
+            );
+            // And it really is a flat array of three rules, not a nested object.
+            let v: serde_json::Value =
+                serde_json::from_str(&serde_json::to_string(&RuleList(rules.clone())).unwrap())
+                    .unwrap();
+            assert_eq!(v.as_array().unwrap().len(), 3, "{shape}: not a flat array");
+            let first = &v[0];
+            assert_eq!(first["id"], 1, "{shape}: id");
+            assert_eq!(first["name"], format!("rule-{shape}"), "{shape}: name");
+            assert_eq!(first["enabled"], true, "{shape}: enabled");
+            assert_eq!(first["source"], "ui", "{shape}: source");
+            assert_eq!(first["fire_count"], 0, "{shape}: fire count");
+            // The spec is flattened: its fields sit at the top level.
+            assert_eq!(first["when"]["events"][0], "run.failed", "{shape}: flattened when");
+            // `RuleSpec.actions` renames itself to `do`, and the flatten puts it
+            // at the top level. Both spellings are part of the wire shape.
+            assert_eq!(first["do"][0]["kind"], "run_flow", "{shape}: flattened actions");
+            assert!(first.get("spec").is_none(), "{shape}: spec must not be nested");
+            assert!(first.get("actions").is_none(), "{shape}: actions must be spelled `do`");
+            // `RuleRow`'s own optionals are `#[serde(default)]` but not skipped,
+            // so an absent one is emitted as null rather than omitted. Pinned,
+            // because it is easy to assume otherwise.
+            assert_eq!(first["last_fired"], serde_json::Value::Null, "{shape}: last_fired");
+            match shape {
+                "full" => {
+                    assert_eq!(first["module"], "pipeline", "{shape}: module");
+                    assert_eq!(
+                        first["do"][0]["parameters"]["channel"], "#ops",
+                        "{shape}: nested action parameters"
+                    );
+                }
+                "proactive" => {
+                    // These *are* skipped when absent, and present when set.
+                    assert_eq!(first["unless"]["events"][0], "run.completed", "{shape}: unless");
+                    assert_eq!(first["within"], 600.0, "{shape}: within");
+                }
+                "clock" => {
+                    assert_eq!(first["at"]["cron"], "0 * * * *", "{shape}: at");
+                    assert_eq!(first["at"]["tz"], "UTC", "{shape}: at tz");
+                }
+                _ => {
+                    assert_eq!(first["module"], serde_json::Value::Null, "{shape}: module");
+                    // A rule with no proactive or clock fields omits them.
+                    assert!(first.get("unless").is_none(), "{shape}: unless omitted");
+                    assert!(first.get("within").is_none(), "{shape}: within omitted");
+                    assert!(first.get("at").is_none(), "{shape}: at omitted");
+                }
+            }
+            // The updated counters are what the store now holds.
+            assert_eq!(v[1]["fire_count"], 11, "{shape}: updated fire count");
+            assert_eq!(v[1]["last_fired"], 22, "{shape}: updated last fired");
+        }
+    }
+
+    #[test]
+    fn an_empty_rule_set_serialises_as_an_empty_array() {
+        let st = RulesState::default();
+        assert_eq!(
+            serde_json::to_string(&RuleList(st.all())).unwrap(),
+            "[]"
+        );
+    }
+
+    #[test]
+    fn listing_rules_does_not_disturb_the_shared_rows() {
+        // Serialising must not consume or mutate the shared set, so a second
+        // list returns the same rules and the rows are still the same ones.
+        let st = state_with(&[1, 2, 3]);
+        let before = st.all();
+        let one = serde_json::to_string(&RuleList(st.all())).unwrap();
+        let two = serde_json::to_string(&RuleList(st.all())).unwrap();
+        assert_eq!(one, two, "two listings differ");
+        assert_eq!(st.all().len(), 3, "a rule was lost");
+        for (a, b) in before.iter().zip(st.all().iter()) {
+            assert!(Arc::ptr_eq(a, b), "listing replaced a shared row");
+        }
+    }
+
+    /// Measures the clone against the serialisation on the real type. Opt-in:
+    /// it is a measurement, not an assertion.
+    #[test]
+    fn report_rule_list_cost() {
+        if std::env::var("CEREYAN_BENCH_REPORT").is_err() {
+            return;
+        }
+        let n = 200i64;
+        let st = RulesState::default();
+        *st.rules.write().unwrap() = Arc::new(
+            (0..n)
+                .map(|i| {
+                    let mut r = rule(i);
+                    // Rules in practice carry several actions with parameters.
+                    r.spec.actions = (0..4)
+                        .map(|a| RuleAction {
+                            kind: "run_flow".into(),
+                            flow: Some(format!("flow-{a}")),
+                            parameters: [
+                                ("channel".to_string(), serde_json::json!("#ops")),
+                                ("n".to_string(), serde_json::json!(a)),
+                            ]
+                            .into_iter()
+                            .collect(),
+                            ..Default::default()
+                        })
+                        .collect();
+                    Arc::new(r)
+                })
+                .collect::<Vec<_>>(),
+        );
+
+        // Both arms must serialise. Measuring the clone without the serialisation
+        // that follows it compares two different jobs, not two ways of doing one.
+        let iters = 300i64;
+        let t = std::time::Instant::now();
+        for _ in 0..iters {
+            let rows: Vec<RuleRow> = st.all().iter().map(|r| r.as_ref().clone()).collect();
+            std::hint::black_box(serde_json::to_string(&rows).unwrap());
+        }
+        let with_clone = t.elapsed().as_secs_f64() / iters as f64 * 1e6;
+
+        let t = std::time::Instant::now();
+        for _ in 0..iters {
+            let rules = st.all();
+            std::hint::black_box(serde_json::to_string(&RuleList(rules)).unwrap());
+        }
+        let direct = t.elapsed().as_secs_f64() / iters as f64 * 1e6;
+
+        // And the clone on its own, so the saving can be attributed.
+        let t = std::time::Instant::now();
+        for _ in 0..iters {
+            let rows: Vec<RuleRow> = st.all().iter().map(|r| r.as_ref().clone()).collect();
+            std::hint::black_box(&rows);
+        }
+        let clone_only = t.elapsed().as_secs_f64() / iters as f64 * 1e6;
+
+        println!(
+            "{n} rules per list: clone then serialise {with_clone:.0} us, \
+             serialise directly {direct:.0} us ({:.1}x); the clone alone is \
+             {clone_only:.0} us",
+            with_clone / direct
+        );
+    }
+
+    #[test]
+    fn get_returns_a_plain_row() {
+        let st = state_with(&[1, 2]);
+        st.update_counters(1, 8, Some(80));
+        let r: RuleRow = st.get(1).expect("rule 1");
+        assert_eq!(r.id, 1);
+        assert_eq!(r.fire_count, 8);
+        assert_eq!(r.last_fired, Some(80));
+        assert!(st.get(99).is_none());
+    }
+
+    #[test]
+    fn an_empty_rule_set_handles_updates() {
+        let st = RulesState::default();
+        st.update_counters(1, 1, Some(1));
+        assert!(st.all().is_empty());
     }
 }

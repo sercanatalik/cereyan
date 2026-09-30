@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-pub const RING_SIZE: usize = 4_096;
+pub const RING_SIZE: usize = 65_536;
 
 /// Sent once after a database reset, with its scope; clients reload everything.
 pub const DATABASE_RESET: &str = "database.reset";
@@ -72,12 +72,19 @@ impl Broadcaster {
     }
 
     /// Events after `since`, or None when `since` is older than the ring.
+    ///
+    /// Returns `None` when `since` is so old that the ring has wrapped around
+    /// and the requested events are gone. Specifically, if `since < oldest - 1`,
+    /// the events are no longer in the ring. The boundary case `since == oldest - 1`
+    /// returns the oldest event (since `seq > since` includes it).
     pub fn replay(&self, since: u64) -> Option<Vec<Arc<StreamEvent>>> {
         let ring = self.ring.lock().unwrap_or_else(|e| e.into_inner());
         let oldest = ring.front().map(|e| e.seq);
         match oldest {
             None => Some(Vec::new()),
-            Some(oldest) if since + 1 < oldest => None,
+            // `since < oldest - 1` is equivalent to `since + 1 < oldest` but
+            // more readable: the requested events are gone.
+            Some(oldest) if since < oldest.saturating_sub(1) => None,
             Some(_) => Some(ring.iter().filter(|e| e.seq > since).cloned().collect()),
         }
     }
@@ -102,5 +109,22 @@ mod tests {
         // Exactly the oldest buffered position is still replayable.
         let oldest = latest - RING_SIZE as u64 + 1;
         assert_eq!(b.replay(oldest - 1).unwrap().len(), RING_SIZE);
+    }
+
+    #[test]
+    fn replay_boundary_case() {
+        let b = Broadcaster::new();
+        // Publish 5 events with seq 1..=5.
+        for i in 1..=5 {
+            b.publish("run.updated", i.to_string(), serde_json::json!({"i": i}));
+        }
+        // since = 0: all events are after 0.
+        assert_eq!(b.replay(0).unwrap().len(), 5);
+        // since = 1: events 2..=5 are after 1.
+        assert_eq!(b.replay(1).unwrap().len(), 4);
+        // since = 4: only event 5 is after 4.
+        assert_eq!(b.replay(4).unwrap().len(), 1);
+        // since = 5: no events after 5.
+        assert_eq!(b.replay(5).unwrap().len(), 0);
     }
 }

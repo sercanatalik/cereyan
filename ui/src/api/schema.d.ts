@@ -1617,6 +1617,23 @@ export interface components {
             /** Format: int64 */
             run_id?: number | null;
         };
+        /** @description One of the worker's engines and the run it is executing. */
+        EngineStats: {
+            engine_id: string;
+            flow?: string | null;
+            module: string;
+            /** Format: int64 */
+            run_id?: number | null;
+            /**
+             * Format: int64
+             * @description Seconds in the current run, or since the engine started when it has none.
+             */
+            since_secs: number;
+            /** @description The processor slot, from 1. */
+            slot: number;
+            /** @description `starting`, `idle`, `running` or `draining`. */
+            status: string;
+        };
         /** @description One engine as the Queue page shows it. */
         EngineView: {
             /** @description `server`, or the worker's name. */
@@ -1852,6 +1869,25 @@ export interface components {
             /** @default null */
             unique: null | components["schemas"]["UniqueSpec"];
         };
+        /** @description Runs of one flow that started on a worker since it started. */
+        FlowStats: {
+            /** Format: int64 */
+            cancelled: number;
+            /** Format: int64 */
+            completed: number;
+            /** Format: int64 */
+            crashed: number;
+            /** Format: int64 */
+            failed: number;
+            flow: string;
+            /**
+             * Format: int64
+             * @description When the latest completed run here ended (microseconds).
+             */
+            last_completed_at?: number | null;
+            /** Format: int64 */
+            running: number;
+        };
         FlowSummary: components["schemas"]["Flow"] & {
             /** @description The batch key of a keyed fan-in. */
             batch_key?: string | null;
@@ -1911,6 +1947,17 @@ export interface components {
             commands: Record<string, never>[];
             drift: string[];
             state: string;
+            stats?: null | components["schemas"]["HeartbeatStats"];
+        };
+        /** @description Counts the server keeps for a worker: what its status page shows. */
+        HeartbeatStats: {
+            by_flow: components["schemas"]["FlowStats"][];
+            engines: components["schemas"]["EngineStats"][];
+            /**
+             * Format: int64
+             * @description The worker's start time (microseconds): runs that started before it are not counted.
+             */
+            since: number;
         };
         HostTotals: {
             busy: number;

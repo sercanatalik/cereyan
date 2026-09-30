@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **A status page on every worker.** `cereyan worker` serves a read-only page, built from the same UI bundle as the server's: its state, runs completed and failed since it started with a bar per flow, each processor's engine and run, its last 20 messages, and its host details. When the server cannot be reached, the page says so, keeps the last counts marked "as of" when they arrived, and goes on showing what the worker knows itself. `status.json` returns the same data, and `healthz` answers 503 after three missed heartbeats. The page binds to `127.0.0.1` on a port the OS picks, which the worker logs at start and the Workers tab shows. Choose another address with `--status-host` and `--status-port` (or `[worker] status_host` and `status_port`). Links are relative, so a reverse proxy can serve the page under any path. A port that cannot be bound stops the worker before it registers. The worker now opens this one port. It used to open none. [Run across machines](https://sercanatalik.github.io/cereyan/guides/run-across-machines/)
+- **Heartbeat answers carry `stats`.** `POST /api/workers/{id}/heartbeat` also returns the worker's runs per flow and state since its reported start time, and the run each of its engines is executing. Workers from 3.0 ignore it.
+
 ## 3.0.1 (2026-09-29)
 
 - **3.0.0 was tagged but never published.** Its Windows test run failed, so the release was held back. 3.0.1 is the same release plus test-suite fixes: test workers start in their own process group so a worker can drain on Ctrl-Break, tests that need four processors skip on smaller runners, and rule-firing tests wait for the firings to finish. The notes below describe 3.0.

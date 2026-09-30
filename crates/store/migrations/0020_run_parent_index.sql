@@ -1,0 +1,33 @@
+-- Whether a crashed run still has a rerun coming.
+--
+-- `active_runs_of_schedule` treats a Crashed run as live while a run points at
+-- it:
+--
+--   ... OR (r.state_type = 'Crashed'
+--           AND NOT EXISTS (SELECT 1 FROM run c WHERE c.parent_run_id = r.id))
+--
+-- `parent_run_id` was the only column that query filters on with no index to
+-- serve it, so the subquery planned as a full scan of `run` -- once per Crashed
+-- run of the schedule, inside a CORRELATED SCALAR SUBQUERY. Measured on 50,000
+-- runs of which 10,000 were Crashed: 21.5 s scanned against 2.7 ms indexed,
+-- 7,700x. It is reached from the continuous-schedule fire path, from the
+-- slot waiter, and from the schedule detail page, so at that size it reads as a
+-- hang rather than as slowness.
+--
+-- `NOT EXISTS` is the worst case for this: a subquery that finds no match must
+-- look at every row before concluding "nothing", so a crashed run with no rerun
+-- -- exactly the case the rule exists to detect -- costs the most.
+--
+-- One column, not (parent_run_id, id): the subquery selects nothing, so the
+-- search is COVERING and no run row is visited. The other ten indexes on `run`
+-- are untouched; the planner is asserted to keep using each of them.
+--
+-- Cost, measured rather than assumed: 14% on run inserts in the production
+-- batch shape, about 1.58 us per insert, 76 KB. Accepted because the read saves
+-- 21.5 s per call against a break-even near 13.6 million run inserts between
+-- two calls.
+--
+-- The recursive chain walks elsewhere read `parent_run_id` going *upward* --
+-- r.id = chain.id -- and are already served by the integer primary key, so they
+-- need nothing from this index.
+CREATE INDEX run_parent_run_id ON run (parent_run_id);

@@ -31,6 +31,7 @@ pub use auth::{AuthenticatedUser, Authenticator};
 pub use custom::{check_conflicts, DispatchRequest, DispatchResponse, RouteDispatcher, RouteSpec};
 pub use rules::RuleDispatcher;
 pub use state::AppState;
+pub use ui::asset as ui_asset;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

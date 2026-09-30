@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use cereyan_core::{new_id, now_micros, propose, Id, Proposal, RunPolicy, State, TaskRun};
+use cereyan_core::{new_id, now_micros, propose, Event, Id, Proposal, RunPolicy, State, TaskRun};
 use crossbeam_channel::{Receiver, Sender};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -403,9 +403,9 @@ pub enum WriteCommand {
         key: String,
         reply: Reply<bool>,
     },
-    AppendEvent(NewEvent, Reply<(i64, Id)>),
+    AppendEvent(NewEvent, Reply<(Event, Id)>),
     /// Many events in one transaction (task-run events from a report).
-    AppendEvents(Vec<NewEvent>, Reply<Vec<(i64, Id)>>),
+    AppendEvents(Vec<NewEvent>, Reply<Vec<(Event, Id)>>),
     UpsertRule(RuleWrite, Reply<i64>),
     /// Arm an expectation; returns the existing open one for the same key.
     ArmExpectation(ArmExpectation, Reply<i64>),
@@ -1245,26 +1245,36 @@ fn create_run(conn: &Connection, r: &CreateRun) -> Result<(i64, Id)> {
 
 fn create_task_run(conn: &Connection, t: &CreateTaskRun) -> Result<(i64, Id)> {
     let id = t.external_id.unwrap_or_else(new_id);
-    conn.execute(
-        "INSERT INTO task_run (external_id, run_id, name, task_key, dynamic_key, created_at, parents, pass)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-         ON CONFLICT (external_id) DO NOTHING",
-        params![
-            id.as_bytes().as_slice(),
-            t.run_id,
-            t.name,
-            t.task_key,
-            t.dynamic_key,
-            now_micros(),
-            serde_json::to_string(&t.parents).unwrap_or_else(|_| "[]".into()),
-            t.pass
-        ],
-    )?;
-    let row_id: i64 = conn.query_row(
-        "SELECT id FROM task_run WHERE external_id = ?1",
-        params![id.as_bytes().as_slice()],
-        |r| r.get(0),
-    )?;
+    // Use RETURNING id to get the row ID directly from the INSERT.
+    // If ON CONFLICT DO NOTHING skips the insert, fall back to SELECT.
+    let row_id: i64 = conn
+        .query_row(
+            "INSERT INTO task_run (external_id, run_id, name, task_key, dynamic_key, created_at, parents, pass)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT (external_id) DO NOTHING
+             RETURNING id",
+            params![
+                id.as_bytes().as_slice(),
+                t.run_id,
+                t.name,
+                t.task_key,
+                t.dynamic_key,
+                now_micros(),
+                serde_json::to_string(&t.parents).unwrap_or_else(|_| "[]".into()),
+                t.pass
+            ],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or_else(|| {
+            // Conflict was ignored: fetch the existing row's id.
+            conn.query_row(
+                "SELECT id FROM task_run WHERE external_id = ?1",
+                params![id.as_bytes().as_slice()],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+        });
     Ok((row_id, id))
 }
 
@@ -1611,7 +1621,7 @@ fn apply_report(conn: &Connection, run_id: i64, events: Vec<ReportEvent>) -> Res
                             related,
                         },
                     )?;
-                    out.event_ids.push(eid);
+                    out.event_ids.push(eid.id);
                 }
                 ReportEvent::Artifact {
                     external_id,
@@ -2059,8 +2069,14 @@ fn sync_skip_marks(conn: &Connection, schedule_id: i64) -> Result<Vec<i64>> {
     Ok(changed)
 }
 
-fn append_event(conn: &Connection, e: &NewEvent) -> Result<(i64, Id)> {
-    let id = new_id();
+/// Insert one event and return it as stored, alongside the external id.
+///
+/// Every column is already in hand here, so the row is assembled rather than
+/// read back: the caller publishes and evaluates this event directly. `occurred`
+/// is bound once and used for both the insert and the returned struct, so the
+/// two can never disagree.
+fn append_event(conn: &Connection, e: &NewEvent) -> Result<(Event, Id)> {
+    let external_id = new_id();
     // An event about a run always names its flow too, so a project's events
     // can be found through `event_flow`.
     let flow_id = match (e.flow_id, e.run_id) {
@@ -2070,23 +2086,45 @@ fn append_event(conn: &Connection, e: &NewEvent) -> Result<(i64, Id)> {
             .optional()?,
         (flow_id, _) => flow_id,
     };
+    let occurred = now_micros();
+    // Serialise once and derive the returned payload from the same text, so the
+    // struct matches the row exactly (`event_from_row` parses this same string
+    // and falls back to an empty map for a non-object payload).
+    let payload_text = e.payload.to_string();
     conn.execute(
         "INSERT INTO event (external_id, kind, timestamp, run_id, flow_id, payload, resource_kind, resource_id, resource_name, related)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
-            id.as_bytes().as_slice(),
+            external_id.as_bytes().as_slice(),
             e.name,
-            now_micros(),
+            occurred,
             e.run_id,
             flow_id,
-            e.payload.to_string(),
+            payload_text,
             e.resource.kind,
             e.resource.id,
             e.resource.name,
             serde_json::to_string(&e.related).unwrap_or_else(|_| "[]".into())
         ],
     )?;
-    Ok((conn.last_insert_rowid(), id))
+    let id = conn.last_insert_rowid();
+    Ok((
+        Event {
+            id,
+            // The writer assigns ids in commit order, so the row id is the
+            // sequence number; `event_from_row` derives `seq` the same way.
+            seq: id,
+            external_id,
+            name: e.name.clone(),
+            occurred,
+            resource: e.resource.clone(),
+            related: e.related.clone(),
+            run_id: e.run_id,
+            flow_id,
+            payload: serde_json::from_str(&payload_text).unwrap_or_default(),
+        },
+        external_id,
+    ))
 }
 
 /// The run resource and its flow id, for engine-reported custom events.

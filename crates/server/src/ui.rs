@@ -41,6 +41,16 @@ pub async fn serve(State(state): State<Arc<AppState>>, uri: Uri) -> Response {
     }
 }
 
+/// An embedded UI file and its MIME type, for a process that serves one without
+/// the server: the worker's status page (`worker.html` and its assets).
+pub fn asset(path: &str) -> Option<(Vec<u8>, String)> {
+    let path = path.trim_start_matches('/');
+    Assets::get(path).map(|file| {
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        (file.data.into_owned(), mime.as_ref().to_string())
+    })
+}
+
 /// The title the UI shows when `[ui] title` is missing or empty.
 pub const DEFAULT_TITLE: &str = "cereyan";
 const MAX_TITLE_CHARS: usize = 80;

@@ -22,6 +22,11 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0015_unique_runs.sql"),
     include_str!("../migrations/0016_task_state.sql"),
     include_str!("../migrations/0017_remote_workers.sql"),
+    include_str!("../migrations/0018_task_run_run_state_index.sql"),
+    include_str!("../migrations/0019_event_run_id_index.sql"),
+    include_str!("../migrations/0020_run_parent_index.sql"),
+    include_str!("../migrations/0021_run_schedule_id_index.sql"),
+    include_str!("../migrations/0022_scheduled_window_index.sql"),
 ];
 
 pub fn latest_version() -> i64 {

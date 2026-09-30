@@ -44,14 +44,14 @@ pub struct ProjectPreview {
     pub active_runs: i64,
 }
 
-fn summarize(state: &AppState, project: ProjectRow) -> ProjectSummary {
+fn summarize(state: &AppState, project: ProjectRow, runs: i64) -> ProjectSummary {
     let live_flows = project
         .flow_ids
         .iter()
         .filter(|id| state.is_live(**id))
         .count();
     ProjectSummary {
-        runs: state.index.counts(Some(&project.name)).runs.values().sum(),
+        runs,
         flows: project.flow_ids.len(),
         live_flows,
         last_run_at: project.last_run_at,
@@ -85,11 +85,17 @@ fn matching_rules(state: &AppState, name: &str) -> usize {
 pub async fn list_projects(
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<Json<Vec<ProjectSummary>>> {
+    // One pass over the index for every project's total, rather than building
+    // the whole count aggregate once per project.
+    let totals = state.index.run_totals_by_project();
     let mut out: Vec<ProjectSummary> = state
         .store
         .list_projects()?
         .into_iter()
-        .map(|p| summarize(&state, p))
+        .map(|p| {
+            let runs = totals.get(p.name.as_str()).copied().unwrap_or(0);
+            summarize(&state, p, runs)
+        })
         .collect();
     out.sort_by(|a, b| b.served.cmp(&a.served).then_with(|| a.name.cmp(&b.name)));
     Ok(Json(out))
@@ -173,6 +179,9 @@ pub async fn delete_project(
         tokio::task::spawn_blocking(move || st.store.delete_flows_batched(&ids, DELETE_BATCH))
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))??;
+    // The flows are gone, so the cached dependency graph must not keep
+    // pointing at them.
+    state.invalidate_dep_graph();
     for flow_id in &project.flow_ids {
         state.index.remove_flow(*flow_id);
         state.stream.publish(

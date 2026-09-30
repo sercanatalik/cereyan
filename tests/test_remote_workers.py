@@ -100,7 +100,7 @@ def srv(isolated_home, project):
 
 class WorkerProcess:
     def __init__(self, tmp_path, srv_url, *, name="w1", extra_files=None, token=TOKEN, processors=2,
-                 shared=None, source=None, env=None):
+                 shared=None, source=None, env=None, extra_args=None):
         self.checkout = tmp_path / f"{name}-checkout"
         self.checkout.mkdir()
         shutil.copy(source / "pipeline.py", self.checkout / "pipeline.py")
@@ -120,6 +120,7 @@ class WorkerProcess:
             argv += ["--token", token]
         for p in shared or []:
             argv += ["--shared-path", str(p)]
+        argv += list(extra_args or [])
         self.log = open(self.log_path, "ab")
         self.proc = subprocess.Popen(argv, env=env, stdout=self.log, stderr=subprocess.STDOUT, **own_group())
 

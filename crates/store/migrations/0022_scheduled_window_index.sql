@@ -1,0 +1,81 @@
+-- Runs waiting to start, in the order they are due.
+--
+-- Three readers ask "what is due between now and an hour from now?":
+--
+--   scheduled_between            WHERE state_type = 'Scheduled'
+--                                  AND scheduled_time > ?1 AND scheduled_time <= ?2
+--   scheduled_queue_runs         the same, narrowed       (GET /api/queue, 5s poll)
+--   scheduled_timeline_run_rows  the same, narrowed       (worker timeline)
+--
+-- `run` has two indexes leading with `state_type`, and neither holds
+-- `scheduled_time`:
+--
+--   run_state_id     (state_type, id)
+--   run_state_start  (state_type, start_time)
+--
+-- so the planner seeks on `state_type = 'Scheduled'` and then walks every
+-- scheduled run, discarding those outside the window and sorting the rest:
+--
+--   SEARCH r USING INDEX run_state_id (state_type=?)
+--   USE TEMP B-TREE FOR ORDER BY
+--
+-- The sort is the larger half of the cost, because it also defeats the LIMIT --
+-- SQLite cannot stop after the first N rows when it does not yet know which rows
+-- come first. So the query costs a pass over the whole pending queue to answer a
+-- question about the next hour of it.
+--
+-- `state_type` leads because it is the equality term, and only the column
+-- immediately after an equality prefix can be range-scanned. `scheduled_time`
+-- second turns the window into a range seek and makes the ordering a walk down
+-- the index, with a partial sort only among runs due at the same microsecond --
+-- which is rare, and which can honour the LIMIT.
+--
+-- `run_schedule (schedule_id, scheduled_time)` already holds the right second
+-- column and cannot be reused: it is PARTIAL over rows with a schedule_id, and a
+-- manually queued run has none while still being Scheduled. Widening it to cover
+-- those rows would produce this index.
+--
+-- A trailing `id` was measured and rejected: the plan does not change and the
+-- index is wider to write.
+--
+-- Measured over 500 flows and an equal number of Scheduled and Completed runs,
+-- reading a one-hour window from the far end of the queue (so exactly 1 run is
+-- due). The window is fixed; only the size of the queue behind it changes:
+--
+--   pending Scheduled   today        with index
+--              1     4.5 us          2.8 us
+--             10     6.1 us          2.6 us
+--             25    11.5 us          2.9 us
+--             50    19.5 us          3.0 us
+--            100    35.6 us          3.0 us
+--            250    84.9 us          2.8 us
+--            500   169.1 us          2.9 us
+--          2,000   676.1 us          2.9 us
+--         10,000  4416.8 us          3.3 us
+--         20,000  9908.6 us          3.4 us
+--
+-- The shape is the point: today's cost is linear in the pending queue, about
+-- 0.49 us per queued run with no sign of flattening, and the indexed cost is flat
+-- at about 3 us. Read the middle column rather than the ratio -- it would reach
+-- 50 ms at 100,000 pending and the third column does not move.
+--
+-- An earlier version of this comment claimed a crossover, with the index a loss
+-- below ~500 pending runs. That came from a Python harness running a cheaper query
+-- (no join, no string decode) against a hand-built database, and it is wrong for
+-- the query the application runs. The numbers above come from the in-repo harness:
+--   CEREYAN_BENCH_REPORT=1 cargo test -p cereyan-store --test store \
+--     report_scheduled_window -- --nocapture
+--
+-- Cost, measured rather than assumed: +1.03 us per insert, 6.48 -> 7.52 us
+-- inserting 5,000 scheduled runs. The trade is 1 us once per run against 673 us
+-- saved on a *single* poll at 2,000 pending -- and the queue page polls every
+-- 5 seconds, so the read side repays the write side within a second of the queue
+-- growing past a hundred runs.
+--
+-- Every other plan over `run` was captured before and after and is unchanged:
+-- run_state_id ordering, the run_state_start sweep, run_flow_id, run_flow_state,
+-- the run_backfill guard, and run_schedule's per-schedule fires. This query is
+-- the only plan that moves. That was worth checking rather than assuming: `run`
+-- already carries three state_type-leading indexes and a fourth could plausibly
+-- have displaced one.
+CREATE INDEX run_state_scheduled ON run (state_type, scheduled_time);

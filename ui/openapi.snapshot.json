@@ -945,6 +945,53 @@
         ],
         "type": "object"
       },
+      "EngineStats": {
+        "description": "One of the worker's engines and the run it is executing.",
+        "properties": {
+          "engine_id": {
+            "type": "string"
+          },
+          "flow": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "module": {
+            "type": "string"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "since_secs": {
+            "description": "Seconds in the current run, or since the engine started when it has none.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "slot": {
+            "description": "The processor slot, from 1.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "description": "`starting`, `idle`, `running` or `draining`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "engine_id",
+          "slot",
+          "module",
+          "status",
+          "since_secs"
+        ],
+        "type": "object"
+      },
       "EngineView": {
         "description": "One engine as the Queue page shows it.",
         "properties": {
@@ -1546,6 +1593,51 @@
         },
         "type": "object"
       },
+      "FlowStats": {
+        "description": "Runs of one flow that started on a worker since it started.",
+        "properties": {
+          "cancelled": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "completed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "crashed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "flow": {
+            "type": "string"
+          },
+          "last_completed_at": {
+            "description": "When the latest completed run here ended (microseconds).",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "running": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "flow",
+          "completed",
+          "failed",
+          "crashed",
+          "cancelled",
+          "running"
+        ],
+        "type": "object"
+      },
       "FlowSummary": {
         "allOf": [
           {
@@ -1757,12 +1849,51 @@
           },
           "state": {
             "type": "string"
+          },
+          "stats": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HeartbeatStats",
+                "description": "What ran on the worker since it started, for its status page."
+              }
+            ]
           }
         },
         "required": [
           "commands",
           "state",
           "drift"
+        ],
+        "type": "object"
+      },
+      "HeartbeatStats": {
+        "description": "Counts the server keeps for a worker: what its status page shows.",
+        "properties": {
+          "by_flow": {
+            "items": {
+              "$ref": "#/components/schemas/FlowStats"
+            },
+            "type": "array"
+          },
+          "engines": {
+            "items": {
+              "$ref": "#/components/schemas/EngineStats"
+            },
+            "type": "array"
+          },
+          "since": {
+            "description": "The worker's start time (microseconds): runs that started before it are not counted.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "since",
+          "by_flow",
+          "engines"
         ],
         "type": "object"
       },

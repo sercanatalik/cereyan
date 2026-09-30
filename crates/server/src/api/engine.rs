@@ -360,11 +360,14 @@ pub async fn report(
     let st = state.clone();
     let custom_ids = outcome.event_ids.clone();
     tokio::task::spawn_blocking(move || {
-        for (eid, _) in appended {
-            st.after_event(eid);
+        // The batch append returned the events, so publishing them needs no
+        // read-back. A report carrying hundreds of task-run transitions would
+        // otherwise cost one `get_event` round trip each.
+        for (event, _) in appended {
+            st.after_event(event);
         }
         for eid in custom_ids {
-            st.after_event(eid);
+            st.after_event_id(eid);
         }
     })
     .await
@@ -493,10 +496,17 @@ pub async fn acquire(
     Json(req): Json<AcquireRequest>,
 ) -> ApiResult<Json<serde_json::Value>> {
     // Names may be templates over the run's parameters (`api:{{ tenant }}`).
-    let parameters = state
-        .store
-        .get_run(req.run_id)?
-        .map(|r| r.parameters)
+    //
+    // One column, and on a blocking thread. A SQLite read inside an `async fn`
+    // occupies one of tokio's per-core worker threads for its duration, and every
+    // other task sharing that worker waits -- which is the wrong thing to do in a
+    // handler that then waits up to 30 seconds anyway. `claim`, below, already
+    // does this; this call had been missed.
+    let st = state.clone();
+    let run_id = req.run_id;
+    let parameters = tokio::task::spawn_blocking(move || st.store.run_parameters(run_id))
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))??
         .unwrap_or_default();
     let needs: Vec<(String, f64)> = req
         .resources
@@ -565,4 +575,55 @@ pub async fn local_path(
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))??;
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod acquire_tests {
+
+    /// Resource names may be templates over the run's parameters (`api:{{ tenant }}`).
+    ///
+    /// The handler now takes that context from `run_parameters` rather than from
+    /// a whole `Run`. The store test proves the two maps are equal, so what is
+    /// pinned here is the rendering itself — over the cases a real run's
+    /// parameters produce, including the ones that are not strings and the ones
+    /// the run does not carry.
+    #[test]
+    fn a_resource_name_is_still_rendered_as_a_template() {
+        type Ctx = serde_json::Map<String, serde_json::Value>;
+        let cases: Vec<(&str, &str, &str)> = vec![
+            ("api:{{ tenant }}", r#"{"tenant":"acme"}"#, "api:acme"),
+            (
+                "db:{{ tenant }}-{{ region }}",
+                r#"{"tenant":"acme","region":"eu"}"#,
+                "db:acme-eu",
+            ),
+            // A placeholder the run does not carry.
+            ("api:{{ missing }}", r#"{"tenant":"acme"}"#, "api:"),
+            // A value that is not a string.
+            ("n:{{ count }}", r#"{"count":42}"#, "n:42"),
+            // An empty context, which is what a malformed column yields.
+            ("api:{{ tenant }}", "{}", "api:"),
+        ];
+        for (name, params, want) in cases {
+            let ctx: Ctx = params.parse().expect("the fixture is a JSON object");
+            assert_eq!(
+                cereyan_core::unique::render_template(name, &ctx),
+                want,
+                "{name} over {params}"
+            );
+        }
+
+        // A name with no placeholder is returned verbatim, without touching the
+        // context -- so a resource called for every run needs no parameters read.
+        let ctx: Ctx = r#"{"tenant":"acme"}"#.parse().unwrap();
+        assert_eq!(
+            cereyan_core::unique::render_template("plain-resource", &ctx),
+            "plain-resource"
+        );
+
+        // And an empty context still yields an empty map, which is the shape the
+        // handler applies `unwrap_or_default()` to.
+        let empty: Option<Ctx> = None;
+        assert_eq!(empty.unwrap_or_default().len(), 0);
+    }
 }

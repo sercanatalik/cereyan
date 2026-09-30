@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use cereyan_core::now_micros;
+use cereyan_core::{now_micros, StateType};
 use serde::Serialize;
 use tokio::sync::watch;
 
@@ -101,16 +101,16 @@ impl Samples {
 }
 
 pub fn sample(state: &AppState) -> Sample {
-    let counts = state.index.counts(None);
-    let engines = state.supervisor.engines_snapshot();
+    // Only the running total is needed here; the projection avoids building the
+    // serialised aggregate (and its per-flow map) every sample.
+    let runs = state.index.runs_by_state(None);
     Sample {
         at: now_micros(),
         queued: state.supervisor.queue_len(),
-        running: counts.runs.get("Running").copied().unwrap_or(0),
-        engines_busy: engines
-            .iter()
-            .filter(|e| !e["current_run"].is_null())
-            .count(),
+        running: runs.get(&StateType::Running).copied().unwrap_or(0),
+        // Counted under the lock, not by filtering a serialised snapshot: the
+        // supervisor's mutex is contended by every enqueue and poll.
+        engines_busy: state.supervisor.engines_busy_count(),
     }
 }
 
@@ -173,10 +173,62 @@ fn histogram(
 }
 
 /// The whole scrape body.
+/// One `cereyan_flow_runs` series: a flow's project and name, a state, and the
+/// count for that pair.
+///
+/// The counts are keyed by flow id as a string, so each key is parsed and looked
+/// up in `by_id` — a map built once, rather than a scan of `flows` per counted
+/// flow, which made this quadratic in the number of flows.
+///
+/// Ordered by the string key then by state, which is the order the series have
+/// always been emitted in. A key that is not an id, or an id with no row, is
+/// skipped: a count can outlive the flow it names.
+fn flow_run_series(
+    flows: &[cereyan_store::FlowLabel],
+    counts_flows: &std::collections::HashMap<String, std::collections::HashMap<String, i64>>,
+) -> Vec<(String, String, String, i64)> {
+    let by_id: std::collections::HashMap<i64, &cereyan_store::FlowLabel> =
+        flows.iter().map(|f| (f.id, f)).collect();
+    let mut per_flow: Vec<(&String, &std::collections::HashMap<String, i64>)> =
+        counts_flows.iter().collect();
+    per_flow.sort_by(|a, b| a.0.cmp(b.0));
+    let mut out = Vec::new();
+    for (flow_id, per_state) in per_flow {
+        let Some(flow) = flow_id.parse::<i64>().ok().and_then(|id| by_id.get(&id)) else {
+            continue;
+        };
+        let mut entries: Vec<(&String, &i64)> = per_state.iter().collect();
+        entries.sort();
+        for (state_type, n) in entries {
+            out.push((
+                flow.project.clone(),
+                flow.name.clone(),
+                state_type.clone(),
+                *n,
+            ));
+        }
+    }
+    out
+}
+
+/// The two resource gauge lines, one pair per resource row.
+///
+/// Takes the rows rather than the supervisor so it can be checked against the
+/// serialised-object read-back it replaced — including that a total of zero here
+/// is a resource's own zero and not a failed lookup.
+fn resource_lines(out: &mut String, rows: &[crate::supervisor::ResourceRow]) {
+    for r in rows {
+        line(out, "cereyan_resource_total", &[("resource", &r.name)], r.total);
+        line(out, "cereyan_resource_used", &[("resource", &r.name)], r.used);
+    }
+}
+
 pub fn render(state: &AppState) -> String {
     let mut out = String::with_capacity(4096);
     let counts = state.index.counts(None);
-    let flows = state.store.list_flows(None).unwrap_or_default();
+    // Labels only: three plain columns. `list_flows` would also parse every
+    // flow's tags, parameter schema and options, and a scrape needs none of them.
+    let flows = state.store.flow_labels().unwrap_or_default();
 
     header(&mut out, "cereyan_info", "gauge", "Build information.");
     line(
@@ -210,31 +262,13 @@ pub fn render(state: &AppState) -> String {
         "gauge",
         "Runs by flow and state type.",
     );
-    let mut per_flow: Vec<(&String, &std::collections::HashMap<String, i64>)> =
-        counts.flows.iter().collect();
-    per_flow.sort_by(|a, b| a.0.cmp(b.0));
-    for (flow_id, per_state) in per_flow {
-        let Some(flow) = flow_id
-            .parse::<i64>()
-            .ok()
-            .and_then(|id| flows.iter().find(|f| f.id == id))
-        else {
-            continue;
-        };
-        let mut entries: Vec<(&String, &i64)> = per_state.iter().collect();
-        entries.sort();
-        for (state_type, n) in entries {
-            line(
-                &mut out,
-                "cereyan_flow_runs",
-                &[
-                    ("project", &flow.project),
-                    ("flow", &flow.name),
-                    ("state", state_type),
-                ],
-                n,
-            );
-        }
+    for (project, name, state_type, n) in flow_run_series(&flows, &counts.flows) {
+        line(
+            &mut out,
+            "cereyan_flow_runs",
+            &[("project", &project), ("flow", &name), ("state", &state_type)],
+            n,
+        );
     }
     header(
         &mut out,
@@ -310,22 +344,7 @@ pub fn render(state: &AppState) -> String {
         "gauge",
         "Resource units in use by running runs.",
     );
-    if let Some(resources) = state.supervisor.resources_snapshot().as_object() {
-        for (name, v) in resources {
-            line(
-                &mut out,
-                "cereyan_resource_total",
-                &[("resource", name)],
-                v["total"].as_f64().unwrap_or(0.0),
-            );
-            line(
-                &mut out,
-                "cereyan_resource_used",
-                &[("resource", name)],
-                v["used"].as_f64().unwrap_or(0.0),
-            );
-        }
-    }
+    resource_lines(&mut out, &state.supervisor.resource_rows());
 
     header(
         &mut out,
@@ -333,7 +352,7 @@ pub fn render(state: &AppState) -> String {
         "counter",
         "Times each rule has fired.",
     );
-    for rule in state.rules.all() {
+    for rule in state.rules.all().iter() {
         line(
             &mut out,
             "cereyan_rule_firings_total",
@@ -454,5 +473,322 @@ mod tests {
         let mut out = String::new();
         line(&mut out, "m", &[("a", "q\"x\\y\nz")], 1);
         assert_eq!(out, "m{a=\"q\\\"x\\\\y\\nz\"} 1\n");
+    }
+}
+
+#[cfg(test)]
+mod flow_series_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn flow(id: i64, project: &str, name: &str) -> cereyan_store::FlowLabel {
+        cereyan_store::FlowLabel {
+            id,
+            project: project.into(),
+            name: name.into(),
+        }
+    }
+
+    fn counts(entries: &[(&str, &[(&str, i64)])]) -> HashMap<String, HashMap<String, i64>> {
+        entries
+            .iter()
+            .map(|(id, states)| {
+                (
+                    id.to_string(),
+                    states
+                        .iter()
+                        .map(|(s, n)| (s.to_string(), *n))
+                        .collect::<HashMap<String, i64>>(),
+                )
+            })
+            .collect()
+    }
+
+    /// The pre-change algorithm, kept as the oracle: a scan per counted flow.
+    fn series_the_old_way(
+        flows: &[cereyan_store::FlowLabel],
+        counts_flows: &HashMap<String, HashMap<String, i64>>,
+    ) -> Vec<(String, String, String, i64)> {
+        let mut per_flow: Vec<(&String, &HashMap<String, i64>)> = counts_flows.iter().collect();
+        per_flow.sort_by(|a, b| a.0.cmp(b.0));
+        let mut out = Vec::new();
+        for (flow_id, per_state) in per_flow {
+            let Some(flow) = flow_id
+                .parse::<i64>()
+                .ok()
+                .and_then(|id| flows.iter().find(|f| f.id == id))
+            else {
+                continue;
+            };
+            let mut entries: Vec<(&String, &i64)> = per_state.iter().collect();
+            entries.sort();
+            for (state_type, n) in entries {
+                out.push((
+                    flow.project.clone(),
+                    flow.name.clone(),
+                    state_type.clone(),
+                    *n,
+                ));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_series_match_the_previous_implementation() {
+        let flows = vec![
+            flow(1, "p", "etl"),
+            flow(2, "p", "billing"),
+            flow(3, "q", "rollup"),
+            flow(10, "p", "ten"),
+        ];
+        // Several states per flow, out of order, plus a flow with one.
+        let c = counts(&[
+            ("1", &[("Failed", 2), ("Completed", 5)]),
+            ("2", &[("Running", 1)]),
+            ("10", &[("Pending", 7)]),
+        ]);
+        assert_eq!(flow_run_series(&flows, &c), series_the_old_way(&flows, &c));
+    }
+
+    #[test]
+    fn a_flows_series_carries_its_project_and_name() {
+        let flows = vec![flow(7, "warehouse", "load")];
+        let c = counts(&[("7", &[("Completed", 3)])]);
+        assert_eq!(
+            flow_run_series(&flows, &c),
+            vec![(
+                "warehouse".to_string(),
+                "load".to_string(),
+                "Completed".to_string(),
+                3
+            )]
+        );
+    }
+
+    #[test]
+    fn a_flow_with_several_states_gets_one_series_each() {
+        let flows = vec![flow(1, "p", "etl")];
+        let c = counts(&[("1", &[("Failed", 2), ("Completed", 5), ("Running", 1)])]);
+        let got = flow_run_series(&flows, &c);
+        assert_eq!(got.len(), 3);
+        // Ordered by state name.
+        let states: Vec<&str> = got.iter().map(|r| r.2.as_str()).collect();
+        assert_eq!(states, vec!["Completed", "Failed", "Running"]);
+        let counts: Vec<i64> = got.iter().map(|r| r.3).collect();
+        assert_eq!(counts, vec![5, 2, 1]);
+    }
+
+    /// A count can outlive the flow it names, and a non-numeric key is possible
+    /// if the index's key type ever changes. Both must be skipped, not panic.
+    #[test]
+    fn a_count_with_no_flow_row_is_skipped() {
+        let flows = vec![flow(1, "p", "etl")];
+        let c = counts(&[("1", &[("Completed", 1)]), ("999", &[("Completed", 4)])]);
+        let got = flow_run_series(&flows, &c);
+        assert_eq!(got.len(), 1, "the orphan count should be skipped");
+        assert_eq!(got[0].1, "etl");
+    }
+
+    #[test]
+    fn a_key_that_is_not_an_id_is_skipped() {
+        let flows = vec![flow(1, "p", "etl")];
+        let c = counts(&[("1", &[("Completed", 1)]), ("not-a-number", &[("Failed", 9)])]);
+        let got = flow_run_series(&flows, &c);
+        assert_eq!(got.len(), 1, "a non-numeric key should be skipped");
+        assert_eq!(got[0].2, "Completed");
+    }
+
+    #[test]
+    fn no_counts_yields_no_series() {
+        assert!(flow_run_series(&[flow(1, "p", "etl")], &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn counts_with_no_flows_yield_no_series() {
+        let c = counts(&[("1", &[("Completed", 1)])]);
+        assert!(flow_run_series(&[], &c).is_empty());
+    }
+
+    /// The ordering is by the *string* key, so "10" precedes "9". That is
+    /// pre-existing and pinned here so a well-meaning reordering shows up.
+    #[test]
+    fn series_are_ordered_by_the_string_key() {
+        let flows = vec![flow(2, "p", "b"), flow(10, "p", "j")];
+        let c = counts(&[("2", &[("Completed", 1)]), ("10", &[("Completed", 1)])]);
+        let got = flow_run_series(&flows, &c);
+        let names: Vec<&str> = got.iter().map(|r| r.1.as_str()).collect();
+        assert_eq!(names, vec!["j", "b"], "string order puts 10 before 2");
+    }
+}
+
+#[cfg(test)]
+mod resource_line_tests {
+    use super::*;
+    use crate::supervisor::ResourceRow;
+
+    fn row(name: &str, total: f64, used: f64, pattern: Option<&str>) -> ResourceRow {
+        ResourceRow {
+            name: name.into(),
+            total,
+            used,
+            pattern: pattern.map(|p| p.into()),
+        }
+    }
+
+    /// The lines the render emitted before this change: it built a JSON object,
+    /// navigated it by string key, and fell back to `0.0` for anything it could
+    /// not read. This is the oracle.
+    fn lines_the_old_way(rows: &[ResourceRow]) -> String {
+        let v: serde_json::Value = serde_json::Value::Object(
+            rows.iter()
+                .map(|r| {
+                    let mut e = serde_json::json!({"total": r.total, "used": r.used});
+                    if let Some(p) = &r.pattern {
+                        e["pattern"] = serde_json::Value::String(p.clone());
+                    }
+                    (r.name.clone(), e)
+                })
+                .collect(),
+        );
+        let mut out = String::new();
+        if let Some(resources) = v.as_object() {
+            for (name, v) in resources {
+                line(
+                    &mut out,
+                    "cereyan_resource_total",
+                    &[("resource", name)],
+                    v["total"].as_f64().unwrap_or(0.0),
+                );
+                line(
+                    &mut out,
+                    "cereyan_resource_used",
+                    &[("resource", name)],
+                    v["used"].as_f64().unwrap_or(0.0),
+                );
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_lines_match_the_previous_implementation() {
+        // Sorted by name, which is what `resource_rows` guarantees. The old path
+        // sorted the names itself; the new one inherits the order, so this is the
+        // only order the two can actually meet in.
+        let rows = vec![
+            row("cpu", 4.0, 1.5, None),
+            row("exact", 7.0, 0.0, None),
+            row("gpu-0", 2.0, 2.0, Some("gpu-*")),
+            row("undeclared", 1.0, 0.25, None),
+        ];
+        let mut out = String::new();
+        resource_lines(&mut out, &rows);
+        assert_eq!(out, lines_the_old_way(&rows));
+    }
+
+    #[test]
+    fn a_zero_total_is_emitted_as_zero() {
+        // The point of the change: this must be a real zero on the wire, and the
+        // old fallback also produced a zero — so the test asserts the value is
+        // present and correctly labelled, not merely that it is absent.
+        let mut out = String::new();
+        resource_lines(&mut out, &[row("idle", 0.0, 0.0, None)]);
+        assert!(
+            out.contains("cereyan_resource_total{resource=\"idle\"} 0"),
+            "a zero total must be emitted, not skipped: {out}"
+        );
+        assert!(
+            out.contains("cereyan_resource_used{resource=\"idle\"} 0"),
+            "a zero usage must be emitted: {out}"
+        );
+    }
+
+    #[test]
+    fn each_resource_gets_a_total_and_a_usage_line() {
+        let mut out = String::new();
+        resource_lines(
+            &mut out,
+            &[
+                row("cpu", 4.0, 1.5, None),
+                row("memory", 1024.0, 512.0, None),
+            ],
+        );
+        for name in ["cpu", "memory"] {
+            assert!(
+                out.contains(&format!("cereyan_resource_total{{resource=\"{name}\"}}")),
+                "no total line for {name}: {out}"
+            );
+            assert!(
+                out.contains(&format!("cereyan_resource_used{{resource=\"{name}\"}}")),
+                "no used line for {name}: {out}"
+            );
+        }
+        assert!(out.contains("cereyan_resource_total{resource=\"cpu\"} 4"), "{out}");
+        assert!(out.contains("cereyan_resource_used{resource=\"cpu\"} 1.5"), "{out}");
+        assert!(out.contains("cereyan_resource_total{resource=\"memory\"} 1024"), "{out}");
+    }
+
+    /// `resource_lines` emits in the order it is given; the sorted guarantee lives
+    /// in `resource_rows`, which sorts the union of declared and in-use names.
+    /// The defect this change exists for, made visible.
+    ///
+    /// The old path read each value back out of a serialised object with
+    /// `as_f64().unwrap_or(0.0)`. A value it could not read became a **zero** —
+    /// and for a resource gauge a zero reads as an idle resource, so the failure
+    /// looked like data rather than like a bug. `NaN` stands in for "a value the
+    /// lookup could not read"; a resource total is not normally NaN, but the
+    /// shape of the failure is what matters, and both paths can be compared on it.
+    #[test]
+    fn a_value_the_old_path_could_not_read_reported_zero() {
+        let rows = [row("broken", f64::NAN, 0.0, None)];
+        let mut new_out = String::new();
+        resource_lines(&mut new_out, &rows);
+        let old_out = lines_the_old_way(&rows);
+
+        // The old path substituted a zero.
+        assert!(
+            old_out.contains("cereyan_resource_total{resource=\"broken\"} 0\n"),
+            "the old path should have reported a zero: {old_out}"
+        );
+        // The new path reports the row's own value, whatever it is.
+        assert_ne!(
+            new_out, old_out,
+            "the new path must not substitute a value it was handed"
+        );
+        // Scoped to the total line: the *usage* of this row really is zero, and
+        // emitting that is correct.
+        let total_line = new_out
+            .lines()
+            .find(|l| l.starts_with("cereyan_resource_total"))
+            .expect("a total line");
+        assert!(
+            total_line.contains("NaN"),
+            "the new path must report the value it was handed: {total_line}"
+        );
+        assert_eq!(
+            total_line, "cereyan_resource_total{resource=\"broken\"} NaN",
+            "the total line carries the row's own value"
+        );
+    }
+
+    #[test]
+    fn the_lines_follow_the_order_of_the_rows() {
+        let rows = vec![row("b", 2.0, 0.0, None), row("a", 1.0, 0.0, None)];
+        let mut out = String::new();
+        resource_lines(&mut out, &rows);
+        let order: Vec<&str> = out
+            .lines()
+            .filter_map(|l| l.split('"').nth(1))
+            .step_by(2)
+            .collect();
+        assert_eq!(order, vec!["b", "a"], "the given order is preserved");
+    }
+
+    #[test]
+    fn no_resources_emits_no_lines() {
+        let mut out = String::new();
+        resource_lines(&mut out, &[]);
+        assert!(out.is_empty());
     }
 }

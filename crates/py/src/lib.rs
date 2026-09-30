@@ -485,7 +485,7 @@ impl Store {
                     resource,
                     related,
                 })
-                .map(|(id, _)| id)
+                .map(|(event, _)| event.id)
         })
         .map_err(to_py)
     }
@@ -718,6 +718,16 @@ fn module_fingerprint(source_dir: &str, module: &str) -> Option<String> {
     cereyan_server::fingerprint::module_fingerprint(std::path::Path::new(source_dir), module)
 }
 
+/// An embedded UI file as `(bytes, mime type)`, or `None`: the worker serves
+/// its status page from these.
+#[pyfunction]
+fn ui_asset<'py>(
+    py: Python<'py>,
+    path: &str,
+) -> Option<(Bound<'py, pyo3::types::PyBytes>, String)> {
+    cereyan_server::ui_asset(path).map(|(data, mime)| (pyo3::types::PyBytes::new(py, &data), mime))
+}
+
 /// Render a rule action's templates against a JSON context (offline rules).
 #[pyfunction]
 fn render_rule_action(action: &str, context: &str) -> PyResult<String> {
@@ -849,6 +859,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_terminal, m)?)?;
     m.add_function(wrap_pyfunction!(decrypt_secret, m)?)?;
     m.add_function(wrap_pyfunction!(module_fingerprint, m)?)?;
+    m.add_function(wrap_pyfunction!(ui_asset, m)?)?;
     m.add_function(wrap_pyfunction!(render_rule_action, m)?)?;
     m.add_function(wrap_pyfunction!(rule_matches, m)?)?;
     m.add_function(wrap_pyfunction!(schedule_fires, m)?)?;

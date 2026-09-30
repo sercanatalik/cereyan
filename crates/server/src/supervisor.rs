@@ -248,6 +248,23 @@ impl QueuedRun {
     }
 }
 
+/// One resource's limits and usage. See [`Supervisor::resource_rows`].
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct ResourceRow {
+    /// The resource's name. Carried here because the metrics renderer labels its
+    /// lines with it, but **not serialised into the entry**: the snapshot keys
+    /// its object by name, so a `name` field inside the entry would be a wire
+    /// change for the settings endpoint and the two MCP resource tools.
+    #[serde(skip)]
+    pub name: String,
+    pub total: f64,
+    pub used: f64,
+    /// The declared pattern that matched this name, if any. A resource with its
+    /// own exact total has none — it needs no pattern.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+}
+
 /// A non-run job for an engine of a key (hooks, bulk_complete prefilter).
 #[derive(Clone, Debug)]
 pub struct QueuedJob {
@@ -257,7 +274,15 @@ pub struct QueuedJob {
 
 #[derive(Default)]
 pub struct Resources {
-    pub totals: HashMap<String, f64>,
+    /// Declared limits, by exact name.
+    ///
+    /// Private so the pattern list below cannot fall out of step with it: every
+    /// write goes through `insert_total`.
+    totals: HashMap<String, f64>,
+    /// The names in `totals` that contain `*`, sorted. Maintained on insert so
+    /// `pattern_for` borrows and scans instead of rebuilding and sorting a
+    /// vector on every call — which happens once per queued run.
+    patterns: Vec<String>,
     pub used: HashMap<String, f64>,
     /// Leases per run: (lease id, name, amount).
     pub leases: HashMap<i64, Vec<(u64, String, f64)>>,
@@ -292,15 +317,27 @@ impl Resources {
             .unwrap_or(1.0)
     }
 
+    /// Register a total, keeping the pattern list in step.
+    ///
+    /// Only a *new* pattern name changes the list's order, so updating the
+    /// value of an existing pattern skips the re-sort.
+    fn insert_total(&mut self, name: &str, total: f64) {
+        let is_new = self.totals.insert(name.to_string(), total).is_none();
+        if is_new && name.contains('*') {
+            self.patterns.push(name.to_string());
+            self.patterns.sort();
+        }
+    }
+
     /// The pattern total that gives `name` its total, when it has no explicit one.
     pub fn pattern_for(&self, name: &str) -> Option<&str> {
         if self.totals.contains_key(name) {
             return None;
         }
-        let mut patterns: Vec<&String> = self.totals.keys().filter(|k| k.contains('*')).collect();
-        patterns.sort();
-        patterns
-            .into_iter()
+        // Sorted, so the first match is the same one the old per-call sort
+        // would have picked.
+        self.patterns
+            .iter()
             .find(|p| glob_matches(p, name))
             .map(|p| p.as_str())
     }
@@ -312,16 +349,21 @@ impl Resources {
 
     /// Drop keyed instances nobody holds once there are many of them.
     fn evict_idle(&mut self) {
-        let idle: Vec<String> = self
+        // Below the threshold there is nothing to do, so do not walk the table
+        // or build a vector of cloned keys to discover that.
+        if self.used.len() <= IDLE_INSTANCES_KEPT {
+            return;
+        }
+        let idle = self
             .used
             .iter()
             .filter(|(n, u)| **u <= 1e-9 && !self.totals.contains_key(*n))
-            .map(|(n, _)| n.clone())
-            .collect();
-        if idle.len() > IDLE_INSTANCES_KEPT {
-            for n in idle {
-                self.used.remove(&n);
-            }
+            .count();
+        if idle > IDLE_INSTANCES_KEPT {
+            // Split the struct so the closure can read `totals` while `used` is
+            // mutably borrowed.
+            let Resources { used, totals, .. } = self;
+            used.retain(|n, u| *u > 1e-9 || totals.contains_key(n));
         }
     }
     pub fn free(&self, name: &str) -> f64 {
@@ -423,6 +465,50 @@ impl Inner {
         self.queue.remove(&k)
     }
 
+    /// Keys that currently have an engine able to take a run right now.
+    ///
+    /// Built once per queue scan so the per-run test is a hash lookup instead
+    /// of comparing an `EngineKey` — three `String` comparisons — against every
+    /// engine. The predicate is exactly the one this replaces, including not
+    /// filtering on location, so the answers are unchanged.
+    fn idle_engine_keys(&self) -> std::collections::HashSet<&EngineKey> {
+        self.engines
+            .values()
+            .filter(|e| e.current_run.is_none() && !e.exit_requested)
+            .map(|e| &e.key)
+            .collect()
+    }
+
+    /// Is there an idle engine for `key` other than `engine_id`? The work taker
+    /// must not count the engine that is asking for work.
+    ///
+    /// The set short-circuits the common case: if no engine is idle for the key
+    /// the answer is false without touching the engine table. Only when one is
+    /// does the exact per-engine test run, which is bounded by the engine cap.
+    fn has_idle_other(
+        &self,
+        idle_keys: &std::collections::HashSet<&EngineKey>,
+        key: &EngineKey,
+        engine_id: &str,
+    ) -> bool {
+        if !idle_keys.contains(key) {
+            return false;
+        }
+        self.engines.values().any(|e| {
+            e.id != engine_id && e.key == *key && e.current_run.is_none() && !e.exit_requested
+        })
+    }
+
+    /// Flow ids that at least one worker is eligible for, so the per-run test for
+    /// "no processor with matching code" is a lookup rather than a scan of every
+    /// worker.
+    fn worker_eligible_flows(&self) -> std::collections::HashSet<i64> {
+        self.workers
+            .values()
+            .flat_map(|w| w.eligible.iter().copied())
+            .collect()
+    }
+
     /// Engines counted against the pool: every one but those told to exit
     /// while idle (they are on their way out).
     fn occupying(&self) -> usize {
@@ -516,7 +602,7 @@ impl Supervisor {
     pub fn new(config: &ServeConfig) -> Supervisor {
         let mut resources = Resources::default();
         for (name, total) in &config.resources {
-            resources.totals.insert(name.clone(), *total);
+            resources.insert_total(name, *total);
         }
         let cpu_cap = cpu_count();
         if config.max_engines > cpu_cap {
@@ -814,6 +900,33 @@ impl Supervisor {
         out
     }
 
+    /// One worker's engines, by slot: what its status page lists under Now.
+    pub fn worker_engines(&self, worker_id: i64) -> Vec<EngineView> {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let location = Location::Worker(worker_id);
+        let host = inner
+            .workers
+            .get(&worker_id)
+            .map(|slot| slot.name.clone())
+            .unwrap_or_else(|| format!("worker {worker_id}"));
+        let mut engines: Vec<EngineView> = inner
+            .engines
+            .values()
+            .filter(|e| e.location == location && (!e.exit_requested || e.current_run.is_some()))
+            .map(|e| EngineView {
+                host: host.clone(),
+                slot: e.slot,
+                id: e.id.clone(),
+                status: e.status(),
+                module: e.key.module.clone(),
+                run_id: e.current_run,
+                since_secs: e.run_since.unwrap_or(e.spawned_at).elapsed().as_secs(),
+            })
+            .collect();
+        engines.sort_by(|a, b| a.slot.cmp(&b.slot).then_with(|| a.id.cmp(&b.id)));
+        engines
+    }
+
     /// The worker name for an id the supervisor knows.
     pub fn worker_name(&self, worker_id: i64) -> Option<String> {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -864,13 +977,13 @@ impl Supervisor {
 
     pub fn set_total(&self, name: &str, total: f64) {
         let mut r = self.resources.lock().unwrap_or_else(|e| e.into_inner());
-        r.totals.insert(name.to_string(), total);
+        r.insert_total(name, total);
     }
 
     pub fn set_totals(&self, totals: &HashMap<String, f64>) {
         let mut r = self.resources.lock().unwrap_or_else(|e| e.into_inner());
         for (k, v) in totals {
-            r.totals.insert(k.clone(), *v);
+            r.insert_total(k, *v);
         }
         drop(r);
         self.notify.notify_waiters();
@@ -901,20 +1014,52 @@ impl Supervisor {
         self.notify.notify_waiters();
     }
 
-    pub fn resources_snapshot(&self) -> serde_json::Value {
+    /// Every resource as a typed row: name, declared total, usage, and the
+    /// declared pattern that matched, if any.
+    ///
+    /// For callers that want the *values* — the metrics renderer, which was
+    /// building a `serde_json::Value` object and then reading each total back out
+    /// of it by string key. That read-back ended in `unwrap_or(0.0)`, so a
+    /// renamed or missing field reported a resource total of zero, which looks
+    /// exactly like an idle resource.
+    ///
+    /// `pattern` is owned rather than borrowed because the row outlives the lock:
+    /// `pattern_for` returns a `&str` from the guarded map.
+    pub fn resource_rows(&self) -> Vec<ResourceRow> {
         let r = self.resources.lock().unwrap_or_else(|e| e.into_inner());
         let mut names: Vec<&String> = r.totals.keys().chain(r.used.keys()).collect();
         names.sort();
         names.dedup();
+        names
+            .into_iter()
+            .map(|n| ResourceRow {
+                name: n.clone(),
+                total: r.total(n),
+                used: r.used.get(n).copied().unwrap_or(0.0),
+                pattern: r.pattern_for(n).map(|p| p.to_string()),
+            })
+            .collect()
+    }
+
+    /// The same rows, as a JSON object keyed by resource name.
+    ///
+    /// For the three callers whose response *is* JSON — the settings endpoint and
+    /// the two MCP resource tools. Built from [`Self::resource_rows`] rather than
+    /// written out again, so the JSON endpoint cannot drift from the values the
+    /// metrics report.
+    pub fn resources_snapshot(&self) -> serde_json::Value {
+        // Keyed by name, as before, with the entry serialised from the row so the
+        // field names cannot drift from the ones the metrics read. A row is a
+        // `f64`/`Option<String>` struct and always serialises, so this cannot fail.
         serde_json::Value::Object(
-            names
+            self.resource_rows()
                 .into_iter()
-                .map(|n| {
-                    let mut entry = serde_json::json!({"total": r.total(n), "used": r.used.get(n).copied().unwrap_or(0.0)});
-                    if let Some(p) = r.pattern_for(n) {
-                        entry["pattern"] = serde_json::Value::String(p.to_string());
-                    }
-                    (n.clone(), entry)
+                .map(|r| {
+                    let name = r.name.clone();
+                    // `name` is `serde(skip)`, so the entry is {total, used} plus
+                    // `pattern` when set -- exactly the shape the hand-built
+                    // `json!` produced.
+                    (name, serde_json::to_value(&r).unwrap_or(serde_json::Value::Null))
                 })
                 .collect(),
         )
@@ -961,38 +1106,43 @@ impl Supervisor {
     }
 
     /// Runs queued and waiting for a resource that were not yet marked.
+    ///
+    /// Lock ordering invariant: `inner` is always acquired before `resources`.
+    /// No code path may acquire `resources` then `inner` — that would deadlock.
     pub fn take_waiting_marks(&self) -> Vec<(i64, String)> {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
         let mut out = Vec::new();
         let now = cereyan_core::now_micros();
-        let resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
-        let queued: Vec<QueuedRun> = inner.queue.values().cloned().collect();
         let engines_full = inner.occupying() >= self.max_engines()
             && inner
                 .engines
                 .values()
                 .all(|e| e.current_run.is_some() || e.exit_requested);
-        for q in queued {
+        // Collect modifications first to avoid borrow conflict (iterating inner.queue
+        // while mutating inner.waiting_marked).
+        let idle_keys = inner.idle_engine_keys();
+        let mut marks: Vec<(i64, String)> = Vec::new();
+        for q in inner.queue.values() {
             if q.not_before.map(|t| t > now).unwrap_or(false) {
                 continue;
             }
             let reason = match resources.can_acquire(&q.needs) {
                 Some(name) => Some(name),
-                None if engines_full
-                    && !inner.engines.values().any(|e| {
-                        e.key == q.key && e.current_run.is_none() && !e.exit_requested
-                    }) =>
-                {
+                None if engines_full && !idle_keys.contains(&q.key) => {
                     Some("no engine slot".to_string())
                 }
                 None => None,
             };
             if let Some(reason) = reason {
                 if inner.waiting_marked.get(&q.run_id) != Some(&reason) {
-                    inner.waiting_marked.insert(q.run_id, reason.clone());
-                    out.push((q.run_id, reason));
+                    marks.push((q.run_id, reason));
                 }
             }
+        }
+        for (run_id, reason) in &marks {
+            inner.waiting_marked.insert(*run_id, reason.clone());
+            out.push((*run_id, reason.clone()));
         }
         out
     }
@@ -1051,13 +1201,12 @@ impl Supervisor {
     /// within `max_engines`. Idle engines of other keys are asked to exit
     /// when the pool is full.
     pub fn ensure_capacity(&self, _state: &AppState) {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        // Demand per key: how many runs could start, and which of their flows
-        // may go to a worker.
+        // Lock ordering invariant: `inner` before `resources` when both are needed.
         let mut demand: HashMap<EngineKey, (usize, Vec<i64>)> = HashMap::new();
         let mut preferred: Vec<(EngineKey, i64)> = Vec::new();
         let horizon = cereyan_core::now_micros() + crate::scheduler::PREWARM_SECS * 1_000_000;
         {
+            let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
             let resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
             for q in inner.queue.values() {
                 if q.not_before.map(|t| t > horizon).unwrap_or(false) {
@@ -1080,64 +1229,139 @@ impl Supervisor {
                 }
             }
         }
-        for j in &inner.jobs {
-            demand.entry(j.key.clone()).or_default().0 += 1;
-        }
-        for (key, (pending, remote_flows)) in demand {
-            let usable = inner
-                .engines
-                .values()
-                .filter(|e| {
-                    e.location == Location::Local
-                        && e.key == key
-                        && !e.exit_requested
-                        && e.current_run.is_none()
-                })
-                .count();
-            let mut to_spawn = pending.saturating_sub(usable);
-            // The server's own processors first: they are warm and nearest.
-            while to_spawn > 0 {
-                if inner.occupying() >= self.max_engines() {
-                    // Evict one idle local engine of another key.
-                    let victim = inner.engines.values_mut().find(|e| {
+        // Collect spawn requests under the lock, then spawn outside it.
+        let mut spawn_requests: Vec<(String, EngineKey)> = Vec::new();
+        // Engines queued by the post-spawn re-check, and the handles they
+        // produce. Both are filled and drained with `inner` released.
+        let mut respawn_requests: Vec<(String, EngineKey)> = Vec::new();
+        let mut spill_requests: Vec<(EngineKey, usize, Vec<i64>)> = Vec::new();
+        let mut evictions: Vec<String> = Vec::new();
+        {
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            for j in &inner.jobs {
+                demand.entry(j.key.clone()).or_default().0 += 1;
+            }
+            for (key, (pending, remote_flows)) in &demand {
+                let key = key.clone();
+                let pending = *pending;
+                let remote_flows = remote_flows.clone();
+                let usable = inner
+                    .engines
+                    .values()
+                    .filter(|e| {
                         e.location == Location::Local
-                            && e.key != key
-                            && e.current_run.is_none()
+                            && e.key == key
                             && !e.exit_requested
-                    });
-                    if let Some(v) = victim {
-                        v.exit_requested = true;
-                    }
-                    break;
-                }
-                let id = format!("engine-{}-{}", std::process::id(), inner.next_engine);
-                inner.next_engine += 1;
-                match self.spawn(&id, &key) {
-                    Ok(child) => {
-                        let pid = Some(child.id());
-                        let mut engine =
-                            Engine::new(id.clone(), key.clone(), pid, Some(child), false);
-                        engine.slot = inner.free_slot(Location::Local);
-                        inner.engines.insert(id, engine);
-                    }
-                    Err(e) => {
-                        eprintln!("cereyan: failed to start engine: {e}");
+                            && e.current_run.is_none()
+                    })
+                    .count();
+                let mut to_spawn = pending.saturating_sub(usable);
+                // The server's own processors first: they are warm and nearest.
+                while to_spawn > 0 {
+                    if inner.occupying() >= self.max_engines() {
+                        // Evict one idle local engine of another key.
+                        let victim = inner.engines.values_mut().find(|e| {
+                            e.location == Location::Local
+                                && e.key != key
+                                && e.current_run.is_none()
+                                && !e.exit_requested
+                        });
+                        if let Some(v) = victim {
+                            v.exit_requested = true;
+                            evictions.push(v.id.clone());
+                        }
                         break;
                     }
+                    let id = format!("engine-{}-{}", std::process::id(), inner.next_engine);
+                    inner.next_engine += 1;
+                    spawn_requests.push((id, key.clone()));
+                    to_spawn -= 1;
                 }
-                to_spawn -= 1;
+                // What the server cannot take now spills over to workers.
+                if to_spawn > 0 && !remote_flows.is_empty() {
+                    spill_requests.push((key, to_spawn, remote_flows));
+                }
             }
-            // What the server cannot take now spills over to workers.
-            if to_spawn > 0 && !remote_flows.is_empty() {
+        }
+        // Spawn processes outside the lock so other threads can enqueue/dequeue.
+        let spawned = self.spawn_all(spawn_requests);
+        // Re-acquire the lock to insert engine records and handle spill-over.
+        {
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            Self::register_engines(&mut inner, spawned);
+            for (key, to_spawn, remote_flows) in spill_requests {
                 Self::spill_over(&mut inner, &key, to_spawn, &remote_flows);
             }
+            // Replays reserved for the worker that ran them before.
+            for (key, worker_id) in preferred {
+                Self::spawn_on(&mut inner, &key, worker_id);
+            }
+            // Re-check demand after spawning: other threads may have enqueued
+            // more runs while we were spawning. Only spawn more if there is
+            // still unmet demand and we haven't hit the engine cap.
+            for (key, (pending, _)) in demand.iter() {
+                let usable = inner
+                    .engines
+                    .values()
+                    .filter(|e| {
+                        e.location == Location::Local
+                            && e.key == *key
+                            && !e.exit_requested
+                            && e.current_run.is_none()
+                    })
+                    .count();
+                let still_needed = pending.saturating_sub(usable);
+                if still_needed > 0 && inner.occupying() < self.max_engines() {
+                    // Queue one more engine for this key; it is created after
+                    // the lock is released, like the first round.
+                    let id = format!("engine-{}-{}", std::process::id(), inner.next_engine);
+                    inner.next_engine += 1;
+                    respawn_requests.push((id, key.clone()));
+                }
+            }
         }
-        // Replays reserved for the worker that ran them before.
-        for (key, worker_id) in preferred {
-            Self::spawn_on(&mut inner, &key, worker_id);
+        // The re-check found demand that appeared while we were spawning. Fork
+        // and exec with the lock released, exactly as the first round does:
+        // `spawn` starts a Python interpreter, and holding `inner` across that
+        // blocks every other supervisor operation.
+        let respawned = self.spawn_all(respawn_requests);
+        if !respawned.is_empty() {
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            Self::register_engines(&mut inner, respawned);
         }
-        drop(inner);
         self.notify.notify_waiters();
+    }
+
+    /// Create every requested engine with `inner` released, returning the
+    /// handles for registration. Forking a Python interpreter takes
+    /// milliseconds; doing it under the lock would stall every other
+    /// supervisor operation, so callers must invoke this outside their lock
+    /// scope.
+    fn spawn_all(
+        &self,
+        requests: Vec<(String, EngineKey)>,
+    ) -> Vec<(String, EngineKey, std::process::Child)> {
+        let mut spawned = Vec::with_capacity(requests.len());
+        for (id, key) in requests {
+            match self.spawn(&id, &key) {
+                Ok(child) => spawned.push((id, key, child)),
+                Err(e) => eprintln!("cereyan: failed to start engine: {e}"),
+            }
+        }
+        spawned
+    }
+
+    /// Record freshly started engines. The caller holds `inner`.
+    fn register_engines(
+        inner: &mut Inner,
+        spawned: Vec<(String, EngineKey, std::process::Child)>,
+    ) {
+        for (id, key, child) in spawned {
+            let pid = Some(child.id());
+            let mut engine = Engine::new(id.clone(), key.clone(), pid, Some(child), false);
+            engine.slot = inner.free_slot(Location::Local);
+            inner.engines.insert(id, engine);
+        }
     }
 
     /// Make sure `worker_id` has an engine for `key` idle or starting, asking it
@@ -1435,7 +1659,8 @@ impl Supervisor {
         let mut blocked_ahead: Vec<i64> = Vec::new();
         let mut take: Option<QKey> = None;
         let mut room = inner.occupying() < max_engines;
-        let mut served_keys: Vec<&EngineKey> = Vec::new();
+        let mut served_keys: std::collections::HashSet<&EngineKey> = std::collections::HashSet::new();
+        let idle_keys = inner.idle_engine_keys();
         for (k, q) in inner.queue.iter() {
             if q.not_before.map(|t| t > now).unwrap_or(false)
                 || q.reserved_elsewhere(Location::Local, now)
@@ -1450,20 +1675,18 @@ impl Supervisor {
                 take = Some(*k);
                 break;
             }
-            if served_keys.contains(&&q.key) {
+            if served_keys.contains(&q.key) {
                 continue;
             }
-            let idle_other = inner.engines.values().any(|e| {
-                e.id != engine_id && e.key == q.key && e.current_run.is_none() && !e.exit_requested
-            });
+            let idle_other = inner.has_idle_other(&idle_keys, &q.key, engine_id);
             if idle_other {
-                served_keys.push(&q.key);
+                served_keys.insert(&q.key);
                 continue;
             }
             if room {
                 // An engine for it can start; count it against the room.
                 room = false;
-                served_keys.push(&q.key);
+                served_keys.insert(&q.key);
                 continue;
             }
             // Pool full and nothing can take that run: give up this slot.
@@ -1540,6 +1763,7 @@ impl Supervisor {
     /// its status, and the first `limit` queued runs in dispatch order with
     /// whether each can start now. Returns (engines, in line, total queued).
     pub fn queue_snapshot(&self, limit: usize) -> (Vec<EngineView>, Vec<LineEntry>, usize) {
+        // Lock ordering invariant: `inner` before `resources`.
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
         let now = cereyan_core::now_micros();
@@ -1566,6 +1790,9 @@ impl Supervisor {
             .collect();
         engines.sort_by(|a, b| a.id.cmp(&b.id));
         let room = inner.occupying() < self.max_engines();
+        // Built once: the per-run tests below are lookups, not scans.
+        let idle_keys = inner.idle_engine_keys();
+        let eligible_flows = inner.worker_eligible_flows();
         let mut line = Vec::new();
         let mut position = 0;
         for q in inner.queue.values() {
@@ -1577,11 +1804,7 @@ impl Supervisor {
                 continue;
             }
             let blocked = resources.can_acquire(&q.needs);
-            let engine_free = room
-                || inner
-                    .engines
-                    .values()
-                    .any(|e| e.key == q.key && e.current_run.is_none() && !e.exit_requested);
+            let engine_free = room || idle_keys.contains(&q.key);
             let reason = match &blocked {
                 Some(name) if name.starts_with("flow:") => Some("max_concurrent".to_string()),
                 Some(name) if name.starts_with("backfill:") => {
@@ -1591,10 +1814,7 @@ impl Supervisor {
                 None if !engine_free
                     && q.remote_ok
                     && !inner.workers.is_empty()
-                    && inner
-                        .workers
-                        .values()
-                        .all(|w| !w.eligible.contains(&q.flow_id)) =>
+                    && !eligible_flows.contains(&q.flow_id) =>
                 {
                     Some("no processor with matching code".to_string())
                 }
@@ -1631,6 +1851,27 @@ impl Supervisor {
         out.sort_by_key(|(id, t)| (*t, *id));
         out.truncate(limit);
         out
+    }
+
+    /// How many engines have a run in progress.
+    ///
+    /// For the metrics sampler, which wants this one number every five seconds.
+    /// Counting under the lock rather than filtering a serialised snapshot keeps
+    /// the hold on `inner` — contended by every enqueue, poll and hand-off — down
+    /// to a counter increment instead of a JSON object per engine.
+    ///
+    /// The predicate is `current_run.is_some()`, which is what the sampler
+    /// derived from `engines_snapshot`. It is deliberately not `occupying()`,
+    /// which counts idle engines against the pool and answers a different
+    /// question.
+    pub fn engines_busy_count(&self) -> usize {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .engines
+            .values()
+            .filter(|e| e.current_run.is_some())
+            .count()
     }
 
     pub fn engines_snapshot(&self) -> Vec<serde_json::Value> {
@@ -2114,5 +2355,953 @@ mod tests {
         assert_eq!(take(&s, "w7-1", "etl"), None);
         s.clear_broken(7);
         assert_eq!(take(&s, "w7-1", "etl"), Some(1));
+    }
+
+    #[test]
+    fn take_waiting_marks_does_not_deadlock_under_concurrent_access() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let s = Arc::new(sup(2));
+        // Enqueue some runs so take_waiting_marks has work to do.
+        for i in 1..=10 {
+            s.enqueue(queued(i, "etl", 0, i));
+        }
+        let mut handles = Vec::new();
+        // Spawn threads that call take_waiting_marks (acquires resources then inner).
+        for _ in 0..4 {
+            let s = Arc::clone(&s);
+            handles.push(thread::spawn(move || {
+                for _ in 0..100 {
+                    let _ = s.take_waiting_marks();
+                }
+            }));
+        }
+        // Spawn threads that enqueue (acquires inner only).
+        for _ in 0..2 {
+            let s = Arc::clone(&s);
+            handles.push(thread::spawn(move || {
+                for i in 100..200 {
+                    s.enqueue(queued(i, "etl", 0, i));
+                }
+            }));
+        }
+        // Spawn threads that call try_acquire (acquires resources only).
+        for _ in 0..2 {
+            let s = Arc::clone(&s);
+            handles.push(thread::spawn(move || {
+                for _ in 0..100 {
+                    let _ = s.try_acquire(9999, &[("gpu".into(), 1.0)]);
+                }
+            }));
+        }
+        for h in handles {
+            h.join().expect("thread should not deadlock");
+        }
+    }
+
+    /// `spawn_all` must never take `inner` itself.
+    ///
+    /// The test is deterministic rather than a race: the main thread holds
+    /// `inner` for the whole duration, and a worker calls `spawn_all`. If
+    /// `spawn_all` acquired the lock it could not finish until the main thread
+    /// released it, so observing the worker complete *while the lock is still
+    /// held* proves the spawn path never needs the supervisor lock.
+    ///
+    /// The engine module points at a nonexistent directory, so `spawn` fails
+    /// fast without starting a real interpreter. The lock discipline is the same
+    /// on the success and failure paths.
+    #[test]
+    fn spawn_all_does_not_take_the_lock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let s = Arc::new(sup(4));
+        let finished = Arc::new(AtomicBool::new(false));
+
+        // Hold the supervisor lock for the whole test.
+        let held = s.inner.lock().unwrap_or_else(|e| e.into_inner());
+
+        let worker = {
+            let s = Arc::clone(&s);
+            let finished = Arc::clone(&finished);
+            thread::spawn(move || {
+                let requests: Vec<(String, EngineKey)> = (0..4)
+                    .map(|i| (format!("engine-test-{i}"), key("etl")))
+                    .collect();
+                s.spawn_all(requests);
+                finished.store(true, Ordering::SeqCst);
+            })
+        };
+
+        // The worker must finish while we still hold the lock. A spawn that
+        // needs the lock blocks here, so the wait doubles as the assertion.
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !finished.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        let completed_while_locked = finished.load(Ordering::SeqCst);
+
+        drop(held);
+        worker.join().expect("worker must not deadlock");
+
+        assert!(
+            completed_while_locked,
+            "spawn_all did not finish while the supervisor lock was held: it \
+             must create processes without taking `inner`"
+        );
+    }
+}
+
+#[cfg(test)]
+mod resources_tests {
+    use super::*;
+
+    fn res(pairs: &[(&str, f64)]) -> Resources {
+        let mut r = Resources::default();
+        for (n, t) in pairs {
+            r.insert_total(n, *t);
+        }
+        r
+    }
+
+    /// The pre-change algorithm, kept as the oracle.
+    fn pattern_for_the_old_way(r: &Resources, name: &str) -> Option<String> {
+        if r.totals.contains_key(name) {
+            return None;
+        }
+        let mut patterns: Vec<&String> = r.totals.keys().filter(|k| k.contains('*')).collect();
+        patterns.sort();
+        patterns
+            .into_iter()
+            .find(|p| glob_matches(p, name))
+            .map(|p| p.to_string())
+    }
+
+    #[test]
+    fn pattern_lookup_matches_the_previous_implementation() {
+        let r = res(&[
+            ("gpu", 2.0),
+            ("db", 1.0),
+            ("tag:*", 4.0),
+            ("flow:*/nightly", 3.0),
+            ("flow:*", 8.0),
+        ]);
+        let names = [
+            "gpu", "db", "tag:urgent", "flow:p/nightly", "flow:p/daily", "other",
+        ];
+        for n in names {
+            assert_eq!(
+                r.pattern_for(n).map(str::to_string),
+                pattern_for_the_old_way(&r, n),
+                "pattern_for differs for {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn totals_are_unchanged() {
+        let r = res(&[("gpu", 2.0), ("tag:*", 4.0)]);
+        assert_eq!(r.total("gpu"), 2.0, "explicit total");
+        assert_eq!(r.total("tag:urgent"), 4.0, "pattern total");
+        assert_eq!(r.total("nothing"), 1.0, "default is 1");
+    }
+
+    #[test]
+    fn the_first_pattern_in_sorted_order_wins() {
+        // Sorting is by the raw pattern, so a prefix sorts before the longer
+        // pattern that extends it: "flow:*" < "flow:*/nightly". Both match
+        // "flow:p/nightly", and the shorter one is the one that applies. This
+        // is the pre-existing behaviour and it is user-visible through the
+        // limit that takes effect, so it is pinned here.
+        let r = res(&[("flow:*/nightly", 3.0), ("flow:*", 8.0)]);
+        assert_eq!(r.pattern_for("flow:p/nightly"), Some("flow:*"));
+        assert_eq!(r.total("flow:p/nightly"), 8.0);
+
+        // A bare "*" sorts before any named pattern and shadows it.
+        let r2 = res(&[("gpu*", 2.0), ("*", 9.0)]);
+        assert_eq!(r2.pattern_for("gpu1"), Some("*"));
+        assert_eq!(r2.total("gpu1"), 9.0);
+    }
+
+    #[test]
+    fn an_explicit_total_beats_a_matching_pattern() {
+        let r = res(&[("tag:*", 4.0), ("tag:urgent", 1.0)]);
+        assert_eq!(r.pattern_for("tag:urgent"), None);
+        assert_eq!(r.total("tag:urgent"), 1.0);
+    }
+
+    #[test]
+    fn a_pattern_registered_later_is_found() {
+        let mut r = res(&[]);
+        assert_eq!(r.total("tag:x"), 1.0, "no patterns yet");
+        r.insert_total("tag:*", 6.0);
+        assert_eq!(r.total("tag:x"), 6.0, "the new pattern applies");
+        // And a non-pattern registered later is not mistaken for one.
+        r.insert_total("plain", 2.0);
+        assert_eq!(r.pattern_for("plain"), None);
+    }
+
+    #[test]
+    fn updating_a_pattern_value_does_not_disturb_it() {
+        let mut r = res(&[("tag:*", 4.0)]);
+        r.insert_total("tag:*", 9.0);
+        assert_eq!(r.total("tag:x"), 9.0);
+        // Registered once, so the list must not have grown a duplicate.
+        assert_eq!(r.patterns.iter().filter(|p| *p == "tag:*").count(), 1);
+    }
+
+    #[test]
+    fn is_declared_tracks_both_kinds() {
+        let r = res(&[("gpu", 1.0), ("tag:*", 2.0)]);
+        assert!(r.is_declared("gpu"));
+        assert!(r.is_declared("tag:x"));
+        assert!(!r.is_declared("other"));
+    }
+
+    #[test]
+    fn eviction_keeps_held_and_declared_instances() {
+        let mut r = res(&[("gpu", 2.0)]);
+        // Fill past the retention threshold with idle, undeclared instances.
+        for i in 0..(IDLE_INSTANCES_KEPT + 50) {
+            r.used.insert(format!("tag:{i}"), 0.0);
+        }
+        r.used.insert("held".into(), 1.0); // in use, must survive
+        r.used.insert("gpu".into(), 0.0); // declared, must survive
+        assert!(r.used.len() > IDLE_INSTANCES_KEPT);
+
+        r.evict_idle();
+
+        assert!(r.used.contains_key("held"), "an in-use instance was evicted");
+        assert!(r.used.contains_key("gpu"), "a declared instance was evicted");
+        assert!(
+            !r.used.contains_key("tag:0"),
+            "an idle undeclared instance survived"
+        );
+        assert!(r.used.len() <= IDLE_INSTANCES_KEPT, "not pruned enough");
+    }
+
+    #[test]
+    fn a_small_table_is_never_pruned() {
+        let mut r = res(&[("gpu", 1.0)]);
+        for i in 0..10 {
+            r.used.insert(format!("tag:{i}"), 0.0);
+        }
+        r.evict_idle();
+        assert_eq!(r.used.len(), 10, "a table below the threshold was pruned");
+    }
+
+    #[test]
+    fn releasing_a_lease_returns_the_amount_to_zero() {
+        let mut r = res(&[]);
+        let lease = r.acquire(1, &[("tag:a".into(), 1.0), ("tag:b".into(), 2.0)]);
+        assert_eq!(r.used.get("tag:a").copied(), Some(1.0));
+        r.release_lease(1, lease);
+        // Zero-usage instances are retained up to the retention threshold; the
+        // amount is what matters, and `free` treats a zero entry as absent.
+        assert_eq!(r.used.get("tag:a").copied(), Some(0.0));
+        assert_eq!(r.free("tag:a"), 1.0, "not fully released");
+        assert_eq!(r.free("tag:b"), 1.0, "default total, fully released");
+
+        // Past the threshold they are pruned.
+        for i in 0..(IDLE_INSTANCES_KEPT + 10) {
+            r.used.insert(format!("other:{i}"), 0.0);
+        }
+        r.evict_idle();
+        assert!(!r.used.contains_key("tag:a"), "idle instance not pruned");
+    }
+
+    #[test]
+    fn can_acquire_reports_the_blocking_name() {
+        let mut r = res(&[("tag:*", 1.0)]);
+        // A pattern total is the limit for each name it covers, not a shared
+        // pool, so exhausting one name does not block another.
+        r.acquire(1, &[("tag:a".into(), 1.0)]);
+        assert_eq!(r.can_acquire(&[("tag:b".into(), 1.0)]), None);
+        // The name that is exhausted is the one reported.
+        assert_eq!(
+            r.can_acquire(&[("tag:a".into(), 1.0)]),
+            Some("tag:a".to_string())
+        );
+        // With the limit raised, it is acquirable again.
+        r.insert_total("tag:*", 2.0);
+        assert_eq!(r.can_acquire(&[("tag:a".into(), 1.0)]), None);
+    }
+
+    #[test]
+    fn can_acquire_reports_the_first_blocking_need() {
+        let mut r = res(&[("tag:*", 1.0)]);
+        r.acquire(1, &[("tag:b".into(), 1.0)]);
+        let needs = vec![
+            ("tag:a".to_string(), 1.0), // fine
+            ("tag:b".to_string(), 1.0), // blocked
+            ("tag:c".to_string(), 1.0),
+        ];
+        assert_eq!(r.can_acquire(&needs), Some("tag:b".to_string()));
+    }
+}
+
+/// Engine-availability lookups: the set is built once per queue scan so the
+/// per-run test is a hash lookup rather than a scan of the engine table.
+#[cfg(test)]
+mod idle_key_tests {
+    use super::*;
+
+    fn k(module: &str) -> EngineKey {
+        EngineKey {
+            source_dir: "/nonexistent".into(),
+            module: module.into(),
+            isolated: false,
+            nice: 0,
+        }
+    }
+
+    /// An engine row in the given state.
+    fn engine(id: &str, key: &EngineKey, busy: bool, exiting: bool) -> Engine {
+        let mut e = Engine::new(id.to_string(), key.clone(), None, None, false);
+        e.current_run = busy.then_some(1);
+        e.exit_requested = exiting;
+        e
+    }
+
+    fn inner_with(engines: Vec<Engine>) -> Inner {
+        let mut inner = Inner::default();
+        for e in engines {
+            inner.engines.insert(e.id.clone(), e);
+        }
+        inner
+    }
+
+    fn slot(name: &str, flows: &[i64]) -> WorkerSlot {
+        WorkerSlot {
+            name: name.into(),
+            processors: 2,
+            state: "online".into(),
+            eligible: flows.iter().copied().collect(),
+            last_seen: Instant::now(),
+            commands: Vec::new(),
+            broken: Default::default(),
+            next_engine: 0,
+        }
+    }
+
+    #[test]
+    fn an_idle_engine_puts_its_key_in_the_set() {
+        let key = k("etl");
+        let inner = inner_with(vec![engine("e1", &key, false, false)]);
+        assert!(inner.idle_engine_keys().contains(&key));
+    }
+
+    #[test]
+    fn a_busy_engine_does_not() {
+        let key = k("etl");
+        let inner = inner_with(vec![engine("e1", &key, true, false)]);
+        assert!(
+            inner.idle_engine_keys().is_empty(),
+            "a running engine counts as idle"
+        );
+    }
+
+    #[test]
+    fn an_exiting_engine_does_not() {
+        let key = k("etl");
+        let inner = inner_with(vec![engine("e1", &key, false, true)]);
+        assert!(
+            inner.idle_engine_keys().is_empty(),
+            "an engine on its way out counts as idle"
+        );
+    }
+
+    #[test]
+    fn only_idle_keys_appear() {
+        let idle = k("etl");
+        let busy = k("ml");
+        let inner = inner_with(vec![
+            engine("e1", &idle, false, false),
+            engine("e2", &busy, true, false),
+        ]);
+        let set = inner.idle_engine_keys();
+        assert!(set.contains(&idle));
+        assert!(!set.contains(&busy));
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn has_idle_other_ignores_the_asking_engine() {
+        let key = k("etl");
+        // Only this engine is idle, so it must not count itself.
+        let alone = inner_with(vec![engine("me", &key, false, false)]);
+        let set = alone.idle_engine_keys();
+        assert!(
+            !alone.has_idle_other(&set, &key, "me"),
+            "the engine asking for work counted itself"
+        );
+
+        // A second idle engine for the same key does count.
+        let two = inner_with(vec![
+            engine("me", &key, false, false),
+            engine("other", &key, false, false),
+        ]);
+        let set2 = two.idle_engine_keys();
+        assert!(two.has_idle_other(&set2, &key, "me"));
+    }
+
+    #[test]
+    fn has_idle_other_is_false_when_the_key_has_none() {
+        let a = k("etl");
+        let b = k("ml");
+        let inner = inner_with(vec![engine("e1", &a, false, false)]);
+        let set = inner.idle_engine_keys();
+        assert!(!inner.has_idle_other(&set, &b, "e1"));
+    }
+
+    #[test]
+    fn worker_eligible_flows_unions_every_worker() {
+        let mut inner = Inner::default();
+        inner.workers.insert(1, slot("w1", &[1, 2]));
+        inner.workers.insert(2, slot("w2", &[2, 3]));
+
+        let flows = inner.worker_eligible_flows();
+        assert_eq!(flows.len(), 3, "a flow claimed twice appears once");
+        assert!(flows.contains(&1) && flows.contains(&2) && flows.contains(&3));
+        assert!(!flows.contains(&4));
+    }
+
+    #[test]
+    fn no_workers_means_no_eligible_flows() {
+        assert!(Inner::default().worker_eligible_flows().is_empty());
+    }
+
+    // ---- end to end through take_waiting_marks ---------------------------
+
+    fn sup_with_cap(max: usize) -> Supervisor {
+        let config: ServeConfig = serde_json::from_value(json!({
+            "home": std::env::temp_dir(),
+            "max_engines": max,
+        }))
+        .unwrap();
+        Supervisor::new(&config)
+    }
+
+    /// A run in `Running`, for adopting a busy engine.
+    fn busy_run(id: i64) -> Run {
+        Run {
+            id,
+            external_id: cereyan_core::new_id(),
+            flow_id: 1,
+            flow_name: "f".into(),
+            project: "p".into(),
+            group: String::new(),
+            name: format!("r{id}"),
+            parameters: serde_json::Map::new(),
+            tags: vec![],
+            attributes: serde_json::Map::new(),
+            state: cereyan_core::State::new(cereyan_core::StateType::Running),
+            failure_count: 0,
+            crash_count: 0,
+            created_at: 0,
+            start_time: Some(0),
+            end_time: None,
+            total_run_time: None,
+            engine_pid: Some(4242),
+            engine_id: Some("adopted".into()),
+            created_by: String::new(),
+            report_seq: 0,
+            schedule_id: None,
+            scheduled_time: None,
+            priority: 0,
+            parent_run_id: None,
+            attempt: 0,
+            backfill_id: None,
+            task_counts: Default::default(),
+            unique_key: None,
+            host: None,
+            processor: None,
+            lease: 0,
+            source_hash: None,
+        }
+    }
+
+    fn run_in(run_id: i64, module: &str) -> QueuedRun {
+        QueuedRun {
+            run_id,
+            key: k(module),
+            priority: 0,
+            order: run_id,
+            needs: Vec::new(),
+            not_before: None,
+            flow_id: 1,
+            remote_ok: true,
+            prefer_worker: None,
+            prefer_until: 0,
+        }
+    }
+
+    /// A full pool whose only engine is busy: every queued run lacks a slot.
+    ///
+    /// `max_engines` is clamped to at least 1, so the pool is filled by
+    /// adopting a running engine rather than by setting the cap to zero.
+    #[test]
+    fn a_full_pool_with_only_a_busy_engine_marks_every_run() {
+        let s = sup_with_cap(1);
+        s.adopt(&busy_run(99), k("other"));
+        assert_eq!(s.max_engines(), 1, "cap should be one engine");
+        for i in 1..=3 {
+            s.enqueue(run_in(i, "etl"));
+        }
+        let marks = s.take_waiting_marks();
+        let mut ids: Vec<i64> = marks.iter().map(|(id, _)| *id).collect();
+        ids.sort();
+        assert_eq!(ids, vec![1, 2, 3], "not every run was marked");
+        assert!(
+            marks.iter().all(|(_, r)| r == "no engine slot"),
+            "wrong reasons: {marks:?}"
+        );
+    }
+
+    /// The same pool, but the queued run's key matches the idle-able engine, so
+    /// the key lookup must find it and not report a slot shortage.
+    #[test]
+    fn a_matching_idle_engine_clears_the_slot_shortage() {
+        let s = sup_with_cap(2);
+        // An engine that exists but is idle: adopted then released.
+        s.adopt(&busy_run(99), k("etl"));
+        {
+            let mut inner = s.inner.lock().unwrap();
+            for e in inner.engines.values_mut() {
+                e.current_run = None;
+            }
+        }
+        s.enqueue(run_in(1, "etl"));
+        assert!(
+            s.take_waiting_marks().is_empty(),
+            "an idle engine for the run's key was not seen"
+        );
+    }
+
+    /// Note on `take_waiting_marks`: the slot check is gated on `engines_full`,
+    /// which requires *every* engine to be busy, so the idle-key set is always
+    /// empty when that branch runs. The lookup is equivalent there by
+    /// construction — a cost reduction, not a behaviour change.
+    ///
+    /// `queue_snapshot` is where the key decides the answer, and the next two
+    /// tests cover that.
+    #[test]
+    fn the_queue_page_reports_an_idle_engine_for_a_matching_key() {
+        let s = sup_with_cap(1);
+        s.adopt(&busy_run(99), k("etl"));
+        {
+            // One engine, idle: the pool is full, so `room` is false and the
+            // answer turns on whether the run's key matches.
+            let mut inner = s.inner.lock().unwrap();
+            for e in inner.engines.values_mut() {
+                e.current_run = None;
+            }
+        }
+        s.enqueue(run_in(1, "etl")); // key matches the idle engine
+        s.enqueue(run_in(2, "ml")); // key does not
+
+        let (_, line, _) = s.queue_snapshot(10);
+        let entry = |id: i64| {
+            line.iter()
+                .find(|l| l.run_id == id)
+                .map(|l| (l.can_start, l.reason.clone()))
+        };
+        assert_eq!(
+            entry(1),
+            Some((true, None)),
+            "a run matching the idle engine's key was reported as blocked"
+        );
+        assert_eq!(
+            entry(2),
+            Some((false, Some("no processor".to_string()))),
+            "a run with no engine for its key was reported as startable"
+        );
+    }
+
+    /// With no idle engine, every key is equally short of one.
+    #[test]
+    fn the_queue_page_reports_a_shortage_for_every_key() {
+        let s = sup_with_cap(1);
+        s.adopt(&busy_run(99), k("etl")); // stays busy
+        s.enqueue(run_in(1, "etl"));
+        s.enqueue(run_in(2, "ml"));
+
+        let (_, line, _) = s.queue_snapshot(10);
+        assert_eq!(line.len(), 2);
+        for l in &line {
+            assert_eq!(l.can_start, false, "run {} should not start", l.run_id);
+            assert_eq!(l.reason.as_deref(), Some("no processor"));
+        }
+    }
+
+    /// With room in the pool, nothing is reported as lacking a slot.
+    #[test]
+    fn room_in_the_pool_marks_nothing() {
+        let s = sup_with_cap(4);
+        for i in 1..=3 {
+            s.enqueue(run_in(i, "etl"));
+        }
+        assert!(s.take_waiting_marks().is_empty());
+    }
+
+    /// A run blocked on a resource reports the resource, not the engine slot.
+    #[test]
+    fn a_resource_block_reports_the_resource_name() {
+        let s = sup_with_cap(0);
+        s.set_total("gpu", 0.0);
+        let mut q = run_in(1, "etl");
+        q.needs = vec![("gpu".into(), 1.0)];
+        s.enqueue(q);
+        assert_eq!(s.take_waiting_marks(), vec![(1, "gpu".to_string())]);
+    }
+
+    /// A run that is not yet due is skipped entirely.
+    #[test]
+    fn a_run_not_yet_due_is_not_marked() {
+        let s = sup_with_cap(0);
+        let mut q = run_in(1, "etl");
+        q.not_before = Some(cereyan_core::now_micros() + 10_000_000);
+        s.enqueue(q);
+        assert!(s.take_waiting_marks().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod busy_count_tests {
+    use super::*;
+
+    fn k(module: &str) -> EngineKey {
+        EngineKey {
+            source_dir: "/nonexistent".into(),
+            module: module.into(),
+            isolated: false,
+            nice: 0,
+        }
+    }
+
+    fn sup_with_engines(specs: &[(&str, bool, bool)]) -> Supervisor {
+        // (module, busy, exit_requested)
+        let config: ServeConfig = serde_json::from_value(serde_json::json!({
+            "home": std::env::temp_dir(),
+            "max_engines": 64,
+        }))
+        .unwrap();
+        let s = Supervisor::new(&config);
+        for (i, (module, busy, exiting)) in specs.iter().enumerate() {
+            let key = k(module);
+            let mut e = Engine::new(format!("e{i}"), key, None, None, false);
+            e.current_run = busy.then_some(100 + i as i64);
+            e.exit_requested = *exiting;
+            s.inner.lock().unwrap().engines.insert(format!("e{i}"), e);
+        }
+        s
+    }
+
+    /// The invariant: the sampler previously derived this number from
+    /// `engines_snapshot`, so the two must agree.
+    #[test]
+    fn the_count_agrees_with_the_snapshot() {
+        for specs in [
+            vec![("etl", false, false)],
+            vec![("etl", true, false)],
+            vec![("etl", true, false), ("ml", false, false), ("reports", true, false)],
+            vec![("etl", false, true), ("ml", true, true)],
+            vec![],
+        ] {
+            let s = sup_with_engines(&specs);
+            let from_snapshot = s
+                .engines_snapshot()
+                .iter()
+                .filter(|e| !e["current_run"].is_null())
+                .count();
+            assert_eq!(
+                s.engines_busy_count(),
+                from_snapshot,
+                "count disagrees with the snapshot for {specs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_idle_engine_is_not_counted() {
+        let s = sup_with_engines(&[("etl", false, false)]);
+        assert_eq!(s.engines_busy_count(), 0);
+    }
+
+    #[test]
+    fn every_busy_engine_is_counted() {
+        let s = sup_with_engines(&[
+            ("etl", true, false),
+            ("ml", true, false),
+            ("reports", false, false),
+            ("mail", true, false),
+        ]);
+        assert_eq!(s.engines_busy_count(), 3);
+    }
+
+    /// An engine told to exit while holding a run is still running something, so
+    /// it counts. This is the pre-existing behaviour and the test pins it.
+    #[test]
+    fn an_exiting_engine_holding_a_run_is_counted() {
+        let s = sup_with_engines(&[("etl", true, true)]);
+        assert_eq!(
+            s.engines_busy_count(),
+            1,
+            "an exiting engine that still holds a run is busy"
+        );
+    }
+
+    #[test]
+    fn no_engines_counts_zero() {
+        let config: ServeConfig = serde_json::from_value(serde_json::json!({
+            "home": std::env::temp_dir(), "max_engines": 4,
+        }))
+        .unwrap();
+        assert_eq!(Supervisor::new(&config).engines_busy_count(), 0);
+    }
+
+    /// This count is not the pool's occupancy: an idle engine occupies the pool
+    /// without being busy. If the two were ever conflated, this would catch it.
+    #[test]
+    fn the_count_is_not_pool_occupancy() {
+        let s = sup_with_engines(&[("etl", false, false), ("ml", false, false)]);
+        assert_eq!(s.engines_busy_count(), 0, "nothing is running");
+        let inner = s.inner.lock().unwrap();
+        assert_eq!(
+            inner.occupying(),
+            2,
+            "both idle engines still occupy the pool, which is a different number"
+        );
+    }
+
+    /// The snapshot must keep serving its JSON consumers unchanged.
+    #[test]
+    fn the_snapshot_still_reports_every_engine() {
+        let s = sup_with_engines(&[("etl", true, false), ("ml", false, false)]);
+        let snap = s.engines_snapshot();
+        assert_eq!(snap.len(), 2);
+        for e in &snap {
+            for k in [
+                "id", "pid", "module", "source_dir", "isolated", "nice", "runs_done",
+                "current_run", "adopted", "exit_requested", "uptime_secs",
+            ] {
+                assert!(e.get(k).is_some(), "the snapshot lost the key {k}");
+            }
+        }
+        let busy: Vec<_> = snap
+            .iter()
+            .filter(|e| !e["current_run"].is_null())
+            .collect();
+        assert_eq!(busy.len(), 1);
+        assert_eq!(busy[0]["module"], "etl");
+    }
+}
+
+#[cfg(test)]
+mod resource_row_tests {
+    use super::*;
+
+    fn sup(max: usize) -> Supervisor {
+        let config: ServeConfig = serde_json::from_value(json!({
+            "home": std::env::temp_dir(),
+            "max_engines": max,
+        }))
+        .unwrap();
+        Supervisor::new(&config)
+    }
+
+    /// A supervisor with declared totals including a pattern, plus one resource
+    /// in use that was never declared.
+    fn sup_with_resources() -> Supervisor {
+        let config: ServeConfig = serde_json::from_value(json!({
+            "home": std::env::temp_dir(),
+            "max_engines": 4,
+            "resources": {
+                "cpu": 4,
+                "memory": 1024,
+                "gpu-*": 2,
+                "exact": 7,
+            },
+        }))
+        .unwrap();
+        let s = Supervisor::new(&config);
+        {
+            let mut r = s.resources.lock().unwrap();
+            // In use, never declared: `total` falls back to the default.
+            r.used.insert("undeclared".into(), 2.0);
+            r.used.insert("gpu-0".into(), 1.0);
+            r.used.insert("exact".into(), 0.0);
+        }
+        s
+    }
+
+    /// The rows and the serialised snapshot are two representations of one thing.
+    /// The snapshot is built from the rows, so this checks the *shape* survived
+    /// that derivation -- in particular that `name` is the object key and not a
+    /// field inside the entry, which is what the settings endpoint and the two
+    /// MCP resource tools receive.
+    #[test]
+    fn the_rows_and_the_snapshot_agree() {
+        let s = sup_with_resources();
+        let rows = s.resource_rows();
+        let obj = s.resources_snapshot();
+        let obj = obj.as_object().expect("the snapshot is an object");
+
+        assert_eq!(rows.len(), obj.len(), "row count differs from snapshot size");
+        for r in &rows {
+            let e = obj
+                .get(&r.name)
+                .unwrap_or_else(|| panic!("no snapshot entry for {}", r.name));
+            let e = e.as_object().expect("an entry is an object");
+            assert_eq!(e["total"], serde_json::json!(r.total), "total for {}", r.name);
+            assert_eq!(e["used"], serde_json::json!(r.used), "used for {}", r.name);
+            let want_pattern = r.pattern.clone().map(serde_json::Value::String);
+            assert_eq!(e.get("pattern"), want_pattern.as_ref(), "pattern for {}", r.name);
+            // The name is the key, never a field inside the entry.
+            assert!(
+                e.get("name").is_none(),
+                "{} must not carry a name field; it is the object key",
+                r.name
+            );
+        }
+        // And the entry carries exactly the keys it always did.
+        for (name, e) in obj {
+            let e = e.as_object().unwrap();
+            let mut keys: Vec<&str> = e.keys().map(|k| k.as_str()).collect();
+            keys.sort();
+            assert_eq!(
+                keys,
+                if e.contains_key("pattern") {
+                    vec!["pattern", "total", "used"]
+                } else {
+                    vec!["total", "used"]
+                },
+                "the keys of {name} changed"
+            );
+        }
+    }
+
+    #[test]
+    fn a_row_carries_its_name_total_usage_and_pattern() {
+        let s = sup_with_resources();
+        let rows = s.resource_rows();
+        let by = |n: &str| rows.iter().find(|r| r.name == n).cloned();
+
+        // An exact declaration: its own total, and no pattern.
+        let exact = by("exact").expect("exact");
+        assert_eq!(exact.total, 7.0);
+        assert_eq!(exact.used, 0.0, "declared but unused is zero usage");
+        assert_eq!(exact.pattern, None, "an exact total needs no pattern");
+
+        // A pattern match: the pattern's total, and the pattern itself.
+        let gpu = by("gpu-0").expect("gpu-0");
+        assert_eq!(gpu.total, 2.0, "the pattern's total applies");
+        assert_eq!(gpu.used, 1.0);
+        assert_eq!(gpu.pattern.as_deref(), Some("gpu-*"));
+
+        // Never declared, but in use: listed, with the default total.
+        let undeclared = by("undeclared").expect("undeclared");
+        assert_eq!(undeclared.used, 2.0);
+        assert_eq!(undeclared.total, 1.0, "an undeclared resource's default total");
+        assert_eq!(undeclared.pattern, None);
+
+        // Sorted by name, as the snapshot has always been.
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted, "rows are sorted by name");
+    }
+
+    /// The case the old `unwrap_or(0.0)` hid: a resource whose usage really is
+    /// zero, and one whose usage is not. Both must be reported as themselves.
+    #[test]
+    fn zero_usage_is_the_resource_s_own_zero() {
+        let s = sup_with_resources();
+        let rows = s.resource_rows();
+        let zero = rows.iter().find(|r| r.name == "exact").unwrap();
+        let nonzero = rows.iter().find(|r| r.name == "gpu-0").unwrap();
+        assert_eq!(zero.used, 0.0);
+        assert_eq!(nonzero.used, 1.0);
+        // The snapshot reports them the same way, with no fallback in between.
+        let obj = s.resources_snapshot();
+        assert_eq!(obj["exact"]["used"], serde_json::json!(0.0));
+        assert_eq!(obj["gpu-0"]["used"], serde_json::json!(1.0));
+    }
+
+    /// The snapshot must be byte-identical to what the hand-built `json!`
+    /// produced, because three endpoints return it as their response body. This
+    /// re-implements the old code and compares, over a set that includes a
+    /// pattern match and an undeclared resource.
+    #[test]
+    fn the_snapshot_is_identical_to_the_previous_implementation() {
+        fn the_old_way(s: &Supervisor) -> serde_json::Value {
+            let r = s.resources.lock().unwrap_or_else(|e| e.into_inner());
+            let mut names: Vec<&String> = r.totals.keys().chain(r.used.keys()).collect();
+            names.sort();
+            names.dedup();
+            serde_json::Value::Object(
+                names
+                    .into_iter()
+                    .map(|n| {
+                        let mut entry = json!({
+                            "total": r.total(n),
+                            "used": r.used.get(n).copied().unwrap_or(0.0),
+                        });
+                        if let Some(p) = r.pattern_for(n) {
+                            entry["pattern"] = serde_json::Value::String(p.to_string());
+                        }
+                        (n.clone(), entry)
+                    })
+                    .collect(),
+            )
+        }
+
+        let s = sup_with_resources();
+        let old = the_old_way(&s);
+        let new = s.resources_snapshot();
+        assert_eq!(
+            new, old,
+            "the snapshot's shape changed for its three JSON callers"
+        );
+        // String comparison too, so key ordering is covered and not just values.
+        assert_eq!(
+            serde_json::to_string(&new).unwrap(),
+            serde_json::to_string(&old).unwrap()
+        );
+    }
+
+    #[test]
+    fn no_resources_yields_no_rows_and_an_empty_object() {
+        let s = sup(4);
+        // Only whatever `Supervisor::new` declares by default.
+        let rows = s.resource_rows();
+        let obj = s.resources_snapshot();
+        assert_eq!(
+            rows.len(),
+            obj.as_object().unwrap().len(),
+            "rows and snapshot disagree when empty"
+        );
+    }
+
+    #[test]
+    fn declaring_a_resource_total_updates_the_row_and_the_snapshot() {
+        let s = sup(4);
+        let before = s.resource_rows();
+        {
+            let mut r = s.resources.lock().unwrap();
+            r.insert_total("brand-new", 12.0);
+            r.used.insert("brand-new".into(), 3.0);
+        }
+        let after = s.resource_rows();
+        assert_eq!(after.len(), before.len() + 1, "the new resource is listed");
+        let row = after.iter().find(|r| r.name == "brand-new").unwrap();
+        assert_eq!(row.total, 12.0);
+        assert_eq!(row.used, 3.0);
+        let obj = s.resources_snapshot();
+        assert_eq!(obj["brand-new"]["total"], serde_json::json!(12.0));
+        assert_eq!(obj["brand-new"]["used"], serde_json::json!(3.0));
     }
 }

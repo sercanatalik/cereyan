@@ -24,7 +24,16 @@ export default defineConfig({
       },
     },
   },
-  build: { outDir: "dist", emptyOutDir: true, sourcemap: false },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    sourcemap: false,
+    // The worker's status page is a second entry: `cereyan worker` serves it
+    // from the same embedded dist, so it shares tokens, fonts and components.
+    rollupOptions: {
+      input: { index: path.resolve(__dirname, "index.html"), worker: path.resolve(__dirname, "worker.html") },
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,

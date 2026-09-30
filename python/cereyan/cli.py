@@ -69,6 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     worker.add_argument("--shared-path", action="append", dest="shared_paths", metavar="PATH", help="a path this machine shares with the server; a LocalTarget elsewhere is reported (repeat for more; also [worker] shared_paths)")
     worker.add_argument("--token", dest="worker_token", help="the server's API token (also CEREYAN_TOKEN)")
     worker.add_argument("--token-file", help="read the server's API token from this file (also [worker] token_file)")
+    worker.add_argument("--status-host", help="interface for the worker's read-only status page (default 127.0.0.1; also [worker] status_host)")
+    worker.add_argument("--status-port", type=int, help="port for the status page (default 0: one the OS picks; also [worker] status_port)")
     worker.set_defaults(func=cmd_worker)
 
     check = sub.add_parser("check", help="import a directory as serve would and report problems, without touching the store")
@@ -255,6 +257,8 @@ def cmd_worker(args) -> int:
             shared_paths=args.shared_paths,
             token=args.worker_token,
             token_file=args.token_file,
+            status_host=args.status_host,
+            status_port=args.status_port,
         )
     except (CereyanError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)

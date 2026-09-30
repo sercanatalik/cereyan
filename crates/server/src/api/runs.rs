@@ -495,7 +495,8 @@ pub async fn create_run(
                 .store
                 .get_flow(id)?
                 .ok_or_else(|| ApiError::Internal("flow vanished".into()))?;
-            state.index.set_flow_project(flow.id, flow.project.clone());
+            state.index.set_flow_project(flow.id, std::sync::Arc::<str>::from(flow.project.as_str()));
+            state.invalidate_dep_graph();
             state.stream.publish(
                 "flow.registered",
                 flow.id.to_string(),
@@ -527,7 +528,8 @@ pub async fn create_run(
                 .store
                 .get_flow(id)?
                 .ok_or_else(|| ApiError::Internal("flow vanished".into()))?;
-            state.index.set_flow_project(flow.id, flow.project.clone());
+            state.index.set_flow_project(flow.id, std::sync::Arc::<str>::from(flow.project.as_str()));
+            state.invalidate_dep_graph();
             state.stream.publish(
                 "flow.registered",
                 flow.id.to_string(),
@@ -842,9 +844,14 @@ pub async fn retry_inner(
         .store
         .get_flow(original.flow_id)?
         .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
-    let tasks = state.store.task_runs_by_run(original.id, None)?;
-    let last = tasks.iter().map(|t| t.pass).max().unwrap_or(0);
-    let latest: Vec<&TaskRun> = tasks.iter().filter(|t| t.pass == last).collect();
+    // Only the latest pass decides what a retry must not reuse, so read that
+    // pass rather than every pass and discarding the rest. `crash_retries`
+    // makes the pass count a declared, user-controlled multiplier, and each
+    // discarded row still costs a full decode of its JSON columns.
+    // `(next_pass - 1).max(0)` is the existing idiom for "the latest pass",
+    // and the clamp covers a run with no task runs.
+    let last = (state.store.next_pass(original.id)? - 1).max(0);
+    let latest: Vec<TaskRun> = state.store.task_runs_by_run(original.id, Some(last))?;
     let key_of: std::collections::HashMap<String, &str> = latest
         .iter()
         .map(|t| (t.external_id.to_string(), t.dynamic_key.as_str()))

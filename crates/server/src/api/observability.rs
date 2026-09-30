@@ -141,9 +141,13 @@ pub struct RulePatch {
     pub at: Option<Option<cereyan_core::RuleClock>>,
 }
 
+// The annotation, and therefore the OpenAPI schema and the generated client
+// types, is unchanged: `body = Vec<RuleRow>`. The return type only differs
+// because `RuleList` serialises the shared rows instead of copying them.
 #[utoipa::path(get, path = "/api/rules", responses((status = 200, body = Vec<RuleRow>)))]
-pub async fn list_rules(State(state): State<Arc<AppState>>) -> Json<Vec<RuleRow>> {
-    Json(state.rules.all())
+pub async fn list_rules(State(state): State<Arc<AppState>>) -> Json<rules::RuleList> {
+    let rules = state.rules.all();
+    Json(rules::RuleList(rules))
 }
 
 #[utoipa::path(post, path = "/api/rules", request_body = RuleBody, responses((status = 201, body = RuleRow), (status = 422)))]

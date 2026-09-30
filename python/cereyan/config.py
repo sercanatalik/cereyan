@@ -46,7 +46,7 @@ KNOWN_KEYS = {
                  "keep_last_runs_per_flow", "backup_every", "backup_keep", "retain_checkpoints_days"},
     "email": {"host", "port", "tls", "username", "password", "from"},
     "ui": {"title"},
-    "worker": {"host", "name", "processors", "labels", "shared_paths", "token_file"},
+    "worker": {"host", "name", "processors", "labels", "shared_paths", "token_file", "status_host", "status_port"},
 }
 
 
@@ -80,7 +80,7 @@ def server_settings(directory: str) -> dict:
 
 
 def worker_settings(directory: str) -> dict:
-    """The ``[worker]`` table: host, name, processors, labels, shared_paths, token_file."""
+    """The ``[worker]`` table: host, name, processors, labels, shared_paths, token_file, status_host, status_port."""
     return dict(load_project_config(directory).get("worker", {}))
 
 

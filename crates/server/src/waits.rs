@@ -128,13 +128,12 @@ fn payload_matches(wanted: &Map<String, Value>, payload: &Map<String, Value>) ->
 
 /// An event arrived: wake every run waiting for one like it.
 pub fn on_event(state: &Arc<AppState>, event: &Event) {
-    let waiting: Vec<i64> = state
-        .index
-        .active_runs()
-        .into_iter()
-        .filter(|r| r.state.state_type == StateType::Paused && r.state.name == "AwaitingEvent")
-        .map(|r| r.id)
-        .collect();
+    // Fast path: one relaxed load, no lock, no clone of the active set. The flag
+    // is maintained under the index lock alongside the waiter set.
+    if !state.index.has_event_waiters() {
+        return;
+    }
+    let waiting = state.index.awaiting_event_ids();
     if waiting.is_empty() {
         return;
     }

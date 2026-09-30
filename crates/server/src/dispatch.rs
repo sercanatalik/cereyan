@@ -58,20 +58,16 @@ pub fn run_needs(
 }
 
 /// Effective priority: the run's own or the highest of flows that depend on it.
+/// Uses the cached dependency graph to avoid loading all flows per enqueue.
 pub fn effective_priority(state: &AppState, flow: &Flow, run: &Run) -> i64 {
     let mut priority = run.priority;
-    if let Ok(flows) = state.store.list_flows(Some(&flow.project)) {
-        for other in flows {
-            let opts = FlowOptions::from_map(&other.options);
-            if opts
-                .after
-                .as_ref()
-                .map(|a| a.depends_on(&flow.name))
-                .unwrap_or(false)
-            {
-                priority = priority.max(opts.priority);
-            }
-        }
+    // Shared, not copied: this runs on every run admission.
+    // The graph already carries the highest priority its dependents declare, and
+    // carries it because building the graph parses those dependents' options
+    // anyway. So this makes no store read, where it used to read a whole flow per
+    // dependent on every run admission.
+    if let Some(dependents) = state.dep_graph().get(&flow.id) {
+        priority = priority.max(dependents.max_priority);
     }
     priority
 }
@@ -288,8 +284,20 @@ fn name_is_terminal(name: &str) -> bool {
 /// Two runs ending together both see an empty remainder, so the marker is
 /// claimed under a lock in this process and persisted for the next one.
 fn backfill_completed(state: &Arc<AppState>, backfill_id: i64, flow_id: i64) {
-    static EMITTED: std::sync::Mutex<Option<std::collections::HashSet<i64>>> =
-        std::sync::Mutex::new(None);
+    // A backfill cannot be complete while its newest run has not ended, and runs
+    // are created in id order, so that is one seek on the backfill index. Without
+    // it, every terminal run re-aggregated the backfill's whole run set: four
+    // times the work per doubling, 6.2 s for an 8,000-run backfill.
+    //
+    // The guard only ever rules completion *out*. When it passes, the aggregate
+    // below still decides, because the newest run ending says nothing about an
+    // earlier one that is still retrying.
+    match state.store.newest_backfill_run_state(backfill_id) {
+        Ok(Some(newest)) if !name_is_terminal(&newest) => return,
+        Ok(None) => return,
+        Ok(Some(_)) => {}
+        Err(_) => return,
+    }
     let Ok(counts) = state.store.backfill_counts(backfill_id) else {
         return;
     };
@@ -303,12 +311,13 @@ fn backfill_completed(state: &Arc<AppState>, backfill_id: i64, flow_id: i64) {
     }
     let marker = format!("backfill.completed:{backfill_id}");
     {
-        let mut guard = EMITTED.lock().unwrap_or_else(|e| e.into_inner());
-        let set = guard.get_or_insert_with(Default::default);
-        if set.contains(&backfill_id) || matches!(state.store.kv_get(&marker), Ok(Some(_))) {
+        // Use the AppState field (reset on server start) instead of a static.
+        // If the mutex is poisoned, clear it and continue.
+        let mut guard = state.backfill_emitted.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.contains(&backfill_id) || matches!(state.store.kv_get(&marker), Ok(Some(_))) {
             return;
         }
-        set.insert(backfill_id);
+        guard.insert(backfill_id);
     }
     let _ = state.store.kv_set(&marker, "1");
     let by_state: serde_json::Map<String, serde_json::Value> =
@@ -438,9 +447,18 @@ pub fn flow_timeout(state: &Arc<AppState>, run_id: i64) {
         if let Some(pid) = active.engine_pid {
             crate::process::terminate(pid);
             let st = state.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(3));
-                if crate::process::is_alive(pid) {
+            let shutdown = state.shutdown.clone();
+            // Use spawn_blocking so the task is tracked by the tokio runtime
+            // and can be cancelled on shutdown.
+            tokio::task::spawn_blocking(move || {
+                // Wait 3 seconds, but abort if the server is shutting down.
+                for _ in 0..30 {
+                    if *shutdown.borrow() {
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                if !*shutdown.borrow() && crate::process::is_alive(pid) {
                     crate::process::kill(pid);
                 }
                 st.supervisor.forget_pid(pid);
@@ -528,10 +546,21 @@ fn trigger_dependents_at(state: &Arc<AppState>, upstream: &Flow, run: &Run, dept
     if run.created_by.starts_with("catchup") && run.state.name == "Skipped" {
         // Nothing ran; still counts as success per spec, so continue.
     }
-    let Ok(flows) = state.store.list_flows(Some(&upstream.project)) else {
-        return;
+    // The dependents come from the shared graph, which is exactly this relation:
+    // `depends_on` is `upstreams().contains(name)` and `dep_graph_from_flows`
+    // walks `upstreams()`, resolved within the same project. Reading every flow in
+    // the project instead cost a full table read and three JSON parses per flow,
+    // on every completed run, to find the handful that declared a dependency.
+    // The graph's `Arc` is released here rather than held across the loop, which
+    // does store reads: a rebuild during the loop should not be pinned by this.
+    let ids: Vec<i64> = match state.dep_graph().get(&upstream.id) {
+        Some(d) => d.ids.to_vec(),
+        None => return,
     };
-    for downstream in flows {
+    for id in ids {
+        let Ok(Some(downstream)) = state.store.get_flow(id) else {
+            continue;
+        };
         let opts = FlowOptions::from_map(&downstream.options);
         let Some(after) = opts.after.as_ref() else {
             continue;
@@ -550,19 +579,34 @@ fn trigger_dependents_at(state: &Arc<AppState>, upstream: &Flow, run: &Run, dept
                 Value::String(s) => s.clone(),
                 other => other.to_string(),
             };
-            let mut upstream_runs: Vec<i64> = Vec::new();
+            // Resolve all upstream flows first.
+            let mut upstream_flow_ids: Vec<i64> = Vec::new();
             let mut complete = true;
             for name in after.upstreams() {
-                let Ok(Some(up)) = state.store.get_flow_by_key(&downstream.project, &name) else {
-                    complete = false;
-                    break;
-                };
-                match state.store.latest_run_with_param(up.id, key, &text) {
-                    Ok(Some(latest))
-                        if latest.state.state_type == StateType::Completed
-                            || latest.state.name == "Skipped" =>
-                    {
-                        skip_down |= carries_skip(&latest);
+                match state.store.get_flow_by_key(&downstream.project, &name) {
+                    Ok(Some(up)) => upstream_flow_ids.push(up.id),
+                    _ => {
+                        complete = false;
+                        break;
+                    }
+                }
+            }
+            if !complete {
+                continue;
+            }
+            // Batch query: fetch the latest run for all upstream flows in one query.
+            let latest_runs = match state.store.latest_run_with_param_many(&upstream_flow_ids, key, &text) {
+                Ok(runs) => runs,
+                Err(_) => continue,
+            };
+            let mut upstream_runs: Vec<i64> = Vec::new();
+            for flow_id in &upstream_flow_ids {
+                // `is_complete` and `carries_skip` are the store's, so the rule a
+                // run must meet to satisfy a fan-in is defined once rather than
+                // restated here against a whole `Run`.
+                match latest_runs.get(flow_id) {
+                    Some(Some(latest)) if latest.is_complete() => {
+                        skip_down |= latest.carries_skip();
                         upstream_runs.push(latest.id);
                     }
                     _ => {
@@ -700,5 +744,394 @@ fn trigger_dependents_at(state: &Arc<AppState>, upstream: &Flow, run: &Run, dept
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod priority_tests {
+    use super::*;
+    use crate::api::flows::list_flows_tests::state_with_flows;
+    use tempfile::TempDir;
+
+    /// A run at a given priority, read back from the store rather than built as
+    /// a literal: `Run` has 39 required fields and no `Default`.
+    fn run(state: &AppState, priority: i64) -> Run {
+        let flow_id = state.store.list_flows(None).unwrap()[0].id;
+        let (id, _) = state
+            .store
+            .create_run_full(cereyan_store::CreateRun {
+                flow_id,
+                name: format!("r{priority}"),
+                parameters: "{}".into(),
+                tags: "[]".into(),
+                created_by: "test".into(),
+                priority,
+                ..Default::default()
+            })
+            .unwrap();
+        state.store.get_run(id).unwrap().expect("the run")
+    }
+
+    /// The flow whose dependents supply the priority. Read from the store so the
+    /// id is the real one.
+    fn upstream_of(state: &AppState, name: &str) -> Flow {
+        state
+            .store
+            .list_flows(None)
+            .unwrap()
+            .into_iter()
+            .find(|f| f.name == name)
+            .expect("the flow is registered")
+    }
+
+    /// A run takes its own priority when nothing depends on it.
+    #[test]
+    fn a_run_with_no_dependents_keeps_its_own_priority() {
+        let dir = TempDir::new().unwrap();
+        let state = state_with_flows(&dir, &[("p", "etl", None, None), ("p", "other", None, None)]);
+        let flow = upstream_of(&state, "etl");
+        for p in [0i64, 3, -2] {
+            assert_eq!(effective_priority(&state, &flow, &run(&state, p)), p, "priority {p}");
+        }
+    }
+
+    /// A dependent's higher priority is applied, and a lower one is not.
+    #[test]
+    fn a_dependents_priority_raises_the_run_but_never_lowers_it() {
+        let dir = TempDir::new().unwrap();
+        let state = state_with_flows(&dir, &[("p", "etl", None, None)]);
+        // Attach a dependent at a known priority by rewriting its options.
+        let mut opts = serde_json::Map::new();
+        opts.insert("after".into(), serde_json::json!({ "flow": "etl" }));
+        opts.insert("priority".into(), serde_json::json!(9));
+        state
+            .store
+            .upsert_flow_full(cereyan_store::UpsertFlow {
+                project: "p".into(),
+                name: "dependent".into(),
+                module: "m".into(),
+                source_dir: "/tmp".into(),
+                description: None,
+                tags: "[]".into(),
+                parameter_schema: "{}".into(),
+                options: serde_json::Value::Object(opts).to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        // Invalidate so the graph is rebuilt with the new declaration.
+        state.invalidate_dep_graph();
+
+        let flow = upstream_of(&state, "etl");
+        assert_eq!(
+            effective_priority(&state, &flow, &run(&state, 2)),
+            9,
+            "a dependent at 9 raises a run at 2"
+        );
+        assert_eq!(
+            effective_priority(&state, &flow, &run(&state, 12)),
+            12,
+            "a dependent at 9 does not lower a run at 12"
+        );
+    }
+
+    /// The graph must record the *highest* among several dependents.
+    #[test]
+    fn the_highest_of_several_dependents_wins() {
+        let dir = TempDir::new().unwrap();
+        let state = state_with_flows(&dir, &[("p", "etl", None, None)]);
+        for (name, priority) in [("low", 1i64), ("high", 20), ("mid", 7)] {
+            let mut opts = serde_json::Map::new();
+            opts.insert("after".into(), serde_json::json!({ "flow": "etl" }));
+            opts.insert("priority".into(), serde_json::json!(priority));
+            state
+                .store
+                .upsert_flow_full(cereyan_store::UpsertFlow {
+                    project: "p".into(),
+                    name: name.into(),
+                    module: "m".into(),
+                    source_dir: "/tmp".into(),
+                    description: None,
+                    tags: "[]".into(),
+                    parameter_schema: "{}".into(),
+                    options: serde_json::Value::Object(opts).to_string(),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+        state.invalidate_dep_graph();
+        let flow = upstream_of(&state, "etl");
+        assert_eq!(effective_priority(&state, &flow, &run(&state, 0)), 20);
+    }
+
+    /// The point of the change: the rule consults the graph and nothing else.
+    ///
+    /// Deleting the dependent rows after the graph is built would change the
+    /// answer if the rule re-read them from the store. It must not — and a stale
+    /// graph is exactly the intended behaviour here, since a stale priority and a
+    /// stale dependent id have the same lifetime.
+    #[test]
+    fn the_rule_does_not_re_read_the_dependents() {
+        let dir = TempDir::new().unwrap();
+        let state = state_with_flows(&dir, &[("p", "etl", None, None)]);
+        let mut opts = serde_json::Map::new();
+        opts.insert("after".into(), serde_json::json!({ "flow": "etl" }));
+        opts.insert("priority".into(), serde_json::json!(9));
+        let dep_id = state
+            .store
+            .upsert_flow_full(cereyan_store::UpsertFlow {
+                project: "p".into(),
+                name: "dependent".into(),
+                module: "m".into(),
+                source_dir: "/tmp".into(),
+                description: None,
+                tags: "[]".into(),
+                parameter_schema: "{}".into(),
+                options: serde_json::Value::Object(opts).to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        let flow = upstream_of(&state, "etl");
+        let r = run(&state, 1);
+        // Warm the graph, so it holds the dependency.
+        assert_eq!(effective_priority(&state, &flow, &r), 9);
+
+        // Remove the dependent without invalidating the graph.
+        state.store.delete_flow(dep_id).unwrap();
+        assert_eq!(
+            state.store.list_flows(None).unwrap().len(),
+            1,
+            "the dependent row is gone"
+        );
+        assert_eq!(
+            effective_priority(&state, &flow, &r),
+            9,
+            "still 9: the rule reads the graph, not the store, so deleting the \
+             row behind an already-built graph does not change the answer"
+        );
+
+        // Invalidating does drop it, which is what keeps the graph honest.
+        state.invalidate_dep_graph();
+        assert_eq!(
+            effective_priority(&state, &flow, &r),
+            1,
+            "after an invalidation the graph is rebuilt without the dependent"
+        );
+    }
+}
+
+#[cfg(test)]
+mod backfill_completion_tests {
+    use super::*;
+    use crate::api::flows::list_flows_tests::state_with_flows;
+    use tempfile::TempDir;
+
+    /// The invariant the guard rests on.
+    ///
+    /// `backfill_completed` returns early when the backfill's newest run has not
+    /// ended, and otherwise falls through to the original aggregate. If the guard
+    /// ever said "still running" for a backfill the aggregate called finished, a
+    /// backfill would never report completion. If it said "ended" for one with
+    /// work left, the aggregate would catch it — that direction is safe.
+    ///
+    /// So the property to pin is one-directional, and it is checked over every
+    /// state name the system can hold, including the sub-state names that
+    /// `name_is_terminal` special-cases.
+    #[test]
+    fn the_guard_never_rules_out_a_finished_backfill() {
+        let dir = TempDir::new().unwrap();
+        let state = state_with_flows(&dir, &[("p", "etl", None, None)]);
+        let flow_id = state.store.list_flows(None).unwrap()[0].id;
+        let b = 11i64;
+
+        // Every state type, plus the sub-state names `name_is_terminal` handles
+        // and a few it must not treat as terminal.
+        let names: Vec<(&str, bool)> = vec![
+            ("Completed", true),
+            ("Failed", true),
+            ("Cancelled", true),
+            ("Crashed", true),
+            ("Cached", true),
+            ("Replayed", true),
+            ("Skipped", true),
+            ("TimedOut", true),
+            ("Pending", false),
+            ("Scheduled", false),
+            ("Running", false),
+            ("Paused", false),
+            ("AwaitingRetry", false),
+            ("Late", false),
+            ("AwaitingResource", false),
+            ("", false),
+        ];
+
+        for (name, terminal) in &names {
+            // The guard reads one name and applies the one rule.
+            let guard_says_ended = name_is_terminal(name);
+            assert_eq!(
+                guard_says_ended, *terminal,
+                "name_is_terminal({name:?}) disagrees with the table this test \
+                 encodes; the guard and the aggregate both use this function, so a \
+                 change here changes both -- which is the point, and is why there \
+                 is no second copy of the rule to drift"
+            );
+        }
+
+        // And end to end: with only a terminal newest run, the aggregate reports
+        // nothing pending, so the guard let it through and completion happens.
+        let (id, _) = state
+            .store
+            .create_run_full(cereyan_store::CreateRun {
+                flow_id,
+                name: "only".into(),
+                parameters: "{}".into(),
+                tags: "[]".into(),
+                created_by: format!("backfill:{b}"),
+                backfill_id: Some(b),
+                initial_state: Some(State::new(StateType::Completed)),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            state.store.newest_backfill_run_state(b).unwrap(),
+            Some("Completed".to_string())
+        );
+        let counts = state.store.backfill_counts(b).unwrap();
+        let pending: i64 = counts
+            .iter()
+            .filter(|(s, _)| !name_is_terminal(s))
+            .map(|(_, n)| *n)
+            .sum();
+        assert_eq!(pending, 0, "nothing pending, so the guard was right to pass");
+        assert!(!counts.is_empty());
+        assert!(id > 0);
+    }
+
+    /// The guard is necessary but not sufficient: the newest run ending says
+    /// nothing about an earlier one still retrying. This is the case the guard
+    /// deliberately lets through to the aggregate.
+    #[test]
+    fn the_newest_run_ending_does_not_complete_a_backfill() {
+        let dir = TempDir::new().unwrap();
+        let state = state_with_flows(&dir, &[("p", "etl", None, None)]);
+        let flow_id = state.store.list_flows(None).unwrap()[0].id;
+        let b = 13i64;
+
+        // Created first, still going; created second, already ended.
+        let mut ids = Vec::new();
+        for (i, name) in ["older", "newer"].iter().enumerate() {
+            let (id, _) = state
+                .store
+                .create_run_full(cereyan_store::CreateRun {
+                    flow_id,
+                    name: (*name).to_string(),
+                    parameters: "{}".into(),
+                    tags: "[]".into(),
+                    created_by: format!("backfill:{b}"),
+                    backfill_id: Some(b),
+                    initial_state: Some(State::new(StateType::Scheduled)),
+                    ..Default::default()
+                })
+                .unwrap();
+            if i == 0 {
+                state
+                    .store
+                    .transition_run(id, State::new(StateType::Running), true)
+                    .unwrap();
+            } else {
+                state
+                    .store
+                    .transition_run(id, State::new(StateType::Completed), true)
+                    .unwrap();
+            }
+            ids.push(id);
+        }
+
+        // The guard passes: the newest run has ended.
+        let newest = state
+            .store
+            .newest_backfill_run_state(b)
+            .unwrap()
+            .expect("there is a newest run");
+        assert!(name_is_terminal(&newest), "the guard lets this through");
+
+        // And the aggregate still finds the older run pending, so completion is
+        // correctly not reported.
+        let counts = state.store.backfill_counts(b).unwrap();
+        let pending: i64 = counts
+            .iter()
+            .filter(|(s, _)| !name_is_terminal(s))
+            .map(|(_, n)| *n)
+            .sum();
+        assert_eq!(pending, 1, "the older run is still going");
+        assert!(ids[0] < ids[1], "the newer run really is the newer one");
+    }
+
+    /// The guard must actually rule out the common case, or it buys nothing: with
+    /// a run still to end, the aggregate is never reached.
+    #[test]
+    fn a_backfill_with_a_newest_run_still_going_is_ruled_out_immediately() {
+        let dir = TempDir::new().unwrap();
+        let state = state_with_flows(&dir, &[("p", "etl", None, None)]);
+        let flow_id = state.store.list_flows(None).unwrap()[0].id;
+        let b = 17i64;
+
+        let (older, _) = state
+            .store
+            .create_run_full(cereyan_store::CreateRun {
+                flow_id,
+                name: "older".into(),
+                parameters: "{}".into(),
+                tags: "[]".into(),
+                created_by: format!("backfill:{b}"),
+                backfill_id: Some(b),
+                initial_state: Some(State::new(StateType::Scheduled)),
+                ..Default::default()
+            })
+            .unwrap();
+        state
+            .store
+            .transition_run(older, State::new(StateType::Completed), true)
+            .unwrap();
+        let (newer, _) = state
+            .store
+            .create_run_full(cereyan_store::CreateRun {
+                flow_id,
+                name: "newer".into(),
+                parameters: "{}".into(),
+                tags: "[]".into(),
+                created_by: format!("backfill:{b}"),
+                backfill_id: Some(b),
+                initial_state: Some(State::new(StateType::Scheduled)),
+                ..Default::default()
+            })
+            .unwrap();
+
+        // This is the case the guard exists for: the newest run has not ended, so
+        // completion is impossible and the aggregate is not worth running.
+        let newest = state
+            .store
+            .newest_backfill_run_state(b)
+            .unwrap()
+            .expect("there is a newest run");
+        assert_eq!(newest, "Scheduled", "the newest run is still to start");
+        assert!(
+            !name_is_terminal(&newest),
+            "so the guard rules completion out before any aggregate"
+        );
+        assert!(newer > older);
+    }
+
+    /// A backfill with no runs is ruled out by the guard too, which is the same
+    /// outcome the `counts.is_empty()` arm used to produce.
+    #[test]
+    fn a_backfill_with_no_runs_is_ruled_out() {
+        let dir = TempDir::new().unwrap();
+        let state = state_with_flows(&dir, &[("p", "etl", None, None)]);
+        assert!(
+            state.store.newest_backfill_run_state(999).unwrap().is_none(),
+            "no runs, so no newest run, so nothing to aggregate"
+        );
+        assert!(state.store.backfill_counts(999).unwrap().is_empty());
     }
 }

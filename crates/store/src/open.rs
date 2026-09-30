@@ -161,14 +161,20 @@ fn passes_quick_check(db_path: &Path) -> bool {
 
 fn quarantine(db_path: &Path) -> Result<()> {
     let ts = cereyan_core::now_micros() / 1_000_000;
-    let target = db_path.with_file_name(format!("db.sqlite.corrupt-{ts}"));
+    let file_name = db_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "db.sqlite".to_string());
+    let target = db_path.with_file_name(format!("{file_name}.corrupt-{ts}"));
     eprintln!(
         "warning: cereyan database failed its integrity check; moving it to {} and starting empty",
         target.display()
     );
     std::fs::rename(db_path, &target)?;
+    // Remove WAL and SHM side files, constructing their names from the actual
+    // DB file name rather than hardcoding "db.sqlite".
     for suffix in ["-wal", "-shm"] {
-        let side = db_path.with_file_name(format!("db.sqlite{suffix}"));
+        let side = db_path.with_file_name(format!("{file_name}{suffix}"));
         if side.exists() {
             let _ = std::fs::remove_file(side);
         }
