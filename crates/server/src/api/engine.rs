@@ -230,6 +230,13 @@ pub async fn work(
                 exit: true,
             }));
         }
+        // Register for the wake-up before looking for work. `notify_waiters`
+        // only reaches futures that already exist, so one created after
+        // `take_work` said Wait misses a run that became ready in between,
+        // and the engine sleeps out the whole poll with work waiting.
+        let notified = state.supervisor.notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
         let decision = state
             .supervisor
             .take_work(&req.engine_id, req.pid, &key, &url);
@@ -289,7 +296,6 @@ pub async fn work(
                         exit: false,
                     }));
                 }
-                let notified = state.supervisor.notify.notified();
                 let mut shutdown = state.shutdown.clone();
                 tokio::select! {
                     _ = tokio::time::timeout_at(deadline, notified) => {}
@@ -518,13 +524,17 @@ pub async fn acquire(
         .collect();
     let deadline = tokio::time::Instant::now() + Duration::from_millis(req.wait_ms.min(30_000));
     loop {
+        // As in `work`: registered before the check, so a release between the
+        // check and the wait is not missed.
+        let notified = state.supervisor.notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
         match state.supervisor.try_acquire(req.run_id, &needs) {
             Ok(lease) => return Ok(Json(json!({"lease": lease}))),
             Err(blocking) => {
                 if tokio::time::Instant::now() >= deadline {
                     return Ok(Json(json!({"waiting": blocking})));
                 }
-                let notified = state.supervisor.notify.notified();
                 let _ = tokio::time::timeout_at(deadline, notified).await;
             }
         }

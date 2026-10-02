@@ -522,9 +522,13 @@ def test_backfill_values_missing_only_and_force(sched):
     forced = c.backfill(fid(sched, "bulk"), "day", "2026-01-01", "2026-01-06", concurrency=3, force=True)
     assert forced["total"] == 6
 
+    # Counts are by state name, so a run waiting for a slot reads as
+    # AwaitingResource: settled means every name is a terminal one.
+    ended = {"Completed", "Failed", "Cancelled", "Crashed", "Cached", "Replayed", "Skipped", "TimedOut"}
+
     def settled():
         counts = c.backfill_status(forced["id"])["counts"]
-        return counts if sum(counts.values()) == 6 and not any(k in ("Scheduled", "Pending", "Running") for k in counts) else None
+        return counts if sum(counts.values()) == 6 and set(counts) <= ended else None
 
     counts = wait_until(settled, timeout=40)
     assert counts == {"Completed": 6}
