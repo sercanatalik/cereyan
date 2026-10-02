@@ -21,7 +21,7 @@ from .targets import LocalTarget, Target
 from .tasks import Task, task
 from .variables import Variable
 
-__version__ = "3.0.1"
+__version__ = "3.1.0"
 
 __all__ = [
     "receive",

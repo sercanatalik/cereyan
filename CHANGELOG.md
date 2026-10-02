@@ -1,9 +1,20 @@
 # Changelog
 
-## Unreleased
+## 3.1.0 (2026-10-02)
 
+Messages to running flows, a status page on every worker, and worker fixes.
+
+- **`receive(topic)` and messages.** A flow can wait for a message on any topic: `receive("approval")` pauses the run, frees its engine, and resumes it with the payload of `POST /api/runs/{id}/messages/{topic}`. A message sent before the run reaches `receive` is queued and handed over when it does. `receive(topic, timeout=60, default=...)` resumes with `default` when nothing arrives in time; the timer is the server's, so the run holds no engine while it waits. `wait_for_input(prompt)` is now `receive("input", prompt=prompt)`. The Python client gains `send_message`, and the MCP server `list_waiting_runs` and `send_message`.
+- **`publish_state(key, value)`.** A flow stores a JSON value under a key for its run, readable with `GET /api/runs/{id}/state` while the run goes on.
 - **A status page on every worker.** `cereyan worker` serves a read-only page, built from the same UI bundle as the server's: its state, runs completed and failed since it started with a bar per flow, each processor's engine and run, its last 20 messages, and its host details. When the server cannot be reached, the page says so, keeps the last counts marked "as of" when they arrived, and goes on showing what the worker knows itself. `status.json` returns the same data, and `healthz` answers 503 after three missed heartbeats. The page binds to `127.0.0.1` on a port the OS picks, which the worker logs at start and the Workers tab shows. Choose another address with `--status-host` and `--status-port` (or `[worker] status_host` and `status_port`). Links are relative, so a reverse proxy can serve the page under any path. A port that cannot be bound stops the worker before it registers. The worker now opens this one port. It used to open none. [Run across machines](https://sercanatalik.github.io/cereyan/guides/run-across-machines/)
 - **Heartbeat answers carry `stats`.** `POST /api/workers/{id}/heartbeat` also returns the worker's runs per flow and state since its reported start time, and the run each of its engines is executing. Workers from 3.0 ignore it.
+- **A worker that stops cleanly leaves at once.** On `SIGTERM` or Ctrl-C a worker drains, waits for its runs, and then calls the new `POST /api/workers/{id}/leave`, so it shows Offline at once and comes back online when started again. A drain set before the stop is kept across the restart.
+- **A worker cannot be named `server`.** That name is the server's own processors in the queue and the UI; registration refuses it and asks for another `--name`.
+
+- **Fix: a worker whose heartbeat failed while its checkout changed** sends the new fingerprints on its next heartbeat. Before, the server kept the old ones and could hand that worker runs of code it no longer had.
+- **Fix: chunked result uploads.** Two workers uploading the same key, or a retried chunk, could corrupt the stored result. Each upload now writes its own file, and each chunk lands at its offset (`upload` and `offset` query parameters on `PUT /api/results/{key}`).
+
+**Migration.** The store migrates to schema 23 (`run_message`, and indexes). Workers and servers of 3.0 and 3.1 mix; a 3.0 worker uploads results without `upload` and `offset`, as before.
 
 ## 3.0.1 (2026-09-29)
 
