@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import socket
+import socketserver
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
@@ -24,6 +25,15 @@ class _Server(ThreadingHTTPServer):
     allow_reuse_address = True
     status: Callable[[], dict[str, Any]]
     health: Callable[[], tuple[bool, dict[str, Any]]]
+
+    def server_bind(self) -> None:
+        # `HTTPServer.server_bind` resolves `socket.getfqdn(host)` for a
+        # `server_name` nothing here reads. A slow reverse lookup (macOS often
+        # takes tens of seconds) then stalls the worker before it says anything.
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = str(host)
+        self.server_port = port
 
 
 class _Server6(_Server):
