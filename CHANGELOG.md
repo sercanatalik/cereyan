@@ -1,6 +1,10 @@
 # Changelog
 
-## 3.1.0 (2026-10-02)
+## 3.1.1 (2026-10-02)
+
+- **3.1.0 was tagged but never published.** Its CI run failed on a lint step and on a test that only builds on Unix, so the release was held back. 3.1.1 is the same release with those fixed. The notes below describe 3.1.
+
+## 3.1.0 (2026-10-02, not published)
 
 Messages to running flows, a status page on every worker, and worker fixes.
 
