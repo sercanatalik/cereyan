@@ -1,8 +1,13 @@
 # Changelog
 
-## 3.1.1 (2026-10-02)
+## 3.1.2 (2026-10-02)
 
-- **3.1.0 was tagged but never published.** Its CI run failed on a lint step and on a test that only builds on Unix, so the release was held back. 3.1.1 is the same release with those fixed. The notes below describe 3.1.
+- **3.1.0 and 3.1.1 were tagged but never published.** Their CI runs failed: first on lint and a test that only builds on Unix, then on a newer clippy lint, a worker that stalled on a reverse DNS lookup on macOS, and the race below. 3.1.2 is the 3.1 release with those fixed. The notes below describe 3.1.
+- **Fix: Join the line now could leave a continuous schedule's run waiting the full delay.** Joining just as the loop created its waiting run moved the run to now, and the loop then put it back at its original time. The schedule could also report a waiting loop with no next fire for a moment.
+
+## 3.1.1 (2026-10-02, not published)
+
+- **3.1.0 was tagged but never published.** Its CI run failed on a lint step and on a test that only builds on Unix, so the release was held back.
 
 ## 3.1.0 (2026-10-02, not published)
 
