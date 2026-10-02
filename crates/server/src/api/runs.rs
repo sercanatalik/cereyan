@@ -495,7 +495,9 @@ pub async fn create_run(
                 .store
                 .get_flow(id)?
                 .ok_or_else(|| ApiError::Internal("flow vanished".into()))?;
-            state.index.set_flow_project(flow.id, std::sync::Arc::<str>::from(flow.project.as_str()));
+            state
+                .index
+                .set_flow_project(flow.id, std::sync::Arc::<str>::from(flow.project.as_str()));
             state.invalidate_dep_graph();
             state.stream.publish(
                 "flow.registered",
@@ -528,7 +530,9 @@ pub async fn create_run(
                 .store
                 .get_flow(id)?
                 .ok_or_else(|| ApiError::Internal("flow vanished".into()))?;
-            state.index.set_flow_project(flow.id, std::sync::Arc::<str>::from(flow.project.as_str()));
+            state
+                .index
+                .set_flow_project(flow.id, std::sync::Arc::<str>::from(flow.project.as_str()));
             state.invalidate_dep_graph();
             state.stream.publish(
                 "flow.registered",
@@ -1177,11 +1181,10 @@ pub async fn resume_inner(state: &Arc<AppState>, id: i64, input: Value) -> ApiRe
     // answer a question that has already moved on, nor overwrite an answer
     // another caller gave first.
     let st = state.clone();
-    let woke = tokio::task::spawn_blocking(move || {
-        crate::waits::wake_paused(&st, &run, |_| Some(input))
-    })
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))??;
+    let woke =
+        tokio::task::spawn_blocking(move || crate::waits::wake_paused(&st, &run, |_| Some(input)))
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))??;
     match woke {
         crate::waits::Woke::Moved(current) => Err(not_paused(&current)),
         crate::waits::Woke::Done(result) => resumed(result),
@@ -1314,17 +1317,18 @@ pub async fn run_receive(
         .store
         .get_run(id)?
         .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
-    let payload = tokio::task::spawn_blocking(move || {
-        state.store.run_message_claim(id, &q.topic, q.index)
-    })
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let payload =
+        tokio::task::spawn_blocking(move || state.store.run_message_claim(id, &q.topic, q.index))
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
     match payload {
         Ok(Some(text)) => {
             let answer: Value = serde_json::from_str(&text).unwrap_or(Value::String(text));
             Ok(Json(serde_json::json!({"claimed": true, "answer": answer})))
         }
-        Ok(None) => Ok(Json(serde_json::json!({"claimed": false, "answer": Value::Null}))),
+        Ok(None) => Ok(Json(
+            serde_json::json!({"claimed": false, "answer": Value::Null}),
+        )),
         Err(e) => Err(ApiError::Internal(e.to_string())),
     }
 }
@@ -1356,8 +1360,10 @@ pub async fn send_message(
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))??;
     match delivered {
-        crate::waits::Delivered::Queued(run) => Ok(Json(run)),
-        crate::waits::Delivered::Woke(crate::waits::Woke::Done(result)) => Ok(Json(resumed(result)?)),
+        crate::waits::Delivered::Queued(run) => Ok(Json(*run)),
+        crate::waits::Delivered::Woke(crate::waits::Woke::Done(result)) => {
+            Ok(Json(resumed(result)?))
+        }
         crate::waits::Delivered::Woke(crate::waits::Woke::Moved(run)) => Err(not_paused(&run)),
     }
 }

@@ -26,7 +26,7 @@ fn answer_lock() -> MutexGuard<'static, ()> {
 /// What answering a paused run came to.
 pub enum Woke {
     /// The run is no longer in the pause the caller saw; nothing was written.
-    Moved(Run),
+    Moved(Box<Run>),
     /// The answer was stored and the transition attempted. An accepted run is
     /// already queued.
     Done(TransitionResult),
@@ -44,13 +44,12 @@ pub fn wake_paused(
         .store
         .get_run(observed.id)?
         .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
-    if run.state.state_type != StateType::Paused
-        || run.state.timestamp != observed.state.timestamp
+    if run.state.state_type != StateType::Paused || run.state.timestamp != observed.state.timestamp
     {
-        return Ok(Woke::Moved(run));
+        return Ok(Woke::Moved(Box::new(run)));
     }
     let Some(input) = input(&run) else {
-        return Ok(Woke::Moved(run));
+        return Ok(Woke::Moved(Box::new(run)));
     };
     wake_locked(state, run, input)
 }
@@ -60,7 +59,7 @@ pub enum Delivered {
     /// The run was waiting on this topic and was answered.
     Woke(Woke),
     /// The run was not waiting on it: the message is queued for its `receive`.
-    Queued(Run),
+    Queued(Box<Run>),
 }
 
 /// Send `payload` on `topic`: answer the run if it waits on that topic, queue
@@ -87,7 +86,7 @@ pub fn deliver_message(
     state
         .store
         .run_message_insert(run_id, topic, &payload.to_string())?;
-    Ok(Delivered::Queued(run))
+    Ok(Delivered::Queued(Box::new(run)))
 }
 
 /// Store `input` as the answer to the question `run` is paused on and schedule
@@ -104,7 +103,10 @@ fn wake_locked(state: &Arc<AppState>, run: Run, input: Value) -> ApiResult<Woke>
     // waiting in `receive(topic)` would replay and pause again.
     let topic = details.get("topic").cloned().unwrap_or(Value::Null);
     let mut answers = crate::api::runs::stored_answers(state, run.id)?;
-    answers.insert(index.to_string(), json!({"topic": topic, "prompt": prompt, "input": input}));
+    answers.insert(
+        index.to_string(),
+        json!({"topic": topic, "prompt": prompt, "input": input}),
+    );
     state.store.kv_set(
         &crate::state::run_input_key(run.id),
         &crate::api::runs::answers_value(&answers),
@@ -146,7 +148,12 @@ pub fn deliver_queued(state: &Arc<AppState>, run: &Run) {
     std::thread::spawn(move || {
         let result = wake_paused(&state, &observed, |run| {
             let topic = run.state.details.get("topic")?.as_str()?;
-            let index = run.state.details.get("index").and_then(|v| v.as_i64()).unwrap_or(0);
+            let index = run
+                .state
+                .details
+                .get("index")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
             let text = state.store.run_message_claim(run.id, topic, index).ok()??;
             let answer: Value = serde_json::from_str(&text).unwrap_or(Value::String(text));
             Some(answer.get("input").cloned().unwrap_or(Value::Null))
@@ -292,17 +299,30 @@ mod answer_tests {
         .unwrap();
         let (_tx, rx) = tokio::sync::watch::channel(false);
         let state = Arc::new(
-            AppState::new(config, store, None, None, "127.0.0.1:0".parse().unwrap(), rx).unwrap(),
+            AppState::new(
+                config,
+                store,
+                None,
+                None,
+                "127.0.0.1:0".parse().unwrap(),
+                rx,
+            )
+            .unwrap(),
         );
         for next in [StateType::Pending, StateType::Running] {
-            state.transition_run(run_id, State::new(next), false).unwrap();
+            state
+                .transition_run(run_id, State::new(next), false)
+                .unwrap();
         }
         (state, run_id)
     }
 
     fn pause(state: &Arc<AppState>, run_id: i64, topic: &str) -> Run {
         let mut paused = State::new(StateType::Paused);
-        paused.details = json!({"topic": topic, "index": 0}).as_object().unwrap().clone();
+        paused.details = json!({"topic": topic, "index": 0})
+            .as_object()
+            .unwrap()
+            .clone();
         match state.transition_run(run_id, paused, false).unwrap() {
             TransitionResult::Accepted(run) => *run,
             TransitionResult::Rejected { reason, .. } => panic!("pause rejected: {reason}"),
@@ -323,7 +343,10 @@ mod answer_tests {
         let first = wake_paused(&state, &seen, |_| Some(json!("A"))).unwrap();
         assert!(matches!(first, Woke::Done(TransitionResult::Accepted(_))));
         let second = wake_paused(&state, &seen, |_| Some(json!("B"))).unwrap();
-        assert!(matches!(second, Woke::Moved(_)), "the second answer must not land");
+        assert!(
+            matches!(second, Woke::Moved(_)),
+            "the second answer must not land"
+        );
         assert_eq!(stored_input(&state, run_id), json!("A"));
     }
 
@@ -334,13 +357,22 @@ mod answer_tests {
         let dir = TempDir::new().unwrap();
         let (state, run_id) = state_with_run(&dir);
         let queued = deliver_message(&state, run_id, "signal", json!(1)).unwrap();
-        assert!(matches!(queued, Delivered::Queued(_)), "a Running run gets it queued");
+        assert!(
+            matches!(queued, Delivered::Queued(_)),
+            "a Running run gets it queued"
+        );
         pause(&state, run_id, "other");
         let queued = deliver_message(&state, run_id, "signal", json!(2)).unwrap();
-        assert!(matches!(queued, Delivered::Queued(_)), "a run on another topic gets it queued");
+        assert!(
+            matches!(queued, Delivered::Queued(_)),
+            "a run on another topic gets it queued"
+        );
         assert_eq!(state.store.run_message_list(run_id).unwrap().len(), 2);
         let woke = deliver_message(&state, run_id, "other", json!(3)).unwrap();
-        assert!(matches!(woke, Delivered::Woke(Woke::Done(TransitionResult::Accepted(_)))));
+        assert!(matches!(
+            woke,
+            Delivered::Woke(Woke::Done(TransitionResult::Accepted(_)))
+        ));
         assert_eq!(stored_input(&state, run_id), json!(3));
     }
 }

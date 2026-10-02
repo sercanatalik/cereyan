@@ -229,11 +229,7 @@ pub fn plan_backfill_with(
             // One query for the whole set. `values` whose latest run for this
             // flow is Completed are the ones already done; everything else —
             // never run, or last run failed — still needs backfilling.
-            let done = store.latest_completed_param_values(
-                flow.id,
-                &body.parameter,
-                &values,
-            )?;
+            let done = store.latest_completed_param_values(flow.id, &body.parameter, &values)?;
             values.retain(|v| !done.contains(v));
         }
     }
@@ -439,10 +435,7 @@ pub fn enqueue_all(state: &Arc<AppState>, backfill_id: i64, flow: &Flow, skip_va
 }
 
 /// Status of a backfill whose row the caller already read.
-pub fn status_of_row(
-    state: &AppState,
-    backfill: Backfill,
-) -> ApiResult<BackfillStatus> {
+pub fn status_of_row(state: &AppState, backfill: Backfill) -> ApiResult<BackfillStatus> {
     let counts = state
         .store
         .backfill_counts(backfill.id)?
@@ -484,7 +477,12 @@ pub async fn list_backfills(
     let out: Vec<BackfillStatus> = rows
         .into_iter()
         .map(|b| {
-            let counts = all_counts.get(&b.id).cloned().unwrap_or_default().into_iter().collect();
+            let counts = all_counts
+                .get(&b.id)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
             Ok(BackfillStatus {
                 tag: format!("backfill:{}", b.id),
                 backfill: b,

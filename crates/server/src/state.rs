@@ -175,7 +175,10 @@ impl DepGraphCache {
 
     /// Is a graph currently held?
     pub fn is_populated(&self) -> bool {
-        self.slot.read().unwrap_or_else(|e| e.into_inner()).is_some()
+        self.slot
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
     }
 }
 
@@ -207,7 +210,7 @@ pub fn dep_graph_from_flows(
         let mut seen: Vec<String> = Vec::new();
         for upstream in after.upstreams() {
             // A hand-written spec can repeat a name; list the dependent once.
-            if seen.iter().any(|s| *s == upstream) {
+            if seen.contains(&upstream) {
                 continue;
             }
             seen.push(upstream.clone());
@@ -216,10 +219,7 @@ pub fn dep_graph_from_flows(
             }
         }
     }
-    graph
-        .into_iter()
-        .map(|(id, d)| (id, d.finish()))
-        .collect()
+    graph.into_iter().map(|(id, d)| (id, d.finish())).collect()
 }
 
 /// Outcome of a transition request: the run after the change, or the current
@@ -431,7 +431,10 @@ impl AppState {
         self.index.load_counts(
             self.store.run_counts()?,
             self.store.task_run_counts()?,
-            flows.iter().map(|f| (f.id, std::sync::Arc::<str>::from(f.project.as_str()))).collect(),
+            flows
+                .iter()
+                .map(|f| (f.id, std::sync::Arc::<str>::from(f.project.as_str())))
+                .collect(),
         );
         // A server that comes up inside a global pause must not dispatch runs
         // whose time passed while it was down; resuming re-arms them.
@@ -1015,7 +1018,11 @@ mod dep_graph_tests {
             flow(2, "p", "negative", after_at("etl", -5)),
         ];
         let g = dep_graph_from_flows(&flows);
-        assert_eq!(priority_of(&g, 1), 0, "an undeclared priority counts as zero");
+        assert_eq!(
+            priority_of(&g, 1),
+            0,
+            "an undeclared priority counts as zero"
+        );
     }
 
     #[test]
@@ -1029,7 +1036,11 @@ mod dep_graph_tests {
         .as_object()
         .cloned()
         .unwrap_or_default();
-        let flows = vec![flow(1, "p", "a", no_after()), flow(2, "p", "b", no_after()), join];
+        let flows = vec![
+            flow(1, "p", "a", no_after()),
+            flow(2, "p", "b", no_after()),
+            join,
+        ];
         let g = dep_graph_from_flows(&flows);
         assert_eq!(ids_of(&g, 1), vec![3], "`join` is recorded under `a`");
         assert_eq!(ids_of(&g, 2), vec![3], "and under `b`");
@@ -1084,9 +1095,7 @@ mod dep_graph_tests {
     #[test]
     fn the_cache_hands_back_the_recorded_priority() {
         let cache = DepGraphCache::default();
-        let g = cache.get_or_build(|| {
-            sample(1)
-        });
+        let g = cache.get_or_build(|| sample(1));
         assert_eq!(ids(&g, 1), vec![1]);
         assert_eq!(priority(&g, 1), 7, "the priority survives the cache");
     }
@@ -1156,17 +1165,21 @@ mod dep_graph_tests {
     fn invalidating_forces_one_rebuild() {
         let cache = DepGraphCache::default();
         let builds = AtomicUsize::new(0);
-        let mut build = || {
+        let build = || {
             builds.fetch_add(1, Ordering::SeqCst);
             sample(1)
         };
-        cache.get_or_build(&mut build);
+        cache.get_or_build(build);
         assert!(cache.is_populated());
         cache.invalidate();
         assert!(!cache.is_populated(), "invalidate left the graph in place");
-        cache.get_or_build(&mut build);
-        cache.get_or_build(&mut build);
-        assert_eq!(builds.load(Ordering::SeqCst), 2, "expected exactly one rebuild");
+        cache.get_or_build(build);
+        cache.get_or_build(build);
+        assert_eq!(
+            builds.load(Ordering::SeqCst),
+            2,
+            "expected exactly one rebuild"
+        );
     }
 
     #[test]
@@ -1220,10 +1233,8 @@ mod transition_tests {
     #[test]
     fn a_transition_returns_the_updated_timing_and_counters() {
         let dir = TempDir::new().unwrap();
-        let state = crate::api::flows::list_flows_tests::state_with_flows(
-            &dir,
-            &[("p", "f", None, None)],
-        );
+        let state =
+            crate::api::flows::list_flows_tests::state_with_flows(&dir, &[("p", "f", None, None)]);
         let flow_id = state.store.list_flows(None).unwrap()[0].id;
         let (run_id, _) = state
             .store
@@ -1244,11 +1255,23 @@ mod transition_tests {
                 panic!("{next:?} was rejected");
             };
             let stored = state.store.get_run(run_id).unwrap().unwrap();
-            assert_eq!(run.start_time, stored.start_time, "start_time after {next:?}");
+            assert_eq!(
+                run.start_time, stored.start_time,
+                "start_time after {next:?}"
+            );
             assert_eq!(run.end_time, stored.end_time, "end_time after {next:?}");
-            assert_eq!(run.total_run_time, stored.total_run_time, "total_run_time after {next:?}");
-            assert_eq!(run.failure_count, stored.failure_count, "failure_count after {next:?}");
-            assert_eq!(run.crash_count, stored.crash_count, "crash_count after {next:?}");
+            assert_eq!(
+                run.total_run_time, stored.total_run_time,
+                "total_run_time after {next:?}"
+            );
+            assert_eq!(
+                run.failure_count, stored.failure_count,
+                "failure_count after {next:?}"
+            );
+            assert_eq!(
+                run.crash_count, stored.crash_count,
+                "crash_count after {next:?}"
+            );
         }
         let run = state.store.get_run(run_id).unwrap().unwrap();
         assert!(run.end_time.is_some() && run.failure_count == 1);

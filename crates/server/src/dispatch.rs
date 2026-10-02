@@ -316,7 +316,10 @@ fn backfill_completed(state: &Arc<AppState>, backfill_id: i64, flow_id: i64) {
     {
         // Use the AppState field (reset on server start) instead of a static.
         // If the mutex is poisoned, clear it and continue.
-        let mut guard = state.backfill_emitted.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = state
+            .backfill_emitted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if guard.contains(&backfill_id) || matches!(state.store.kv_get(&marker), Ok(Some(_))) {
             return;
         }
@@ -598,10 +601,14 @@ fn trigger_dependents_at(state: &Arc<AppState>, upstream: &Flow, run: &Run, dept
                 continue;
             }
             // Batch query: fetch the latest run for all upstream flows in one query.
-            let latest_runs = match state.store.latest_run_with_param_many(&upstream_flow_ids, key, &text) {
-                Ok(runs) => runs,
-                Err(_) => continue,
-            };
+            let latest_runs =
+                match state
+                    .store
+                    .latest_run_with_param_many(&upstream_flow_ids, key, &text)
+                {
+                    Ok(runs) => runs,
+                    Err(_) => continue,
+                };
             let mut upstream_runs: Vec<i64> = Vec::new();
             for flow_id in &upstream_flow_ids {
                 // `is_complete` and `carries_skip` are the store's, so the rule a
@@ -791,10 +798,17 @@ mod priority_tests {
     #[test]
     fn a_run_with_no_dependents_keeps_its_own_priority() {
         let dir = TempDir::new().unwrap();
-        let state = state_with_flows(&dir, &[("p", "etl", None, None), ("p", "other", None, None)]);
+        let state = state_with_flows(
+            &dir,
+            &[("p", "etl", None, None), ("p", "other", None, None)],
+        );
         let flow = upstream_of(&state, "etl");
         for p in [0i64, 3, -2] {
-            assert_eq!(effective_priority(&state, &flow, &run(&state, p)), p, "priority {p}");
+            assert_eq!(
+                effective_priority(&state, &flow, &run(&state, p)),
+                p,
+                "priority {p}"
+            );
         }
     }
 
@@ -1005,7 +1019,10 @@ mod backfill_completion_tests {
             .filter(|(s, _)| !name_is_terminal(s))
             .map(|(_, n)| *n)
             .sum();
-        assert_eq!(pending, 0, "nothing pending, so the guard was right to pass");
+        assert_eq!(
+            pending, 0,
+            "nothing pending, so the guard was right to pass"
+        );
         assert!(!counts.is_empty());
         assert!(id > 0);
     }
@@ -1132,7 +1149,11 @@ mod backfill_completion_tests {
         let dir = TempDir::new().unwrap();
         let state = state_with_flows(&dir, &[("p", "etl", None, None)]);
         assert!(
-            state.store.newest_backfill_run_state(999).unwrap().is_none(),
+            state
+                .store
+                .newest_backfill_run_state(999)
+                .unwrap()
+                .is_none(),
             "no runs, so no newest run, so nothing to aggregate"
         );
         assert!(state.store.backfill_counts(999).unwrap().is_empty());

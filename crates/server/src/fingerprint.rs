@@ -66,7 +66,7 @@ fn hash_files(files: &[PathBuf]) -> Option<String> {
     let mut hasher = Sha256::new();
     for path in files {
         let name = path.file_name()?.to_string_lossy().into_owned();
-        let content = std::fs::read(&path).ok()?;
+        let content = std::fs::read(path).ok()?;
         hasher.update(name.as_bytes());
         hasher.update([0]);
         hasher.update(&content);
@@ -94,7 +94,10 @@ fn dir_stamp(path: &Path) -> DirStamp {
             mtime: m.modified().ok(),
             len: m.len(),
         },
-        Err(_) => DirStamp { mtime: None, len: 0 },
+        Err(_) => DirStamp {
+            mtime: None,
+            len: 0,
+        },
     }
 }
 
@@ -153,9 +156,7 @@ impl Fingerprints {
         // `source_dir/etl/orders.py`, and it is that directory whose contents
         // the fingerprint covers.
         let file = module_file(Path::new(source_dir), module);
-        let Some(dir) = file.parent() else {
-            return None;
-        };
+        let dir = file.parent()?;
         let stamp = dir_stamp(dir);
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         // Validate from what is already cached. This is the hot path: a worker
@@ -230,7 +231,9 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+// Unix only: the tests seal a directory with permission bits, which Windows
+// does not have.
+#[cfg(all(test, unix))]
 mod cache_tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
@@ -283,7 +286,11 @@ mod cache_tests {
         );
         // A miss would now fail, proving the seal is effective.
         let other = Fingerprints::default();
-        assert_eq!(other.get(&dir, "etl.orders"), None, "seal did not take effect");
+        assert_eq!(
+            other.get(&dir, "etl.orders"),
+            None,
+            "seal did not take effect"
+        );
         drop(sealed);
     }
 

@@ -261,12 +261,7 @@ fn evaluate_stored(state: &AppState, worker_id: i64) -> ApiResult<(HashSet<i64>,
     let mut eligible = HashSet::new();
     let mut drift: Vec<String> = Vec::new();
     for (flow_id, source_dir, module, hash) in state.store.worker_flow_details(worker_id)? {
-        if state
-            .fingerprints
-            .get(&source_dir, &module)
-            .as_deref()
-            == Some(hash.as_str())
-        {
+        if state.fingerprints.get(&source_dir, &module).as_deref() == Some(hash.as_str()) {
             eligible.insert(flow_id);
         } else if !drift.contains(&module) {
             drift.push(module);
@@ -304,7 +299,8 @@ pub async fn register(
     // "server"; a worker by that name would merge into its row.
     if body.name.trim().eq_ignore_ascii_case("server") {
         return Err(ApiError::Unprocessable(
-            "\"server\" names the server's own processors; start the worker with another --name".into(),
+            "\"server\" names the server's own processors; start the worker with another --name"
+                .into(),
         ));
     }
     let st = state.clone();
@@ -791,7 +787,13 @@ pub(crate) mod timeline_tests {
     /// `created_at` is given explicitly so a run with no scheduled time can be
     /// placed *between* two that have one -- which is the only way to show the
     /// fallback interleaves by time rather than being appended.
-    fn row_at(id: i64, flow_id: i64, flow_name: &str, due: Option<i64>, created: i64) -> TimelineRunRow {
+    fn row_at(
+        id: i64,
+        flow_id: i64,
+        flow_name: &str,
+        due: Option<i64>,
+        created: i64,
+    ) -> TimelineRunRow {
         TimelineRunRow {
             id,
             flow_name: flow_name.to_string(),
@@ -839,11 +841,19 @@ pub(crate) mod timeline_tests {
                 .collect()
         };
         assert_eq!(
-            ids(timeline_next_from(candidates.clone(), None, &HashMap::new())),
+            ids(timeline_next_from(
+                candidates.clone(),
+                None,
+                &HashMap::new()
+            )),
             ids(timeline_next_from(candidates.clone(), None, &full)),
             "a populated flow map must not change the server's forecast"
         );
-        let without_flows = ids(timeline_next_from(candidates.clone(), None, &HashMap::new()));
+        let without_flows = ids(timeline_next_from(
+            candidates.clone(),
+            None,
+            &HashMap::new(),
+        ));
         assert_eq!(
             without_flows.iter().map(|r| r.0).collect::<Vec<_>>(),
             vec![1, 2, 3],
@@ -947,7 +957,6 @@ pub(crate) mod timeline_tests {
                 parameter_schema: "{}".into(),
                 options: serde_json::Value::Object(options).to_string(),
                 group: None,
-                ..Default::default()
             });
         }
         let mut ids = Vec::new();
@@ -977,8 +986,15 @@ pub(crate) mod timeline_tests {
         let (_tx, rx) = tokio::sync::watch::channel(false);
         (
             Arc::new(
-                AppState::new(config, store, None, None, "127.0.0.1:0".parse().unwrap(), rx)
-                    .unwrap(),
+                AppState::new(
+                    config,
+                    store,
+                    None,
+                    None,
+                    "127.0.0.1:0".parse().unwrap(),
+                    rx,
+                )
+                .unwrap(),
             ),
             ids[0],
             ids[1],
@@ -990,7 +1006,7 @@ pub(crate) mod timeline_tests {
     #[test]
     fn the_servers_own_forecast_over_a_real_store_offers_everything() {
         let dir = TempDir::new().unwrap();
-        let (state, remote_ok, _server_only) = state_with_scheduled_runs(&dir);
+        let (state, _remote_ok, _server_only) = state_with_scheduled_runs(&dir);
         let next = timeline_next(&state, None).unwrap();
         let names: Vec<&str> = next.iter().map(|r| r.flow.as_str()).collect();
         assert_eq!(
@@ -1010,7 +1026,11 @@ pub(crate) mod timeline_tests {
         let eligible: HashSet<i64> = [remote_ok, server_only].into_iter().collect();
         let next = timeline_next(&state, Some(&eligible)).unwrap();
         let names: Vec<&str> = next.iter().map(|r| r.flow.as_str()).collect();
-        assert_eq!(names, vec!["remote-ok"], "a server-only flow is not remote work");
+        assert_eq!(
+            names,
+            vec!["remote-ok"],
+            "a server-only flow is not remote work"
+        );
 
         // The runs the server sees are also the runs the worker draws from, so the
         // only difference between the two forecasts is the filter.

@@ -1,7 +1,7 @@
 //! Read queries over the read-only pool.
 
-use std::sync::LazyLock;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use cereyan_core::{
     ArtifactListItem, ArtifactRow, Backfill, Event, Expectation, Flow, Id, Log, RuleFiring,
@@ -27,10 +27,13 @@ static SQL_FLOWS_BY_NAME: LazyLock<String> =
     LazyLock::new(|| format!("SELECT {FLOW_COLUMNS} FROM flow WHERE name = ?1"));
 static SQL_RUN_NAME_EXISTS: LazyLock<String> =
     LazyLock::new(|| "SELECT 1 FROM run WHERE name = ?1 LIMIT 1".to_string());
-static SQL_GET_RUN: LazyLock<String> =
-    LazyLock::new(|| format!("SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id WHERE r.id = ?1"));
+static SQL_GET_RUN: LazyLock<String> = LazyLock::new(|| {
+    format!("SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id WHERE r.id = ?1")
+});
 static SQL_GET_RUN_BY_EXTERNAL_ID: LazyLock<String> = LazyLock::new(|| {
-    format!("SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id WHERE r.external_id = ?1")
+    format!(
+        "SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id WHERE r.external_id = ?1"
+    )
 });
 static SQL_GET_TASK_RUN: LazyLock<String> =
     LazyLock::new(|| format!("SELECT {TASK_RUN_COLUMNS} FROM {TASK_RUN_FROM} WHERE t.id = ?1"));
@@ -135,6 +138,9 @@ pub fn checkpoint_seed_key(run_id: i64) -> String {
     format!("run.checkpoints:{run_id}")
 }
 
+/// Skip rows per schedule id, as `list_skip_rows` returns them for one.
+pub type SkipRowsBySchedule = std::collections::HashMap<i64, Vec<(i64, i64, String)>>;
+
 /// Completed task runs of a crash chain that stored a replayable result.
 ///
 /// `chain` is a JSON array of run ids so the statement text is the same whatever
@@ -189,9 +195,7 @@ const LATEST_RUN_MARK_COLUMNS: &str = "r.id, COALESCE(r.state_type, 'Scheduled')
 
 /// `(flow_id, LatestRunMark)` — the leading column is only there so the caller can
 /// keep one row per flow without the `run` table's `flow_id` being decoded twice.
-fn latest_run_mark_from_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<(i64, LatestRunMark)> {
+fn latest_run_mark_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, LatestRunMark)> {
     Ok((
         row.get(0)?,
         LatestRunMark {
@@ -466,7 +470,7 @@ fn active_list() -> String {
 /// `(run id, state type, state name, duration in microseconds)` of a recent run.
 /// A queued run, as the queue view needs it: the nine fields it shows. See
 /// [`Store::queue_runs`].
-    #[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct QueueRun {
     pub id: i64,
     pub name: String,
@@ -505,8 +509,8 @@ fn queue_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<QueueRun> {
         backfill_id: row.get(7)?,
         schedule_id: row.get(8)?,
         scheduled_time: row.get(9)?,
-    })}
-
+    })
+}
 
 /// A run as a timeline row shows it: id, flow name, and when it is due.
 ///
@@ -562,13 +566,11 @@ const SQL_RECENT_RUN_STATES: &str =
 /// Filtering only in SQL would make the `LIMIT` count rows the caller then
 /// discards; filtering only in Rust would make the seek walk the flow's whole
 /// history looking for `MEDIAN_SAMPLE` durations that may not exist.
-const SQL_MEDIAN_SAMPLE: &str =
-    "SELECT total_run_time FROM run \
+const SQL_MEDIAN_SAMPLE: &str = "SELECT total_run_time FROM run \
      WHERE flow_id = ?1 AND total_run_time IS NOT NULL \
      ORDER BY id DESC LIMIT ?2";
 
-const SQL_LAST_COMPLETED_AT: &str =
-    "SELECT end_time FROM run \
+const SQL_LAST_COMPLETED_AT: &str = "SELECT end_time FROM run \
      WHERE flow_id = ?1 AND COALESCE(state_type, 'Completed') = 'Completed' \
      ORDER BY id DESC LIMIT 1";
 
@@ -748,8 +750,7 @@ impl Store {
                 .query_row([run_id], |row| {
                     let external: Vec<u8> = row.get(0)?;
                     Ok(RunEventContext {
-                        external_id: Id::from_bytes(&external)
-                            .unwrap_or_else(cereyan_core::new_id),
+                        external_id: Id::from_bytes(&external).unwrap_or_else(cereyan_core::new_id),
                         name: row.get(1)?,
                         project: row.get(2)?,
                         flow_name: row.get(3)?,
@@ -775,23 +776,19 @@ impl Store {
         run_id: i64,
     ) -> Result<Option<serde_json::Map<String, serde_json::Value>>> {
         self.with_reader(|conn| {
-            let mut stmt =
-                conn.prepare_cached("SELECT parameters FROM run WHERE id = ?1")?;
-            let got: Option<Option<String>> = stmt
-                .query_row([run_id], |row| row.get(0))
-                .optional()?;
+            let mut stmt = conn.prepare_cached("SELECT parameters FROM run WHERE id = ?1")?;
+            let got: Option<Option<String>> =
+                stmt.query_row([run_id], |row| row.get(0)).optional()?;
             Ok(got.map(crate::row::json_map))
         })
     }
 
     pub fn get_run(&self, run_id: i64) -> Result<Option<Run>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_RUN)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_RUN)?;
             Ok(stmt.query_row([run_id], run_from_row).optional()?)
         })
     }
-
-    /// The runs with these ids, in no particular order; missing ids are left out.
 
     /// The given runs, projected to what the queue view shows.
     ///
@@ -837,7 +834,10 @@ impl Store {
         self.with_reader(|conn| {
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt
-                .query_map(rusqlite::params![after, until, limit as i64], queue_run_from_row)?
+                .query_map(
+                    rusqlite::params![after, until, limit as i64],
+                    queue_run_from_row,
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })
@@ -879,7 +879,7 @@ impl Store {
 
     pub fn get_run_by_external_id(&self, id: &Id) -> Result<Option<Run>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_RUN_BY_EXTERNAL_ID)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_RUN_BY_EXTERNAL_ID)?;
             Ok(stmt
                 .query_row([id.as_bytes().as_slice()], run_from_row)
                 .optional()?)
@@ -1034,7 +1034,7 @@ impl Store {
 
     pub fn get_task_run(&self, id: i64) -> Result<Option<TaskRun>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_TASK_RUN)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_TASK_RUN)?;
             Ok(stmt.query_row([id], task_run_from_row).optional()?)
         })
     }
@@ -1151,14 +1151,14 @@ impl Store {
 
     pub fn get_flow(&self, id: i64) -> Result<Option<Flow>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_FLOW)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_FLOW)?;
             Ok(stmt.query_row([id], flow_from_row).optional()?)
         })
     }
 
     pub fn get_flow_by_key(&self, project: &str, name: &str) -> Result<Option<Flow>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_FLOW_BY_KEY)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_FLOW_BY_KEY)?;
             Ok(stmt.query_row([project, name], flow_from_row).optional()?)
         })
     }
@@ -1325,7 +1325,7 @@ impl Store {
 
     pub fn get_schedule(&self, id: i64) -> Result<Option<ScheduleRow>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_SCHEDULE)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_SCHEDULE)?;
             Ok(stmt.query_row([id], schedule_from_row).optional()?)
         })
     }
@@ -1352,11 +1352,8 @@ impl Store {
     /// many schedules there are, which keeps it in the prepared statement cache.
     /// A schedule with no skips has no entry, matching `list_skip_rows`, which
     /// returns nothing for one.
-    pub fn list_skip_rows_many(
-        &self,
-        schedule_ids: &[i64],
-    ) -> Result<std::collections::HashMap<i64, Vec<(i64, i64, String)>>> {
-        let mut out: std::collections::HashMap<i64, Vec<(i64, i64, String)>> = Default::default();
+    pub fn list_skip_rows_many(&self, schedule_ids: &[i64]) -> Result<SkipRowsBySchedule> {
+        let mut out: SkipRowsBySchedule = Default::default();
         if schedule_ids.is_empty() {
             return Ok(out);
         }
@@ -1376,9 +1373,7 @@ impl Store {
                 ))
             })? {
                 let (schedule_id, fire, at, by) = r?;
-                out.entry(schedule_id)
-                    .or_default()
-                    .push((fire, at, by));
+                out.entry(schedule_id).or_default().push((fire, at, by));
             }
             Ok(out)
         })
@@ -1475,7 +1470,7 @@ impl Store {
     /// name, unlike a full flow read.
     pub fn flows_by_name(&self, name: &str) -> Result<Vec<cereyan_core::Flow>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_FLOWS_BY_NAME)?;
+            let mut stmt = conn.prepare_cached(&SQL_FLOWS_BY_NAME)?;
             let rows = stmt
                 .query_map([name], flow_from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1522,10 +1517,7 @@ impl Store {
     }
 
     /// The given runs as timeline rows.
-    pub fn timeline_run_rows(
-        &self,
-        run_ids: &[i64],
-    ) -> Result<Vec<TimelineRunRow>> {
+    pub fn timeline_run_rows(&self, run_ids: &[i64]) -> Result<Vec<TimelineRunRow>> {
         if run_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -1564,7 +1556,10 @@ impl Store {
         self.with_reader(|conn| {
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt
-                .query_map(rusqlite::params![after, until, limit as i64], timeline_run_row_from)?
+                .query_map(
+                    rusqlite::params![after, until, limit as i64],
+                    timeline_run_row_from,
+                )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })
@@ -1589,13 +1584,10 @@ impl Store {
                 "SELECT id, options FROM flow \
                  WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each(?1))",
             )?;
-            let mut out: HashMap<i64, serde_json::Map<String, serde_json::Value>> =
-                HashMap::new();
-            for row in stmt
-                .query_map([list], |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
-                })?
-            {
+            let mut out: HashMap<i64, serde_json::Map<String, serde_json::Value>> = HashMap::new();
+            for row in stmt.query_map([list], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
+            })? {
                 let (id, options) = row?;
                 out.insert(id, crate::row::json_map(options));
             }
@@ -1639,7 +1631,10 @@ impl Store {
     ///
     /// A run that does not appear in the map simply was not found; nothing is
     /// returned for it.
-    pub fn run_marks(&self, run_ids: impl IntoIterator<Item = i64>) -> HashMap<i64, ScheduleRunMark> {
+    pub fn run_marks(
+        &self,
+        run_ids: impl IntoIterator<Item = i64>,
+    ) -> HashMap<i64, ScheduleRunMark> {
         let ids: Vec<i64> = run_ids.into_iter().collect();
         if ids.is_empty() {
             return HashMap::new();
@@ -1676,11 +1671,7 @@ impl Store {
     /// schedule may hold up to `LOOKAHEAD_MAX` of them, so one fire would
     /// materialise a hundred runs to read three values from each. The `WHERE`,
     /// the `ORDER BY` and the returned order are identical to that reader's.
-    pub fn future_run_marks(
-        &self,
-        schedule_id: i64,
-        after: i64,
-    ) -> Result<Vec<ScheduleRunMark>> {
+    pub fn future_run_marks(&self, schedule_id: i64, after: i64) -> Result<Vec<ScheduleRunMark>> {
         let sql = "SELECT r.id, r.scheduled_time, r.state_details
              FROM run r
              WHERE r.schedule_id = ?1 AND r.scheduled_time > ?2 AND r.state_type = 'Scheduled'
@@ -1717,7 +1708,7 @@ impl Store {
 
     pub fn get_backfill(&self, id: i64) -> Result<Option<Backfill>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_BACKFILL)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_BACKFILL)?;
             Ok(stmt.query_row([id], backfill_from_row).optional()?)
         })
     }
@@ -1769,7 +1760,9 @@ impl Store {
         self.with_reader(|conn| {
             let mut stmt = conn.prepare_cached(&sql)?;
             let mut out = std::collections::HashSet::new();
-            for r in stmt.query_map(rusqlite::params![flow_id, list, path], |r| r.get::<_, String>(0))? {
+            for r in stmt.query_map(rusqlite::params![flow_id, list, path], |r| {
+                r.get::<_, String>(0)
+            })? {
                 out.insert(r?);
             }
             Ok(out)
@@ -1966,7 +1959,7 @@ impl Store {
 
     pub fn get_event(&self, id: i64) -> Result<Option<Event>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_EVENT)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_EVENT)?;
             Ok(stmt.query_row([id], event_from_row).optional()?)
         })
     }
@@ -1984,7 +1977,7 @@ impl Store {
 
     pub fn get_rule(&self, id: i64) -> Result<Option<RuleRow>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_RULE)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_RULE)?;
             Ok(stmt.query_row([id], rule_from_row).optional()?)
         })
     }
@@ -2100,7 +2093,7 @@ impl Store {
 
     pub fn get_expectation(&self, id: i64) -> Result<Option<Expectation>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_EXPECTATION)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_EXPECTATION)?;
             Ok(stmt.query_row([id], expectation_from_row).optional()?)
         })
     }
@@ -2244,7 +2237,7 @@ impl Store {
 
     pub fn get_artifact(&self, id: i64) -> Result<Option<ArtifactRow>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_ARTIFACT)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_ARTIFACT)?;
             Ok(stmt.query_row([id], artifact_from_row).optional()?)
         })
     }
@@ -2264,7 +2257,7 @@ impl Store {
     /// A variable with its raw stored value (ciphertext for secrets).
     pub fn get_variable(&self, name: &str) -> Result<Option<(VariableRow, String)>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(&*SQL_GET_VARIABLE)?;
+            let mut stmt = conn.prepare_cached(&SQL_GET_VARIABLE)?;
             Ok(stmt.query_row([name], variable_from_row).optional()?)
         })
     }
@@ -2411,7 +2404,7 @@ impl Store {
     pub fn run_name_exists(&self, name: &str) -> Result<bool> {
         self.with_reader(|conn| {
             Ok(conn
-                .prepare_cached(&*SQL_RUN_NAME_EXISTS)?
+                .prepare_cached(&SQL_RUN_NAME_EXISTS)?
                 .query_row([name], |r| r.get::<_, i64>(0))
                 .optional()?
                 .is_some())

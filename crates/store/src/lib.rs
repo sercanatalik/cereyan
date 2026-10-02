@@ -18,8 +18,7 @@ pub use manage::{ProjectCounts, ProjectRow, TableCounts, BACKUP_DIR};
 pub use migrations::latest_version as latest_schema_version;
 pub use read::{
     checkpoint_seed_key, ArtifactFilter, ArtifactsPage, Checkpoint, EventFilter, EventsPage,
-    FlowLabel, LatestRunMark, QueueRun, RecentRun, RunEventContext, ScheduleRunMark,
-    TaskStateRow,
+    FlowLabel, LatestRunMark, QueueRun, RecentRun, RunEventContext, ScheduleRunMark, TaskStateRow,
     TimelineRunRow,
 };
 pub use read::{ListRunsFilter, ListTaskRunsFilter, LogFilter, LogsPage, RunsPage, TaskRunsPage};
@@ -422,7 +421,12 @@ impl Store {
     /// Claim the oldest pending message for a run and topic, storing the
     /// answer in the run's input KV so replay finds it at the same ordinal.
     /// Returns the payload string when a message was claimed, None otherwise.
-    pub fn run_message_claim(&self, run_id: i64, topic: &str, index: i64) -> Result<Option<String>> {
+    pub fn run_message_claim(
+        &self,
+        run_id: i64,
+        topic: &str,
+        index: i64,
+    ) -> Result<Option<String>> {
         self.write(|reply| WriteCommand::RunMessageClaim {
             run_id,
             topic: topic.into(),
@@ -433,10 +437,7 @@ impl Store {
 
     /// List unconsumed messages for a run.
     pub fn run_message_list(&self, run_id: i64) -> Result<Vec<(String, String)>> {
-        self.write(|reply| WriteCommand::RunMessageList {
-            run_id,
-            reply,
-        })
+        self.write(|reply| WriteCommand::RunMessageList { run_id, reply })
     }
 
     pub fn append_event(&self, event: writer::NewEvent) -> Result<(Event, Id)> {
@@ -805,9 +806,7 @@ mod reader_pool_tests {
         let panicking = {
             let store = Arc::clone(&store);
             std::thread::spawn(move || {
-                store.with_reader(|_| -> Result<()> {
-                    panic!("boom")
-                });
+                let _ = store.with_reader(|_| -> Result<()> { panic!("boom") });
             })
         };
         assert!(panicking.join().is_err(), "the read was supposed to panic");
@@ -846,7 +845,9 @@ mod reader_pool_tests {
     fn results_are_the_same_whether_waiting_or_opening() {
         let (_d, store) = store();
         let run = seed(&store);
-        store.create_task_run(run, "orders", "t", "orders", 0).unwrap();
+        store
+            .create_task_run(run, "orders", "t", "orders", 0)
+            .unwrap();
         let expected = store.get_run(run).unwrap().expect("row");
 
         let _held = drain(&store);

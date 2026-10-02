@@ -70,7 +70,9 @@ pub async fn put(
             && upload.len() <= 64
             && upload.chars().all(|c| c.is_ascii_alphanumeric());
         if !ok {
-            return Err(ApiError::BadRequest(format!("invalid upload id {upload:?}")));
+            return Err(ApiError::BadRequest(format!(
+                "invalid upload id {upload:?}"
+            )));
         }
     }
     let dir = storage(&state);

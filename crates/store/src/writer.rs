@@ -980,7 +980,7 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
                     let mut answers: serde_json::Map<String, serde_json::Value> =
                         serde_json::Map::new();
                     if let Some(ref raw) = existing {
-                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
                             if let Some(a) = value.get("answers").and_then(|a| a.as_object()) {
                                 answers = a.clone();
                             }

@@ -230,10 +230,7 @@ impl Scheduler {
     /// The schedules of several flows at once, keyed by flow id and ordered by
     /// id within each flow — the same contents and order as calling `for_flow`
     /// for each, from one pass over the table instead of one pass per flow.
-    pub fn for_flows(
-        &self,
-        flow_ids: &[i64],
-    ) -> HashMap<i64, Vec<ScheduleRow>> {
+    pub fn for_flows(&self, flow_ids: &[i64]) -> HashMap<i64, Vec<ScheduleRow>> {
         if flow_ids.is_empty() {
             return HashMap::new();
         }
@@ -274,7 +271,6 @@ where
     }
     by_flow
 }
-
 
 /// Bring code-declared schedules of a flow in line with its declarations.
 /// Register a flow's code-declared schedules, returning the ids of those whose
@@ -652,7 +648,10 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
     let horizon = Utc::now() + chrono::Duration::seconds(LOOKAHEAD_MIN_SECS);
     // Skipped fires do not count: the look-ahead keeps LOOKAHEAD_RUNS runs that
     // will start and extends past skips, bounded by LOOKAHEAD_MAX in all.
-    let mut starting = existing.iter().filter(|r| !is_mark_skip(&r.details)).count();
+    let mut starting = existing
+        .iter()
+        .filter(|r| !is_mark_skip(&r.details))
+        .count();
     let mut created = 0;
     while existing.len() < LOOKAHEAD_MAX && (starting < LOOKAHEAD_RUNS || cursor < horizon) {
         let next = match row.schedule.next_after(cursor) {
@@ -699,9 +698,10 @@ pub fn materialize(state: &Arc<AppState>, schedule_id: i64) {
                 .or_else(|| flow_deadline.map(|d| d.round() as i64));
             if let Some(seconds) = deadline.filter(|d| *d > 0) {
                 if !marked {
-                    state
-                        .timer
-                        .push(due + seconds * 1_000_000, TimerEvent::StartDeadline(mark.id));
+                    state.timer.push(
+                        due + seconds * 1_000_000,
+                        TimerEvent::StartDeadline(mark.id),
+                    );
                 }
             }
         }
@@ -1402,7 +1402,7 @@ mod group_tests {
 
     #[test]
     fn each_group_is_ordered_by_id() {
-        let all = vec![row(9, 1), row(2, 1), row(5, 1)];
+        let all = [row(9, 1), row(2, 1), row(5, 1)];
         let got = group_by_flow(all.iter(), &[1]);
         let ids: Vec<i64> = got[&1].iter().map(|s| s.id).collect();
         assert_eq!(ids, vec![2, 5, 9], "groups must be ordered by id");
@@ -1410,7 +1410,7 @@ mod group_tests {
 
     #[test]
     fn a_flow_with_no_schedules_has_no_group() {
-        let all = vec![row(1, 1)];
+        let all = [row(1, 1)];
         let got = group_by_flow(all.iter(), &[1, 2]);
         assert!(got.contains_key(&1));
         assert!(!got.contains_key(&2), "an empty flow should have no group");
@@ -1418,7 +1418,7 @@ mod group_tests {
 
     #[test]
     fn only_the_wanted_flows_are_grouped() {
-        let all = vec![row(1, 1), row(2, 2), row(3, 3)];
+        let all = [row(1, 1), row(2, 2), row(3, 3)];
         let got = group_by_flow(all.iter(), &[2]);
         assert_eq!(got.len(), 1);
         assert_eq!(got[&2][0].id, 2, "another flow's schedule leaked in");
@@ -1426,7 +1426,7 @@ mod group_tests {
 
     #[test]
     fn no_flows_means_nothing_grouped() {
-        let all = vec![row(1, 1)];
+        let all = [row(1, 1)];
         assert!(group_by_flow(all.iter(), &[]).is_empty());
     }
 }
@@ -1450,10 +1450,7 @@ mod skip_mark_tests {
         for other in ["system", "scheduler", "User", "user ", ""] {
             let mut d = serde_json::Map::new();
             d.insert(SKIP_MARK.into(), serde_json::Value::String(other.into()));
-            assert!(
-                !is_mark_skip(&d),
-                "skip={other:?} is not a person's skip"
-            );
+            assert!(!is_mark_skip(&d), "skip={other:?} is not a person's skip");
         }
 
         // A non-string value is not a mark either.
@@ -1517,10 +1514,8 @@ mod skip_mark_tests {
                         StateType::Scheduled,
                         Some("skipped"),
                         None,
-                        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
-                            details,
-                        )
-                        .unwrap(),
+                        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(details)
+                            .unwrap(),
                     )),
                     ..Default::default()
                 })
@@ -1536,8 +1531,7 @@ mod skip_mark_tests {
             // And against the store's own mark, which the fire path reads.
             let marks = store.run_marks([id]);
             assert_eq!(
-                marks[&id].details,
-                run.state.details,
+                marks[&id].details, run.state.details,
                 "the mark's details differ from the run's"
             );
             assert_eq!(is_mark_skip(&marks[&id].details), from_mark);

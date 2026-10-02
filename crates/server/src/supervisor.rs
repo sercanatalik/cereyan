@@ -1112,7 +1112,10 @@ impl Supervisor {
                     // `name` is `serde(skip)`, so the entry is {total, used} plus
                     // `pattern` when set -- exactly the shape the hand-built
                     // `json!` produced.
-                    (name, serde_json::to_value(&r).unwrap_or(serde_json::Value::Null))
+                    (
+                        name,
+                        serde_json::to_value(&r).unwrap_or(serde_json::Value::Null),
+                    )
                 })
                 .collect(),
         )
@@ -1387,10 +1390,7 @@ impl Supervisor {
     }
 
     /// Record freshly started engines. The caller holds `inner`.
-    fn register_engines(
-        inner: &mut Inner,
-        spawned: Vec<(String, EngineKey, std::process::Child)>,
-    ) {
+    fn register_engines(inner: &mut Inner, spawned: Vec<(String, EngineKey, std::process::Child)>) {
         for (id, key, child) in spawned {
             let pid = Some(child.id());
             let mut engine = Engine::new(id.clone(), key.clone(), pid, Some(child), false);
@@ -1694,7 +1694,8 @@ impl Supervisor {
         let mut blocked_ahead: Vec<i64> = Vec::new();
         let mut take: Option<QKey> = None;
         let mut room = inner.occupying() < max_engines;
-        let mut served_keys: std::collections::HashSet<&EngineKey> = std::collections::HashSet::new();
+        let mut served_keys: std::collections::HashSet<&EngineKey> =
+            std::collections::HashSet::new();
         let idle_keys = inner.idle_engine_keys();
         for (k, q) in inner.queue.iter() {
             if q.not_before.map(|t| t > now).unwrap_or(false)
@@ -2447,12 +2448,20 @@ mod tests {
         while inner.occupying() < s.max_engines() {
             inner.request_spawn(&etl, &mut requests);
         }
-        assert_eq!(requests.len(), 2, "the cap stops the pass at two queued engines");
+        assert_eq!(
+            requests.len(),
+            2,
+            "the cap stops the pass at two queued engines"
+        );
         assert_eq!(inner.usable_local(&etl), 2);
         assert_eq!(inner.usable_local(&key("ml")), 0);
         let keys: Vec<EngineKey> = requests.iter().map(|(_, k)| k.clone()).collect();
         inner.finish_starting(&keys);
-        assert_eq!(inner.occupying(), 0, "a failed or registered start frees its reservation");
+        assert_eq!(
+            inner.occupying(),
+            0,
+            "a failed or registered start frees its reservation"
+        );
         assert!(inner.starting.is_empty());
     }
 
@@ -2546,7 +2555,12 @@ mod resources_tests {
             ("flow:*", 8.0),
         ]);
         let names = [
-            "gpu", "db", "tag:urgent", "flow:p/nightly", "flow:p/daily", "other",
+            "gpu",
+            "db",
+            "tag:urgent",
+            "flow:p/nightly",
+            "flow:p/daily",
+            "other",
         ];
         for n in names {
             assert_eq!(
@@ -2630,8 +2644,14 @@ mod resources_tests {
 
         r.evict_idle();
 
-        assert!(r.used.contains_key("held"), "an in-use instance was evicted");
-        assert!(r.used.contains_key("gpu"), "a declared instance was evicted");
+        assert!(
+            r.used.contains_key("held"),
+            "an in-use instance was evicted"
+        );
+        assert!(
+            r.used.contains_key("gpu"),
+            "a declared instance was evicted"
+        );
         assert!(
             !r.used.contains_key("tag:0"),
             "an idle undeclared instance survived"
@@ -2988,7 +3008,7 @@ mod idle_key_tests {
         let (_, line, _) = s.queue_snapshot(10);
         assert_eq!(line.len(), 2);
         for l in &line {
-            assert_eq!(l.can_start, false, "run {} should not start", l.run_id);
+            assert!(!l.can_start, "run {} should not start", l.run_id);
             assert_eq!(l.reason.as_deref(), Some("no processor"));
         }
     }
@@ -3063,7 +3083,11 @@ mod busy_count_tests {
         for specs in [
             vec![("etl", false, false)],
             vec![("etl", true, false)],
-            vec![("etl", true, false), ("ml", false, false), ("reports", true, false)],
+            vec![
+                ("etl", true, false),
+                ("ml", false, false),
+                ("reports", true, false),
+            ],
             vec![("etl", false, true), ("ml", true, true)],
             vec![],
         ] {
@@ -3141,8 +3165,17 @@ mod busy_count_tests {
         assert_eq!(snap.len(), 2);
         for e in &snap {
             for k in [
-                "id", "pid", "module", "source_dir", "isolated", "nice", "runs_done",
-                "current_run", "adopted", "exit_requested", "uptime_secs",
+                "id",
+                "pid",
+                "module",
+                "source_dir",
+                "isolated",
+                "nice",
+                "runs_done",
+                "current_run",
+                "adopted",
+                "exit_requested",
+                "uptime_secs",
             ] {
                 assert!(e.get(k).is_some(), "the snapshot lost the key {k}");
             }
@@ -3206,16 +3239,30 @@ mod resource_row_tests {
         let obj = s.resources_snapshot();
         let obj = obj.as_object().expect("the snapshot is an object");
 
-        assert_eq!(rows.len(), obj.len(), "row count differs from snapshot size");
+        assert_eq!(
+            rows.len(),
+            obj.len(),
+            "row count differs from snapshot size"
+        );
         for r in &rows {
             let e = obj
                 .get(&r.name)
                 .unwrap_or_else(|| panic!("no snapshot entry for {}", r.name));
             let e = e.as_object().expect("an entry is an object");
-            assert_eq!(e["total"], serde_json::json!(r.total), "total for {}", r.name);
+            assert_eq!(
+                e["total"],
+                serde_json::json!(r.total),
+                "total for {}",
+                r.name
+            );
             assert_eq!(e["used"], serde_json::json!(r.used), "used for {}", r.name);
             let want_pattern = r.pattern.clone().map(serde_json::Value::String);
-            assert_eq!(e.get("pattern"), want_pattern.as_ref(), "pattern for {}", r.name);
+            assert_eq!(
+                e.get("pattern"),
+                want_pattern.as_ref(),
+                "pattern for {}",
+                r.name
+            );
             // The name is the key, never a field inside the entry.
             assert!(
                 e.get("name").is_none(),
@@ -3261,7 +3308,10 @@ mod resource_row_tests {
         // Never declared, but in use: listed, with the default total.
         let undeclared = by("undeclared").expect("undeclared");
         assert_eq!(undeclared.used, 2.0);
-        assert_eq!(undeclared.total, 1.0, "an undeclared resource's default total");
+        assert_eq!(
+            undeclared.total, 1.0,
+            "an undeclared resource's default total"
+        );
         assert_eq!(undeclared.pattern, None);
 
         // Sorted by name, as the snapshot has always been.

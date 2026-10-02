@@ -366,7 +366,8 @@ impl ActiveIndex {
 
     /// Is any run waiting on a durable event? One relaxed atomic load, no lock.
     pub fn has_event_waiters(&self) -> bool {
-        self.has_event_waiters.load(std::sync::atomic::Ordering::Acquire)
+        self.has_event_waiters
+            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Ids of runs waiting on a durable event. O(waiters), not O(active runs).
@@ -541,12 +542,7 @@ mod tests {
     }
 
     fn awaiting() -> State {
-        State::from_parts(
-            StateType::Paused,
-            Some("AwaitingEvent"),
-            None,
-            Map::new(),
-        )
+        State::from_parts(StateType::Paused, Some("AwaitingEvent"), None, Map::new())
     }
 
     fn test_key() -> EngineKey {
@@ -659,7 +655,8 @@ mod tests {
     }
 
     #[test]
-    fn waiter_index_drops_terminal_runs() {        let ix = ActiveIndex::new();
+    fn waiter_index_drops_terminal_runs() {
+        let ix = ActiveIndex::new();
         let key = test_key();
         ix.insert_run(&run_in(1, 10, awaiting()), key.clone(), false);
         ix.insert_run(&run_in(2, 10, awaiting()), key, false);
@@ -740,13 +737,41 @@ mod counts_tests {
         ix.set_flow_project(2, "a".into());
         ix.set_flow_project(3, "b".into());
 
-        ix.insert_run(&run_in(1, 1, "a", State::new(StateType::Completed)), key(), false);
-        ix.insert_run(&run_in(2, 1, "a", State::new(StateType::Running)), key(), false);
-        ix.insert_run(&run_in(3, 1, "a", State::new(StateType::Failed)), key(), false);
-        ix.insert_run(&run_in(4, 2, "a", State::new(StateType::Running)), key(), false);
-        ix.insert_run(&run_in(5, 2, "a", State::new(StateType::Completed)), key(), false);
-        ix.insert_run(&run_in(6, 3, "b", State::new(StateType::Completed)), key(), false);
-        ix.insert_run(&run_in(7, 3, "b", State::new(StateType::Running)), key(), false);
+        ix.insert_run(
+            &run_in(1, 1, "a", State::new(StateType::Completed)),
+            key(),
+            false,
+        );
+        ix.insert_run(
+            &run_in(2, 1, "a", State::new(StateType::Running)),
+            key(),
+            false,
+        );
+        ix.insert_run(
+            &run_in(3, 1, "a", State::new(StateType::Failed)),
+            key(),
+            false,
+        );
+        ix.insert_run(
+            &run_in(4, 2, "a", State::new(StateType::Running)),
+            key(),
+            false,
+        );
+        ix.insert_run(
+            &run_in(5, 2, "a", State::new(StateType::Completed)),
+            key(),
+            false,
+        );
+        ix.insert_run(
+            &run_in(6, 3, "b", State::new(StateType::Completed)),
+            key(),
+            false,
+        );
+        ix.insert_run(
+            &run_in(7, 3, "b", State::new(StateType::Running)),
+            key(),
+            false,
+        );
         ix
     }
 
@@ -766,7 +791,11 @@ mod counts_tests {
                 );
             }
             // And no extra states in the projection.
-            assert_eq!(proj.len(), StateType::ALL.len(), "projection has extra states");
+            assert_eq!(
+                proj.len(),
+                StateType::ALL.len(),
+                "projection has extra states"
+            );
         }
     }
 

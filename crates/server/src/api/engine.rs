@@ -623,7 +623,7 @@ mod acquire_tests {
 
         // And an empty context still yields an empty map, which is the shape the
         // handler applies `unwrap_or_default()` to.
-        let empty: Option<Ctx> = None;
+        let empty: Option<Ctx> = std::hint::black_box(None);
         assert_eq!(empty.unwrap_or_default().len(), 0);
     }
 }

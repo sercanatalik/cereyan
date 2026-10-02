@@ -86,8 +86,14 @@ fn summarize(
     last_completed_at: Option<i64>,
     start_times: &std::collections::HashMap<i64, Option<i64>>,
 ) -> Result<FlowSummary, cereyan_store::StoreError> {
-    let health =
-        crate::health::flow_health(&flow, options, active, &recent, last_completed_at, start_times);
+    let health = crate::health::flow_health(
+        &flow,
+        options,
+        active,
+        &recent,
+        last_completed_at,
+        start_times,
+    );
     // The rows are newest first, so the displayed set is the newest of what was
     // read; health sees the whole sample.
     let recent: Vec<cereyan_store::RecentRun> =
@@ -132,7 +138,10 @@ pub async fn list_flows(
 /// computed over *every* flow, before the response set is chosen) is exactly the
 /// kind of thing a test should pin, because getting it wrong compiles and returns
 /// a plausible-looking response.
-fn flow_summaries(state: &AppState, q: &FlowsQuery) -> Result<Vec<FlowSummary>, cereyan_store::StoreError> {
+fn flow_summaries(
+    state: &AppState,
+    q: &FlowsQuery,
+) -> Result<Vec<FlowSummary>, cereyan_store::StoreError> {
     let all = state.store.list_flows(None)?;
     // One pass for the trigger lists, one for the active runs, and one options
     // parse per flow — instead of a per-flow scan and a full active-set clone.
@@ -155,7 +164,9 @@ fn flow_summaries(state: &AppState, q: &FlowsQuery) -> Result<Vec<FlowSummary>, 
     let active_by_flow = state.index.active_runs_by_flow();
     // One read each for the whole request, rather than one per flow.
     let flow_ids: Vec<i64> = flows.iter().map(|f| f.id).collect();
-    let recent_by_flow = state.store.recent_run_states_many(&flow_ids, RECENT_RUNS_READ)?;
+    let recent_by_flow = state
+        .store
+        .recent_run_states_many(&flow_ids, RECENT_RUNS_READ)?;
     let last_completed = state.store.last_completed_at_many(&flow_ids)?;
     let schedules_by_flow = state.scheduler.for_flows(&flow_ids);
     // One batched read of every running run's start time, for the health rule.
@@ -167,7 +178,10 @@ fn flow_summaries(state: &AppState, q: &FlowsQuery) -> Result<Vec<FlowSummary>, 
         .filter(|r| r.state.state_type == cereyan_core::StateType::Running)
         .map(|r| r.id)
         .collect();
-    let start_times = state.store.run_start_times(&running_ids).unwrap_or_default();
+    let start_times = state
+        .store
+        .run_start_times(&running_ids)
+        .unwrap_or_default();
     let mut out = Vec::with_capacity(flows.len());
     for flow in flows {
         let id = flow.id;
@@ -178,7 +192,7 @@ fn flow_summaries(state: &AppState, q: &FlowsQuery) -> Result<Vec<FlowSummary>, 
             .unwrap_or_default();
         let active = active_by_flow.get(&id).map(|v| v.as_slice()).unwrap_or(&[]);
         out.push(summarize(
-            &state,
+            state,
             flow,
             &options,
             flow_triggers,
@@ -345,10 +359,7 @@ pub(crate) mod trigger_tests {
         let full = triggers_by_upstream(&all);
         assert_eq!(
             full.get(&("p".to_string(), "etl".to_string())),
-            Some(&vec![
-                "load-hourly".to_string(),
-                "daily-job".to_string(),
-            ]),
+            Some(&vec!["load-hourly".to_string(), "daily-job".to_string(),]),
             "every dependent of `p/etl`, in input order"
         );
         // The cross-project dependent names an upstream in *its own* project.
@@ -405,7 +416,10 @@ pub(crate) mod trigger_tests {
 
     #[test]
     fn a_flow_with_no_after_declares_no_triggers() {
-        let all = vec![flow(1, "p", "etl", None), flow(2, "p", "daily", Some("etl"))];
+        let all = vec![
+            flow(1, "p", "etl", None),
+            flow(2, "p", "daily", Some("etl")),
+        ];
         let t = triggers_by_upstream(&all);
         assert_eq!(t.len(), 1, "only the dependent contributes a key");
         assert!(!t.contains_key(&("p".to_string(), "daily".to_string())));
@@ -424,13 +438,7 @@ pub(crate) mod trigger_tests {
 
     /// The same, with a resolved group. `list_flows_filtered` selects on
     /// `COALESCE(flow_group, project)`, so an empty group means "its project".
-    fn flow_grouped(
-        id: i64,
-        project: &str,
-        name: &str,
-        group: &str,
-        after: Option<&str>,
-    ) -> Flow {
+    fn flow_grouped(id: i64, project: &str, name: &str, group: &str, after: Option<&str>) -> Flow {
         let mut f = flow_inner(id, project, name, after);
         f.group = if group.is_empty() {
             None
@@ -582,7 +590,7 @@ pub(crate) mod trigger_tests {
     fn a_flow_with_no_dependents_has_an_empty_list() {
         let flows = vec![flow(1, "p", "alone", None)];
         let map = triggers_by_upstream(&flows);
-        assert!(map.get(&("p".to_string(), "alone".to_string())).is_none());
+        assert!(!map.contains_key(&("p".to_string(), "alone".to_string())));
     }
 
     #[test]
@@ -593,7 +601,7 @@ pub(crate) mod trigger_tests {
         let flows = vec![flow(1, "p", "child", Some("ghost"))];
         let map = triggers_by_upstream(&flows);
         // The child itself is depended on by nobody.
-        assert!(map.get(&("p".to_string(), "child".to_string())).is_none());
+        assert!(!map.contains_key(&("p".to_string(), "child".to_string())));
         // And the old algorithm agrees for the one flow that exists.
         for f in &flows {
             check(&flows, f);
@@ -659,7 +667,10 @@ pub(crate) mod list_flows_tests {
 
     /// A real `AppState` over a real store, so a caller's own logic — not a
     /// reconstruction of it — is what the test drives.
-    pub(crate) fn state_with_flows(dir: &TempDir, flows: &[(&str, &str, Option<&str>, Option<&str>)]) -> Arc<AppState> {
+    pub(crate) fn state_with_flows(
+        dir: &TempDir,
+        flows: &[(&str, &str, Option<&str>, Option<&str>)],
+    ) -> Arc<AppState> {
         let home = dir.path().join("home");
         let store = Arc::new(cereyan_store::Store::open(&home).unwrap());
         for (project, name, group, after) in flows {
@@ -678,7 +689,6 @@ pub(crate) mod list_flows_tests {
                     parameter_schema: "{}".into(),
                     options: serde_json::Value::Object(options).to_string(),
                     group: group.map(|g| g.to_string()),
-                    ..Default::default()
                 })
                 .unwrap();
         }
@@ -688,7 +698,15 @@ pub(crate) mod list_flows_tests {
         .unwrap();
         let (_tx, rx) = tokio::sync::watch::channel(false);
         Arc::new(
-            AppState::new(config, store, None, None, "127.0.0.1:0".parse().unwrap(), rx).unwrap(),
+            AppState::new(
+                config,
+                store,
+                None,
+                None,
+                "127.0.0.1:0".parse().unwrap(),
+                rx,
+            )
+            .unwrap(),
         )
     }
 
@@ -786,7 +804,10 @@ pub(crate) mod list_flows_tests {
             summaries.iter().all(|s| s.triggers.is_empty()),
             "a cross-project dependent names an upstream in its own project, so \
              `p/etl` has no dependents here: {:?}",
-            summaries.iter().map(|s| (&s.flow.name, &s.triggers)).collect::<Vec<_>>()
+            summaries
+                .iter()
+                .map(|s| (&s.flow.name, &s.triggers))
+                .collect::<Vec<_>>()
         );
     }
 
@@ -810,12 +831,20 @@ pub(crate) mod list_flows_tests {
     #[test]
     fn listing_flows_leaves_the_stored_flows_alone() {
         let dir = TempDir::new().unwrap();
-        let state = state_with_flows(&dir, &[("p", "etl", None, None), ("p", "daily", None, Some("etl"))]);
+        let state = state_with_flows(
+            &dir,
+            &[("p", "etl", None, None), ("p", "daily", None, Some("etl"))],
+        );
         let first = flow_summaries(&state, &FlowsQuery::default()).unwrap();
         let second = flow_summaries(&state, &FlowsQuery::default()).unwrap();
-        let names = |v: &[FlowSummary]| -> Vec<String> { v.iter().map(|s| s.flow.name.clone()).collect() };
+        let names =
+            |v: &[FlowSummary]| -> Vec<String> { v.iter().map(|s| s.flow.name.clone()).collect() };
         assert_eq!(names(&first), names(&second), "two listings agree");
-        assert_eq!(state.store.list_flows(None).unwrap().len(), 2, "nothing was lost");
+        assert_eq!(
+            state.store.list_flows(None).unwrap().len(),
+            2,
+            "nothing was lost"
+        );
     }
 
     #[test]

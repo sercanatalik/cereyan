@@ -487,10 +487,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/api/runs/{id}/input", get(runs::run_input))
         .route("/api/runs/{id}/receive", get(runs::run_receive))
-        .route(
-            "/api/runs/{id}/messages/{topic}",
-            post(runs::send_message),
-        )
+        .route("/api/runs/{id}/messages/{topic}", post(runs::send_message))
         .route("/api/task-runs", get(task_runs::list_task_runs))
         .route("/api/task-runs/{id}", get(task_runs::get_task_run))
         .route("/api/task-runs/{id}/logs", get(logs::task_run_logs))

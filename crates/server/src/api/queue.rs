@@ -329,14 +329,26 @@ mod queue_class_tests {
     #[test]
     fn a_queued_runs_trigger_is_classified_the_same_way() {
         // A backfill wins over everything else.
-        assert_eq!(trigger(&q("schedule", Some(3), Some(9), "Scheduled")), "backfill");
+        assert_eq!(
+            trigger(&q("schedule", Some(3), Some(9), "Scheduled")),
+            "backfill"
+        );
         assert_eq!(trigger(&q("api", Some(3), None, "Scheduled")), "backfill");
         // Then a schedule.
-        assert_eq!(trigger(&q("schedule", None, Some(9), "Scheduled")), "schedule");
+        assert_eq!(
+            trigger(&q("schedule", None, Some(9), "Scheduled")),
+            "schedule"
+        );
         // Then the recognised creator prefixes.
         assert_eq!(trigger(&q("rule:alert", None, None, "Scheduled")), "rule");
-        assert_eq!(trigger(&q("run:upstream", None, None, "Scheduled")), "dependency");
-        assert_eq!(trigger(&q("crash:42", None, None, "Scheduled")), "crash rerun");
+        assert_eq!(
+            trigger(&q("run:upstream", None, None, "Scheduled")),
+            "dependency"
+        );
+        assert_eq!(
+            trigger(&q("crash:42", None, None, "Scheduled")),
+            "crash rerun"
+        );
         // And anything else is reported as itself.
         for other in ["api", "continuous", "retry:1", "", "Rule:x", "runx"] {
             assert_eq!(
@@ -355,12 +367,27 @@ mod queue_class_tests {
     /// be mistaken for a retry.
     #[test]
     fn a_nearly_due_runs_kind_is_classified_the_same_way() {
-        assert_eq!(joining_kind(&q("api", None, None, "AwaitingRetry")), "retry");
+        assert_eq!(
+            joining_kind(&q("api", None, None, "AwaitingRetry")),
+            "retry"
+        );
         // A retry beats a continuous creator and a schedule.
-        assert_eq!(joining_kind(&q("continuous", None, Some(9), "AwaitingRetry")), "retry");
-        assert_eq!(joining_kind(&q("api", None, Some(9), "AwaitingRetry")), "retry");
-        assert_eq!(joining_kind(&q("continuous", None, None, "Scheduled")), "continuous");
-        assert_eq!(joining_kind(&q("schedule", None, Some(9), "Scheduled")), "schedule");
+        assert_eq!(
+            joining_kind(&q("continuous", None, Some(9), "AwaitingRetry")),
+            "retry"
+        );
+        assert_eq!(
+            joining_kind(&q("api", None, Some(9), "AwaitingRetry")),
+            "retry"
+        );
+        assert_eq!(
+            joining_kind(&q("continuous", None, None, "Scheduled")),
+            "continuous"
+        );
+        assert_eq!(
+            joining_kind(&q("schedule", None, Some(9), "Scheduled")),
+            "schedule"
+        );
         // The distinguishing case: a continuous run *does* carry a schedule id, so
         // only the order of the two checks separates them. Without this, swapping
         // them would pass — an earlier version of this test had no case here.
@@ -371,7 +398,10 @@ mod queue_class_tests {
         );
         assert_eq!(joining_kind(&q("api", None, None, "Scheduled")), "delayed");
         // A backfill id does not affect the joining kind, as before.
-        assert_eq!(joining_kind(&q("api", Some(3), None, "Scheduled")), "delayed");
+        assert_eq!(
+            joining_kind(&q("api", Some(3), None, "Scheduled")),
+            "delayed"
+        );
         // The empty state name a run with no transition carries, projected to
         // `Scheduled`, is not `AwaitingRetry`.
         assert_eq!(joining_kind(&q("api", None, None, "")), "delayed");

@@ -108,7 +108,10 @@ impl RulesState {
         row.last_fired = last_fired;
     }
     pub fn get(&self, id: i64) -> Option<RuleRow> {
-        self.all().iter().find(|r| r.id == id).map(|r| r.as_ref().clone())
+        self.all()
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.as_ref().clone())
     }
 }
 
@@ -168,7 +171,7 @@ pub fn start(state: &Arc<AppState>) {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(rule.id, last);
-                if let Some(schedule) = clock_schedule(&rule) {
+                if let Some(schedule) = clock_schedule(rule) {
                     if let Ok(Some(missed)) = schedule.next_after(from_micros(last)) {
                         if to_micros(missed) < now {
                             eprintln!(
@@ -507,15 +510,15 @@ pub fn on_event(state: &Arc<AppState>, event: Event) {
     let mut to_fire: Vec<RuleRow> = Vec::new();
     {
         let mut guards = state.rules.guards.lock().unwrap_or_else(|e| e.into_inner());
-        for rule in rules.iter()
-            .into_iter()
+        for rule in rules
+            .iter()
             .filter(|r| candidates.contains(&r.id) && !r.spec.is_proactive())
         {
             if !cereyan_rules::matches(&rule.spec.when, &event, &ctx) {
                 continue;
             }
             let g = guards.entry(rule.id).or_default();
-            match cereyan_rules::check_guards(&rule, &event, &ctx, g, now) {
+            match cereyan_rules::check_guards(rule, &event, &ctx, g, now) {
                 GuardDecision::Fire => {
                     g.record(ctx.run.as_ref().map(|r| r.id), now);
                     to_fire.push(rule.as_ref().clone());
@@ -657,7 +660,9 @@ pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunConte
         }
     }
     if let Ok(Some(updated)) = state.store.get_rule(rule.id) {
-        state.rules.update_counters(rule.id, updated.fire_count, updated.last_fired);
+        state
+            .rules
+            .update_counters(rule.id, updated.fire_count, updated.last_fired);
         state.stream.publish(
             "rule.updated",
             rule.id.to_string(),
@@ -817,11 +822,10 @@ pub fn execute(
             // reads. Previously the whole active index was deep-cloned and then
             // each surviving run read in full — including a per-row task_counts
             // aggregate — to get these same two fields.
-            for (run_id, parameters, engine_pid) in
-                state
-                    .store
-                    .cancellable_runs(flow_id, &states)
-                    .map_err(|e| e.to_string())?
+            for (run_id, parameters, engine_pid) in state
+                .store
+                .cancellable_runs(flow_id, &states)
+                .map_err(|e| e.to_string())?
             {
                 if Some(run_id) == own {
                     continue;
@@ -1274,7 +1278,10 @@ mod arc_tests {
     fn state_with(ids: &[i64]) -> RulesState {
         let st = RulesState::default();
         *st.rules.write().unwrap() = Arc::new(
-            ids.iter().copied().map(|i| Arc::new(rule(i))).collect::<Vec<_>>(),
+            ids.iter()
+                .copied()
+                .map(|i| Arc::new(rule(i)))
+                .collect::<Vec<_>>(),
         );
         st
     }
@@ -1293,7 +1300,10 @@ mod arc_tests {
         for (i, r) in after.iter().enumerate() {
             let id = r.id;
             if id == 3 {
-                assert!(!Arc::ptr_eq(r, &before[i]), "the changed rule was not copied");
+                assert!(
+                    !Arc::ptr_eq(r, &before[i]),
+                    "the changed rule was not copied"
+                );
             } else {
                 assert!(
                     Arc::ptr_eq(r, &before[i]),
@@ -1312,7 +1322,7 @@ mod arc_tests {
     #[test]
     fn a_quiet_update_copies_nothing() {
         let st = state_with(&[1, 2, 3]);
-        let addrs: Vec<*const RuleRow> = st.all().iter().map(|r| Arc::as_ptr(r)).collect();
+        let addrs: Vec<*const RuleRow> = st.all().iter().map(Arc::as_ptr).collect();
         st.update_counters(2, 7, Some(1));
         let after = st.all();
         for (i, a) in addrs.iter().enumerate() {
@@ -1334,14 +1344,14 @@ mod arc_tests {
             .all()
             .iter()
             .filter(|r| r.id != 2)
-            .map(|r| Arc::as_ptr(r))
+            .map(Arc::as_ptr)
             .collect();
         st.update_counters(2, 9, Some(9));
         let after = st.all();
         let same: Vec<*const RuleRow> = after
             .iter()
             .filter(|r| r.id != 2)
-            .map(|r| Arc::as_ptr(r))
+            .map(Arc::as_ptr)
             .collect();
         assert_eq!(same, others, "an unheld rule was copied");
         // The held one is a distinct allocation, and the caller's copy is intact.
@@ -1378,10 +1388,7 @@ mod arc_tests {
             "a held snapshot mutated underneath its reader"
         );
         // ...and a fresh read sees the update.
-        assert_eq!(
-            st.all().iter().find(|r| r.id == 1).unwrap().fire_count,
-            5
-        );
+        assert_eq!(st.all().iter().find(|r| r.id == 1).unwrap().fire_count, 5);
     }
 
     #[test]
@@ -1446,8 +1453,11 @@ mod arc_tests {
                 }
                 _ => {}
             }
-            *st.rules.write().unwrap() =
-                Arc::new(vec![Arc::new(r.clone()), Arc::new(rule(2)), Arc::new(rule(3))]);
+            *st.rules.write().unwrap() = Arc::new(vec![
+                Arc::new(r.clone()),
+                Arc::new(rule(2)),
+                Arc::new(rule(3)),
+            ]);
             st.update_counters(2, 11, Some(22));
 
             let rules = st.all();
@@ -1470,16 +1480,32 @@ mod arc_tests {
             assert_eq!(first["source"], "ui", "{shape}: source");
             assert_eq!(first["fire_count"], 0, "{shape}: fire count");
             // The spec is flattened: its fields sit at the top level.
-            assert_eq!(first["when"]["events"][0], "run.failed", "{shape}: flattened when");
+            assert_eq!(
+                first["when"]["events"][0], "run.failed",
+                "{shape}: flattened when"
+            );
             // `RuleSpec.actions` renames itself to `do`, and the flatten puts it
             // at the top level. Both spellings are part of the wire shape.
-            assert_eq!(first["do"][0]["kind"], "run_flow", "{shape}: flattened actions");
-            assert!(first.get("spec").is_none(), "{shape}: spec must not be nested");
-            assert!(first.get("actions").is_none(), "{shape}: actions must be spelled `do`");
+            assert_eq!(
+                first["do"][0]["kind"], "run_flow",
+                "{shape}: flattened actions"
+            );
+            assert!(
+                first.get("spec").is_none(),
+                "{shape}: spec must not be nested"
+            );
+            assert!(
+                first.get("actions").is_none(),
+                "{shape}: actions must be spelled `do`"
+            );
             // `RuleRow`'s own optionals are `#[serde(default)]` but not skipped,
             // so an absent one is emitted as null rather than omitted. Pinned,
             // because it is easy to assume otherwise.
-            assert_eq!(first["last_fired"], serde_json::Value::Null, "{shape}: last_fired");
+            assert_eq!(
+                first["last_fired"],
+                serde_json::Value::Null,
+                "{shape}: last_fired"
+            );
             match shape {
                 "full" => {
                     assert_eq!(first["module"], "pipeline", "{shape}: module");
@@ -1490,7 +1516,10 @@ mod arc_tests {
                 }
                 "proactive" => {
                     // These *are* skipped when absent, and present when set.
-                    assert_eq!(first["unless"]["events"][0], "run.completed", "{shape}: unless");
+                    assert_eq!(
+                        first["unless"]["events"][0], "run.completed",
+                        "{shape}: unless"
+                    );
                     assert_eq!(first["within"], 600.0, "{shape}: within");
                 }
                 "clock" => {
@@ -1514,10 +1543,7 @@ mod arc_tests {
     #[test]
     fn an_empty_rule_set_serialises_as_an_empty_array() {
         let st = RulesState::default();
-        assert_eq!(
-            serde_json::to_string(&RuleList(st.all())).unwrap(),
-            "[]"
-        );
+        assert_eq!(serde_json::to_string(&RuleList(st.all())).unwrap(), "[]");
     }
 
     #[test]

@@ -321,164 +321,164 @@ mod tests {
         assert!(t.is_empty());
     }
 
-/// Removing a schedule's events must not cancel a flow's resume that shares the id.
-#[test]
-fn removing_a_schedule_keeps_a_flow_resume_with_the_same_id() {
-    let t = Timer::new();
-    t.push(10, TimerEvent::Fire(3));
-    t.push(20, TimerEvent::ResumeFlow(3));
-    t.remove_schedule_events(3);
-    assert_eq!(t.len(), 1);
-    assert_eq!(t.pop_due(100), vec![(20, TimerEvent::ResumeFlow(3))]);
-}
-
-/// Removing a run's events must not cancel an expectation that shares the id.
-#[test]
-fn removing_a_run_keeps_an_expectation_with_the_same_id() {
-    let t = Timer::new();
-    t.push(10, TimerEvent::Due(42));
-    t.push(20, TimerEvent::Expectation(42));
-    t.remove_run_events(42);
-    assert_eq!(t.len(), 1);
-    assert_eq!(t.pop_due(100), vec![(20, TimerEvent::Expectation(42))]);
-}
-
-/// A compaction must not stop the timer cancelling events.
-///
-/// The compaction block rebuilds the heap without the cancelled *tuples*. It is not
-/// a cancellation: nothing about a live event has changed, so nothing about the
-/// side indexes should either.
-///
-/// It used to call `forget_seq` for every **kept** entry, and `forget_seq` is
-/// precisely the function that removes a sequence from the side indexes. So each
-/// compaction stripped every live sequence out of `by_run`, `by_schedule` and
-/// `by_rule`, and from then on `remove_run_events`, `remove_schedule_events` and
-/// `remove_rule_clock` all returned nothing and cancelled nothing — silently. A
-/// removed run's `LateCheck`, `FlowTimeout` and `CrashRerun` would still fire.
-///
-/// The fixture puts the cancelled events **in the future**, which is the only shape
-/// that reaches the compaction branch: popping a cancelled event removes it from
-/// `cancelled` as it goes, so cancelled events that are already due drain the set
-/// and the branch never runs. Its own comment says as much — "for a cancelled
-/// future event [the dead entry] can be hours" away.
-#[test]
-fn a_compaction_leaves_events_cancellable() {
-    let t = Timer::new();
-    // Live events, far in the future, for one run, one schedule and one rule.
-    t.push(1_000_000, TimerEvent::Due(7));
-    t.push(1_000_001, TimerEvent::FlowTimeout(7));
-    t.push(1_000_002, TimerEvent::Fire(3));
-    t.push(1_000_003, TimerEvent::RuleClock(5));
-    // Cancelled events, also in the future, so they stay in the heap and in
-    // `cancelled` and the compaction branch fires.
-    for i in 0..20 {
-        t.push(900_000 + i, TimerEvent::Due(1000 + i));
+    /// Removing a schedule's events must not cancel a flow's resume that shares the id.
+    #[test]
+    fn removing_a_schedule_keeps_a_flow_resume_with_the_same_id() {
+        let t = Timer::new();
+        t.push(10, TimerEvent::Fire(3));
+        t.push(20, TimerEvent::ResumeFlow(3));
+        t.remove_schedule_events(3);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t.pop_due(100), vec![(20, TimerEvent::ResumeFlow(3))]);
     }
-    for i in 0..20 {
-        t.remove_run_events(1000 + i);
+
+    /// Removing a run's events must not cancel an expectation that shares the id.
+    #[test]
+    fn removing_a_run_keeps_an_expectation_with_the_same_id() {
+        let t = Timer::new();
+        t.push(10, TimerEvent::Due(42));
+        t.push(20, TimerEvent::Expectation(42));
+        t.remove_run_events(42);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t.pop_due(100), vec![(20, TimerEvent::Expectation(42))]);
     }
-    assert_eq!(t.len(), 4, "four live events");
 
-    // Nothing is due yet, so this only runs the compaction branch.
-    assert!(t.pop_due(50_000).is_empty(), "nothing is due at 50s");
+    /// A compaction must not stop the timer cancelling events.
+    ///
+    /// The compaction block rebuilds the heap without the cancelled *tuples*. It is not
+    /// a cancellation: nothing about a live event has changed, so nothing about the
+    /// side indexes should either.
+    ///
+    /// It used to call `forget_seq` for every **kept** entry, and `forget_seq` is
+    /// precisely the function that removes a sequence from the side indexes. So each
+    /// compaction stripped every live sequence out of `by_run`, `by_schedule` and
+    /// `by_rule`, and from then on `remove_run_events`, `remove_schedule_events` and
+    /// `remove_rule_clock` all returned nothing and cancelled nothing — silently. A
+    /// removed run's `LateCheck`, `FlowTimeout` and `CrashRerun` would still fire.
+    ///
+    /// The fixture puts the cancelled events **in the future**, which is the only shape
+    /// that reaches the compaction branch: popping a cancelled event removes it from
+    /// `cancelled` as it goes, so cancelled events that are already due drain the set
+    /// and the branch never runs. Its own comment says as much — "for a cancelled
+    /// future event [the dead entry] can be hours" away.
+    #[test]
+    fn a_compaction_leaves_events_cancellable() {
+        let t = Timer::new();
+        // Live events, far in the future, for one run, one schedule and one rule.
+        t.push(1_000_000, TimerEvent::Due(7));
+        t.push(1_000_001, TimerEvent::FlowTimeout(7));
+        t.push(1_000_002, TimerEvent::Fire(3));
+        t.push(1_000_003, TimerEvent::RuleClock(5));
+        // Cancelled events, also in the future, so they stay in the heap and in
+        // `cancelled` and the compaction branch fires.
+        for i in 0..20 {
+            t.push(900_000 + i, TimerEvent::Due(1000 + i));
+        }
+        for i in 0..20 {
+            t.remove_run_events(1000 + i);
+        }
+        assert_eq!(t.len(), 4, "four live events");
 
-    // All three removal paths must still work.
-    t.remove_run_events(7);
-    t.remove_schedule_events(3);
-    t.remove_rule_clock(5);
-    assert_eq!(
-        t.len(),
-        0,
-        "a compaction must not stop the timer cancelling events"
-    );
-    assert!(
-        t.pop_due(2_000_000).is_empty(),
-        "and the cancelled events must not fire"
-    );
-}
+        // Nothing is due yet, so this only runs the compaction branch.
+        assert!(t.pop_due(50_000).is_empty(), "nothing is due at 50s");
 
-/// `side_of` must route a sequence to the index it was filed under.
-///
-/// An injection pointing every sequence at `by_rule` passed all eleven tests in
-/// this module. The reason is that getting it wrong is *invisible* until later:
-/// `forget_seq` looks in the wrong map, does not find the sequence, and returns
-/// having removed nothing. The sequence is then stranded in the correct map
-/// forever, and the next `remove_*` finds it and cancels an event that has already
-/// fired -- decrementing `active_count` a second time.
-///
-/// So the test cancels *after* popping, which is the only ordering in which the
-/// mistake shows.
-#[test]
-fn a_popped_event_is_not_cancellable_afterwards() {
-    let t = Timer::new();
-    t.push(10, TimerEvent::Due(1));
-    t.push(20, TimerEvent::LateCheck(1));
-    t.push(30, TimerEvent::Fire(2));
-    t.push(40, TimerEvent::RuleClock(3));
-    assert_eq!(t.len(), 4);
-    assert_eq!(t.pop_due(100).len(), 4, "all four fire");
-    assert_eq!(t.len(), 0, "and the count is back to zero");
+        // All three removal paths must still work.
+        t.remove_run_events(7);
+        t.remove_schedule_events(3);
+        t.remove_rule_clock(5);
+        assert_eq!(
+            t.len(),
+            0,
+            "a compaction must not stop the timer cancelling events"
+        );
+        assert!(
+            t.pop_due(2_000_000).is_empty(),
+            "and the cancelled events must not fire"
+        );
+    }
 
-    // Every one of these must find nothing, because the events are gone. If any
-    // found something, the count would be decremented a second time.
-    t.remove_run_events(1);
-    t.remove_schedule_events(2);
-    t.remove_rule_clock(3);
-    assert_eq!(
-        t.len(),
-        0,
-        "cancelling an event that has already fired must not change the count"
-    );
-    assert!(t.pop_due(200).is_empty(), "and nothing is left in the heap");
+    /// `side_of` must route a sequence to the index it was filed under.
+    ///
+    /// An injection pointing every sequence at `by_rule` passed all eleven tests in
+    /// this module. The reason is that getting it wrong is *invisible* until later:
+    /// `forget_seq` looks in the wrong map, does not find the sequence, and returns
+    /// having removed nothing. The sequence is then stranded in the correct map
+    /// forever, and the next `remove_*` finds it and cancels an event that has already
+    /// fired -- decrementing `active_count` a second time.
+    ///
+    /// So the test cancels *after* popping, which is the only ordering in which the
+    /// mistake shows.
+    #[test]
+    fn a_popped_event_is_not_cancellable_afterwards() {
+        let t = Timer::new();
+        t.push(10, TimerEvent::Due(1));
+        t.push(20, TimerEvent::LateCheck(1));
+        t.push(30, TimerEvent::Fire(2));
+        t.push(40, TimerEvent::RuleClock(3));
+        assert_eq!(t.len(), 4);
+        assert_eq!(t.pop_due(100).len(), 4, "all four fire");
+        assert_eq!(t.len(), 0, "and the count is back to zero");
 
-    // And every index agrees.
-    let inner = t.inner.lock().unwrap();
-    assert!(
-        inner.by_run.is_empty()
-            && inner.by_schedule.is_empty()
-            && inner.by_rule.is_empty()
-            && inner.side_of.is_empty(),
-        "every index is empty after a full drain: by_run {:?}, by_schedule {:?}, \
+        // Every one of these must find nothing, because the events are gone. If any
+        // found something, the count would be decremented a second time.
+        t.remove_run_events(1);
+        t.remove_schedule_events(2);
+        t.remove_rule_clock(3);
+        assert_eq!(
+            t.len(),
+            0,
+            "cancelling an event that has already fired must not change the count"
+        );
+        assert!(t.pop_due(200).is_empty(), "and nothing is left in the heap");
+
+        // And every index agrees.
+        let inner = t.inner.lock().unwrap();
+        assert!(
+            inner.by_run.is_empty()
+                && inner.by_schedule.is_empty()
+                && inner.by_rule.is_empty()
+                && inner.side_of.is_empty(),
+            "every index is empty after a full drain: by_run {:?}, by_schedule {:?}, \
          by_rule {:?}, side_of has {} entries",
-        inner.by_run.keys().collect::<Vec<_>>(),
-        inner.by_schedule.keys().collect::<Vec<_>>(),
-        inner.by_rule.keys().collect::<Vec<_>>(),
-        inner.side_of.len()
-    );
-}
-
-/// The same claim, read straight off the side indexes, so a failure says *which*
-/// index was emptied rather than only that something was.
-#[test]
-fn a_compaction_leaves_the_side_indexes_intact() {
-    let t = Timer::new();
-    t.push(1_000_000, TimerEvent::Due(7));
-    t.push(900_000, TimerEvent::Fire(3));
-    for i in 0..20 {
-        t.push(800_000 + i, TimerEvent::Due(1000 + i));
+            inner.by_run.keys().collect::<Vec<_>>(),
+            inner.by_schedule.keys().collect::<Vec<_>>(),
+            inner.by_rule.keys().collect::<Vec<_>>(),
+            inner.side_of.len()
+        );
     }
-    for i in 0..20 {
-        t.remove_run_events(1000 + i);
-    }
-    assert!(t.pop_due(50_000).is_empty());
 
-    let inner = t.inner.lock().unwrap();
-    assert_eq!(
-        inner.by_run.keys().copied().collect::<Vec<_>>(),
-        vec![7],
-        "by_run lost its live entry"
-    );
-    assert_eq!(
-        inner.by_schedule.keys().copied().collect::<Vec<_>>(),
-        vec![3],
-        "by_schedule lost its live entry"
-    );
-    drop(inner);
-    assert!(
-        t.has_rule_clock(99) == false,
-        "sanity: an unrelated rule is not indexed"
-    );
-}
+    /// The same claim, read straight off the side indexes, so a failure says *which*
+    /// index was emptied rather than only that something was.
+    #[test]
+    fn a_compaction_leaves_the_side_indexes_intact() {
+        let t = Timer::new();
+        t.push(1_000_000, TimerEvent::Due(7));
+        t.push(900_000, TimerEvent::Fire(3));
+        for i in 0..20 {
+            t.push(800_000 + i, TimerEvent::Due(1000 + i));
+        }
+        for i in 0..20 {
+            t.remove_run_events(1000 + i);
+        }
+        assert!(t.pop_due(50_000).is_empty());
+
+        let inner = t.inner.lock().unwrap();
+        assert_eq!(
+            inner.by_run.keys().copied().collect::<Vec<_>>(),
+            vec![7],
+            "by_run lost its live entry"
+        );
+        assert_eq!(
+            inner.by_schedule.keys().copied().collect::<Vec<_>>(),
+            vec![3],
+            "by_schedule lost its live entry"
+        );
+        drop(inner);
+        assert!(
+            !t.has_rule_clock(99),
+            "sanity: an unrelated rule is not indexed"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -695,7 +695,7 @@ mod drain_cost {
         // `filled` pushes four events per iteration, so a column of `n` is 4n
         // events over n runs -- four per run, as `arm_run` does.
         for n in [400usize, 1_600, 6_400, 25_600, 102_400] {
-            let mut t = filled(n, n);
+            let t = filled(n, n);
             let at = Instant::now();
             let popped = t.pop_due(10_000_000);
             let drain = at.elapsed().as_secs_f64() * 1e3;

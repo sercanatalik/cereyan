@@ -218,8 +218,18 @@ fn flow_run_series(
 /// is a resource's own zero and not a failed lookup.
 fn resource_lines(out: &mut String, rows: &[crate::supervisor::ResourceRow]) {
     for r in rows {
-        line(out, "cereyan_resource_total", &[("resource", &r.name)], r.total);
-        line(out, "cereyan_resource_used", &[("resource", &r.name)], r.used);
+        line(
+            out,
+            "cereyan_resource_total",
+            &[("resource", &r.name)],
+            r.total,
+        );
+        line(
+            out,
+            "cereyan_resource_used",
+            &[("resource", &r.name)],
+            r.used,
+        );
     }
 }
 
@@ -266,7 +276,11 @@ pub fn render(state: &AppState) -> String {
         line(
             &mut out,
             "cereyan_flow_runs",
-            &[("project", &project), ("flow", &name), ("state", &state_type)],
+            &[
+                ("project", &project),
+                ("flow", &name),
+                ("state", &state_type),
+            ],
             n,
         );
     }
@@ -593,7 +607,10 @@ mod flow_series_tests {
     #[test]
     fn a_key_that_is_not_an_id_is_skipped() {
         let flows = vec![flow(1, "p", "etl")];
-        let c = counts(&[("1", &[("Completed", 1)]), ("not-a-number", &[("Failed", 9)])]);
+        let c = counts(&[
+            ("1", &[("Completed", 1)]),
+            ("not-a-number", &[("Failed", 9)]),
+        ]);
         let got = flow_run_series(&flows, &c);
         assert_eq!(got.len(), 1, "a non-numeric key should be skipped");
         assert_eq!(got[0].2, "Completed");
@@ -724,9 +741,18 @@ mod resource_line_tests {
                 "no used line for {name}: {out}"
             );
         }
-        assert!(out.contains("cereyan_resource_total{resource=\"cpu\"} 4"), "{out}");
-        assert!(out.contains("cereyan_resource_used{resource=\"cpu\"} 1.5"), "{out}");
-        assert!(out.contains("cereyan_resource_total{resource=\"memory\"} 1024"), "{out}");
+        assert!(
+            out.contains("cereyan_resource_total{resource=\"cpu\"} 4"),
+            "{out}"
+        );
+        assert!(
+            out.contains("cereyan_resource_used{resource=\"cpu\"} 1.5"),
+            "{out}"
+        );
+        assert!(
+            out.contains("cereyan_resource_total{resource=\"memory\"} 1024"),
+            "{out}"
+        );
     }
 
     /// `resource_lines` emits in the order it is given; the sorted guarantee lives

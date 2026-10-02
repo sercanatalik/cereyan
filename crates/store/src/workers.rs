@@ -206,7 +206,10 @@ impl Store {
     ///
     /// A membership row whose flow no longer exists yields no row, matching the
     /// old behaviour of skipping it.
-    pub fn worker_flow_details(&self, worker_id: i64) -> Result<Vec<(i64, String, String, String)>> {
+    pub fn worker_flow_details(
+        &self,
+        worker_id: i64,
+    ) -> Result<Vec<(i64, String, String, String)>> {
         self.with_reader(|conn| {
             let mut stmt = conn.prepare_cached(
                 "SELECT wf.flow_id, f.source_dir, f.module, wf.module_hash
@@ -225,9 +228,8 @@ impl Store {
     /// How many flows each worker has claimed, in one grouped read.
     pub fn worker_flow_counts(&self) -> Result<Vec<(i64, i64)>> {
         self.with_reader(|conn| {
-            let mut stmt = conn.prepare_cached(
-                "SELECT worker_id, COUNT(*) FROM worker_flow GROUP BY worker_id",
-            )?;
+            let mut stmt = conn
+                .prepare_cached("SELECT worker_id, COUNT(*) FROM worker_flow GROUP BY worker_id")?;
             let rows = stmt
                 .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;

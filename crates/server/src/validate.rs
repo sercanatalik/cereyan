@@ -163,8 +163,7 @@ mod borrow_tests {
     #[test]
     fn an_undeclared_parameter_is_rejected_by_name() {
         let s = schema_of(json!({"type": "string"}));
-        let e = validate_parameters(&s, json!({"other": "v"}).as_object().unwrap())
-            .unwrap_err();
+        let e = validate_parameters(&s, json!({"other": "v"}).as_object().unwrap()).unwrap_err();
         assert_eq!(e, "parameter \"other\" is not declared by the flow");
     }
 
@@ -193,8 +192,7 @@ mod borrow_tests {
     fn a_choice_list_accepts_a_member_and_rejects_a_non_member() {
         let s = schema_of(json!({"enum": ["alpha", "beta"]}));
         assert!(validate_parameters(&s, json!({"p": "alpha"}).as_object().unwrap()).is_ok());
-        let e = validate_parameters(&s, json!({"p": "iota"}).as_object().unwrap())
-            .unwrap_err();
+        let e = validate_parameters(&s, json!({"p": "iota"}).as_object().unwrap()).unwrap_err();
         assert!(
             e.starts_with("parameter \"p\" must be one of"),
             "the choices are listed: {e}"
@@ -271,8 +269,7 @@ mod borrow_tests {
     #[test]
     fn a_schema_with_no_properties_rejects_everything_supplied() {
         let s = json!({ "type": "object" });
-        let e = validate_parameters(&s, json!({"p": "v"}).as_object().unwrap())
-            .unwrap_err();
+        let e = validate_parameters(&s, json!({"p": "v"}).as_object().unwrap()).unwrap_err();
         assert_eq!(e, "parameter \"p\" is not declared by the flow");
     }
 
@@ -280,8 +277,7 @@ mod borrow_tests {
     fn a_schema_that_is_not_an_object_is_treated_as_empty() {
         // Not an object, so `properties` is unreachable and every lookup misses.
         for s in [json!("not a schema"), json!([1, 2, 3]), json!(null)] {
-            let e = validate_parameters(&s, json!({"p": "v"}).as_object().unwrap())
-                .unwrap_err();
+            let e = validate_parameters(&s, json!({"p": "v"}).as_object().unwrap()).unwrap_err();
             assert_eq!(
                 e, "parameter \"p\" is not declared by the flow",
                 "schema {s}"
@@ -294,7 +290,10 @@ mod borrow_tests {
     fn validation_leaves_the_schema_unchanged_and_is_repeatable() {
         let s = realistic_schema();
         let before = s.clone();
-        let params = json!({"param_0": "v", "param_1": "w"}).as_object().unwrap().clone();
+        let params = json!({"param_0": "v", "param_1": "w"})
+            .as_object()
+            .unwrap()
+            .clone();
         for _ in 0..5 {
             assert!(validate_parameters(&s, &params).is_ok());
             assert_eq!(s, before, "the schema must not be touched");
@@ -324,15 +323,14 @@ mod borrow_tests {
             return;
         }
         let s = realistic_schema();
-        let params: Map<String, Value> = (0..5)
-            .map(|i| (format!("param_{i}"), json!("v")))
-            .collect();
+        let params: Map<String, Value> =
+            (0..5).map(|i| (format!("param_{i}"), json!("v"))).collect();
         let iters = 50_000i64;
 
         // What the rule costs as it stands: borrowing the schema.
         let t = std::time::Instant::now();
         for _ in 0..iters {
-            std::hint::black_box(validate_parameters(&s, &params));
+            let _ = std::hint::black_box(validate_parameters(&s, &params));
         }
         let borrowed = t.elapsed().as_secs_f64() / iters as f64 * 1e6;
 

@@ -296,7 +296,6 @@ impl Compiled {
     }
 }
 
-
 impl Schedule {
     /// Pin an interval schedule's anchor to `now` when it has none.
     pub fn with_anchor_if_missing(mut self, now: Micros) -> Schedule {
@@ -444,7 +443,10 @@ impl Schedule {
             let Some(previous) = compiled.previous_from(cursor, floor) else {
                 break;
             };
-            if out.last().is_some_and(|last: &DateTime<Utc>| *last == previous) {
+            if out
+                .last()
+                .is_some_and(|last: &DateTime<Utc>| *last == previous)
+            {
                 // A schedule that fires twice in the same instant would otherwise
                 // loop here forever. Not reachable for a cron, which has a
                 // one-second resolution, but the walk must terminate.
@@ -946,7 +948,8 @@ mod walk_cost {
                 expected.retain(|f| *f > floor);
 
                 assert_eq!(
-                    backwards, expected,
+                    backwards,
+                    expected,
                     "{expr} in {tz:?} over {days} days: backwards {backwards:?} vs \
                      forwards' last {} {expected:?}",
                     forwards.len()
@@ -965,7 +968,10 @@ mod walk_cost {
         let end = utc("2026-09-30T00:00:00Z");
         // One fire per year, so a 400-day window holds at most one.
         let fires = s.fires_before(end, end - Duration::days(400), 4).unwrap();
-        assert!(fires.len() <= 1, "a yearly cron cannot fire twice in 400 days: {fires:?}");
+        assert!(
+            fires.len() <= 1,
+            "a yearly cron cannot fire twice in 400 days: {fires:?}"
+        );
         for f in &fires {
             assert!(*f >= end - Duration::days(400), "nothing before the floor");
         }
@@ -978,8 +984,14 @@ mod walk_cost {
     fn a_continuous_schedule_has_no_fires_in_either_direction() {
         let s = Schedule::Continuous { delay: 30.0 };
         let end = utc("2026-09-30T00:00:00Z");
-        assert!(s.fires_before(end, end - Duration::days(800), 2).unwrap().is_empty());
-        assert!(s.fires_between(end - Duration::days(800), end, 10).unwrap().is_empty());
+        assert!(s
+            .fires_before(end, end - Duration::days(800), 2)
+            .unwrap()
+            .is_empty());
+        assert!(s
+            .fires_between(end - Duration::days(800), end, 10)
+            .unwrap()
+            .is_empty());
     }
 
     /// How much of a walk is the walk, and how much is re-resolving the zone and
@@ -1024,9 +1036,7 @@ mod walk_cost {
 
         // And the two answers the health check actually wanted.
         let t = Instant::now();
-        let back = s
-            .fires_before(end, end - Duration::days(800), 2)
-            .unwrap();
+        let back = s.fires_before(end, end - Duration::days(800), 2).unwrap();
         let backwards = t.elapsed().as_secs_f64() * 1e3;
 
         println!(

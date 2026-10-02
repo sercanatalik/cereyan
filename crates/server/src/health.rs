@@ -261,7 +261,10 @@ pub fn sweep(state: &Arc<AppState>) -> usize {
     {
         // Forget runs that are no longer active so the set stays small.
         let alive: HashSet<i64> = all.iter().map(|r| r.id).collect();
-        let mut guard = state.overdue_reported.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = state
+            .overdue_reported
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         guard.retain(|id| alive.contains(id));
     }
     let running: Vec<crate::index::ActiveRun> = all
@@ -299,9 +302,7 @@ pub fn sweep(state: &Arc<AppState>) -> usize {
         let empty: Vec<cereyan_store::RecentRun> = Vec::new();
         let Some((expected, basis)) = expected_duration(
             &options,
-            recent_by_flow
-                .get(&active.flow_id)
-                .unwrap_or(&empty),
+            recent_by_flow.get(&active.flow_id).unwrap_or(&empty),
         ) else {
             continue;
         };
@@ -314,7 +315,10 @@ pub fn sweep(state: &Arc<AppState>) -> usize {
             continue;
         }
         {
-            let mut guard = state.overdue_reported.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = state
+                .overdue_reported
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if !guard.insert(active.id) {
                 continue;
             }
@@ -416,9 +420,7 @@ pub(crate) mod flow_health_tests {
     fn starts(pairs: &[(i64, Option<f64>)], now: i64) -> HashMap<i64, Option<i64>> {
         pairs
             .iter()
-            .map(|(id, secs)| {
-                (*id, secs.map(|s| now - (s * 1_000_000.0) as i64))
-            })
+            .map(|(id, secs)| (*id, secs.map(|s| now - (s * 1_000_000.0) as i64)))
             .collect()
     }
 
@@ -469,12 +471,12 @@ pub(crate) mod flow_health_tests {
     fn a_run_with_no_start_time_is_skipped() {
         let now = now_micros();
         for map in [
-            starts(&[(1, None)], now),         // known, not started
-            HashMap::new(),                      // not in the map at all
+            starts(&[(1, None)], now), // known, not started
+            HashMap::new(),            // not in the map at all
         ] {
             let active = [running(1, 600.0)];
-            let h = flow_health(&flow(1), &expecting(60.0), &active, &[], None, &map)
-                .expect("health");
+            let h =
+                flow_health(&flow(1), &expecting(60.0), &active, &[], None, &map).expect("health");
             assert!(
                 h.reasons.is_empty(),
                 "a run with no start time is skipped, got {:?}",
@@ -497,7 +499,11 @@ pub(crate) mod flow_health_tests {
             &starts(&[(1, Some(9_999.0))], now),
         )
         .expect("health");
-        assert!(h.reasons.is_empty(), "a non-Running run is not overdue: {:?}", h.reasons);
+        assert!(
+            h.reasons.is_empty(),
+            "a non-Running run is not overdue: {:?}",
+            h.reasons
+        );
     }
 
     /// Several flows, each with its own runs. The map is shared, so the risk this
@@ -511,12 +517,9 @@ pub(crate) mod flow_health_tests {
         two.flow_id = 2;
         let map = starts(&[(1, Some(600.0)), (2, Some(600.0))], now);
 
-        for (f, active, expected_warn) in [
-            (1, &[one][..], true),
-            (2, &[two][..], true),
-        ] {
-            let h = flow_health(&flow(f), &expecting(60.0), active, &[], None, &map)
-                .expect("health");
+        for (f, active, expected_warn) in [(1, &[one][..], true), (2, &[two][..], true)] {
+            let h =
+                flow_health(&flow(f), &expecting(60.0), active, &[], None, &map).expect("health");
             assert_eq!(h.reasons.len(), 1, "flow {f}: {:?}", h.reasons);
             assert!(
                 h.reasons[0].contains(&active[0].id.to_string()),
@@ -563,6 +566,7 @@ pub(crate) mod flow_health_tests {
     /// What this test covers is the thing the edit could have broken: which runs
     /// are considered, and which are reported.
     #[test]
+    #[allow(clippy::type_complexity)]
     fn the_reports_match_the_previous_implementation() {
         let now = now_micros();
         let cases: Vec<(Vec<crate::index::ActiveRun>, Vec<(i64, Option<f64>)>, f64)> = vec![
@@ -589,9 +593,7 @@ pub(crate) mod flow_health_tests {
         ];
         // The run id a reason names: the second whitespace-separated token of
         // "run <id> has been running ...".
-        let named = |r: &str| -> String {
-            r.split_whitespace().nth(1).unwrap_or("").to_string()
-        };
+        let named = |r: &str| -> String { r.split_whitespace().nth(1).unwrap_or("").to_string() };
         for (active, pairs, expected) in cases {
             let map = starts(&pairs, now);
             let got = flow_health(&flow(1), &expecting(expected), &active, &[], None, &map)
@@ -600,7 +602,10 @@ pub(crate) mod flow_health_tests {
             // The previous implementation, reconstructed.
             let mut want_ids = Vec::new();
             let mut want_warn = false;
-            for r in active.iter().filter(|r| r.state.state_type == StateType::Running) {
+            for r in active
+                .iter()
+                .filter(|r| r.state.state_type == StateType::Running)
+            {
                 let Some(start) = map.get(&r.id).copied().flatten() else {
                     continue;
                 };
@@ -611,10 +616,7 @@ pub(crate) mod flow_health_tests {
                 }
             }
             let got_ids: Vec<String> = got.reasons.iter().map(|r| named(r)).collect();
-            assert_eq!(
-                got_ids, want_ids,
-                "the reported runs differ for {active:?}"
-            );
+            assert_eq!(got_ids, want_ids, "the reported runs differ for {active:?}");
             assert_eq!(
                 got.status == "WARN",
                 want_warn,
@@ -678,7 +680,8 @@ mod overdue_rule_tests {
     fn the_elapsed_and_expected_figures_are_rendered() {
         let now = 1_000_000_000i64;
         let active = [running_at(7, 1)];
-        let map: HashMap<i64, Option<i64>> = [(7i64, Some(now - 600_000_000))].into_iter().collect();
+        let map: HashMap<i64, Option<i64>> =
+            [(7i64, Some(now - 600_000_000))].into_iter().collect();
         assert_eq!(
             overdue_reasons(&active, &map, now, 60.0, "overdue_factor"),
             vec!["run 7 has been running 10m against 60s expected (overdue_factor)"],
@@ -689,7 +692,8 @@ mod overdue_rule_tests {
     #[test]
     fn a_run_from_another_flow_is_not_considered() {
         let now = 1_000_000_000i64;
-        let map: HashMap<i64, Option<i64>> = [(1i64, Some(now - 600_000_000))].into_iter().collect();
+        let map: HashMap<i64, Option<i64>> =
+            [(1i64, Some(now - 600_000_000))].into_iter().collect();
         // The rule is handed a flow's own active slice, so a run belonging to
         // another flow is simply not in it.
         assert!(

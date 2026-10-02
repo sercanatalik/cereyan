@@ -1125,7 +1125,10 @@ fn append_event_returns_the_row_that_was_stored() {
         .unwrap();
 
     let stored = store.get_event(returned.id).unwrap().expect("row exists");
-    assert_eq!(returned, stored, "returned event differs from the stored row");
+    assert_eq!(
+        returned, stored,
+        "returned event differs from the stored row"
+    );
     assert_eq!(returned.external_id, external_id);
     assert_eq!(returned.seq, returned.id, "seq is the row id");
     assert_eq!(stored.payload.get("a").and_then(|v| v.as_i64()), Some(1));
@@ -1143,7 +1146,7 @@ fn append_event_derives_flow_id_from_the_run() {
     let flow_id = flow(&store, "p", "etl");
     let (run_id, _) = store
         .create_run_full(CreateRun {
-            flow_id: flow_id,
+            flow_id,
             name: "r1".into(),
             parameters: "{}".into(),
             tags: "[]".into(),
@@ -1153,7 +1156,11 @@ fn append_event_derives_flow_id_from_the_run() {
         .unwrap();
 
     let (returned, _) = store
-        .append_event(new_event("task_run.completed", Some(run_id), serde_json::json!({})))
+        .append_event(new_event(
+            "task_run.completed",
+            Some(run_id),
+            serde_json::json!({}),
+        ))
         .unwrap();
     let stored = store.get_event(returned.id).unwrap().expect("row exists");
     assert_eq!(returned, stored);
@@ -1238,7 +1245,10 @@ fn transition_run_returns_the_state_that_was_persisted() {
         .unwrap();
     // The state the write reports must equal the state the row now holds.
     let row = store.get_run(run_id).unwrap().expect("run exists");
-    assert_eq!(returned, row.state, "write returned a different state than stored");
+    assert_eq!(
+        returned, row.state,
+        "write returned a different state than stored"
+    );
     assert_eq!(returned.state_type, StateType::Running);
     assert_eq!(returned.name, "Running");
 }
@@ -1274,9 +1284,7 @@ fn worker_flow_details_returns_only_that_workers_rows() {
     store
         .set_worker_flows(w1, vec![(f1, "h1".into()), (f2, "h2".into())])
         .unwrap();
-    store
-        .set_worker_flows(w2, vec![(f3, "h3".into())])
-        .unwrap();
+    store.set_worker_flows(w2, vec![(f3, "h3".into())]).unwrap();
 
     let mine = store.worker_flow_details(w1).unwrap();
     assert_eq!(mine.len(), 2, "only this worker's rows");
@@ -1332,9 +1340,7 @@ fn worker_flow_counts_groups_by_worker() {
     store
         .set_worker_flows(w1, vec![(f1, "h".into()), (f2, "h".into())])
         .unwrap();
-    store
-        .set_worker_flows(w2, vec![(f3, "h".into())])
-        .unwrap();
+    store.set_worker_flows(w2, vec![(f3, "h".into())]).unwrap();
 
     let counts: std::collections::HashMap<i64, i64> =
         store.worker_flow_counts().unwrap().into_iter().collect();
@@ -1378,9 +1384,15 @@ fn single_row_getters_return_the_row_and_none_for_a_missing_id() {
 
     // Present and absent, for every getter this change touched.
     assert!(store.get_run(run_id).unwrap().is_some(), "get_run");
-    assert!(store.get_run(run_id + 9_999).unwrap().is_none(), "get_run missing");
+    assert!(
+        store.get_run(run_id + 9_999).unwrap().is_none(),
+        "get_run missing"
+    );
     assert_eq!(
-        store.get_run_by_external_id(&run_ext).unwrap().map(|r| r.id),
+        store
+            .get_run_by_external_id(&run_ext)
+            .unwrap()
+            .map(|r| r.id),
         Some(run_id),
         "get_run_by_external_id"
     );
@@ -1390,7 +1402,10 @@ fn single_row_getters_return_the_row_and_none_for_a_missing_id() {
     );
 
     assert!(store.get_flow(f).unwrap().is_some(), "get_flow");
-    assert!(store.get_flow(f + 9_999).unwrap().is_none(), "get_flow missing");
+    assert!(
+        store.get_flow(f + 9_999).unwrap().is_none(),
+        "get_flow missing"
+    );
     let by_key = store.get_flow_by_key("p", "etl").unwrap();
     assert_eq!(by_key.as_ref().map(|x| x.id), Some(f), "get_flow_by_key");
     assert!(
@@ -1402,15 +1417,39 @@ fn single_row_getters_return_the_row_and_none_for_a_missing_id() {
         "get_flow_by_key wrong project"
     );
 
-    assert!(store.get_task_run(9_999).unwrap().is_none(), "get_task_run missing");
-    assert!(store.get_schedule(9_999).unwrap().is_none(), "get_schedule missing");
-    assert!(store.get_backfill(9_999).unwrap().is_none(), "get_backfill missing");
-    assert!(store.get_event(9_999).unwrap().is_none(), "get_event missing");
+    assert!(
+        store.get_task_run(9_999).unwrap().is_none(),
+        "get_task_run missing"
+    );
+    assert!(
+        store.get_schedule(9_999).unwrap().is_none(),
+        "get_schedule missing"
+    );
+    assert!(
+        store.get_backfill(9_999).unwrap().is_none(),
+        "get_backfill missing"
+    );
+    assert!(
+        store.get_event(9_999).unwrap().is_none(),
+        "get_event missing"
+    );
     assert!(store.get_rule(9_999).unwrap().is_none(), "get_rule missing");
-    assert!(store.get_expectation(9_999).unwrap().is_none(), "get_expectation missing");
-    assert!(store.get_artifact(9_999).unwrap().is_none(), "get_artifact missing");
-    assert!(store.get_variable("absent").unwrap().is_none(), "get_variable missing");
-    assert!(store.get_variable("absent").unwrap().is_none(), "get_variable repeated");
+    assert!(
+        store.get_expectation(9_999).unwrap().is_none(),
+        "get_expectation missing"
+    );
+    assert!(
+        store.get_artifact(9_999).unwrap().is_none(),
+        "get_artifact missing"
+    );
+    assert!(
+        store.get_variable("absent").unwrap().is_none(),
+        "get_variable missing"
+    );
+    assert!(
+        store.get_variable("absent").unwrap().is_none(),
+        "get_variable repeated"
+    );
 }
 
 #[test]
@@ -1472,12 +1511,21 @@ fn latest_run_with_param_still_matches_through_the_cache() {
         .unwrap();
 
     assert_eq!(
-        store.latest_run_with_param(f, "day", "2026-01-01").unwrap().map(|r| r.id),
+        store
+            .latest_run_with_param(f, "day", "2026-01-01")
+            .unwrap()
+            .map(|r| r.id),
         Some(with)
     );
-    assert!(store.latest_run_with_param(f, "day", "1999-01-01").unwrap().is_none());
+    assert!(store
+        .latest_run_with_param(f, "day", "1999-01-01")
+        .unwrap()
+        .is_none());
     // A key no run carries must not match the run that lacks it.
-    assert!(store.latest_run_with_param(f, "absent", "x").unwrap().is_none());
+    assert!(store
+        .latest_run_with_param(f, "absent", "x")
+        .unwrap()
+        .is_none());
     let _ = without;
 }
 
@@ -1486,7 +1534,6 @@ fn latest_run_with_param_still_matches_through_the_cache() {
 // `checkpoints` used to evaluate the crash-chain CTE twice and read one `kv` row
 // per chain element. It now walks the chain once and reads the seeds in a single
 // query. The precedence rules are what matter, so these tests pin them.
-
 
 fn run_of(store: &Store, flow_id: i64, name: &str) -> (i64, Id) {
     store
@@ -1537,14 +1584,16 @@ fn seed_of(store: &Store, run_id: i64, entries: &[(&str, &str)]) {
     let json = serde_json::to_string(
         &entries
             .iter()
-            .map(|(k, r)| serde_json::json!({
-                "dynamic_key": k,
-                "task_key": "t",
-                "input_hash": format!("h-{r}"),
-                "result_ref": r,
-                "run_id": run_id,
-                "pass": 0,
-            }))
+            .map(|(k, r)| {
+                serde_json::json!({
+                    "dynamic_key": k,
+                    "task_key": "t",
+                    "input_hash": format!("h-{r}"),
+                    "result_ref": r,
+                    "run_id": run_id,
+                    "pass": 0,
+                })
+            })
             .collect::<Vec<_>>(),
     )
     .unwrap();
@@ -1568,7 +1617,10 @@ fn checkpoints_come_from_completed_task_runs() {
     completed_with_result(&store, run, "orders", 0, "art/1");
 
     let cps = store.checkpoints(run).unwrap();
-    assert_eq!(result_refs(&cps), vec![("orders".to_string(), "art/1".to_string())]);
+    assert_eq!(
+        result_refs(&cps),
+        vec![("orders".to_string(), "art/1".to_string())]
+    );
     assert_eq!(cps[0].run_id, run);
     assert_eq!(cps[0].input_hash, "h-art/1");
 }
@@ -1680,7 +1732,10 @@ fn a_run_inherits_its_ancestors_seed() {
     seed_of(&store, parent, &[("orders", "art/parent-seed")]);
 
     let cps = store.checkpoints(child).unwrap();
-    assert_eq!(result_refs(&cps), vec![("orders".into(), "art/parent-seed".into())]);
+    assert_eq!(
+        result_refs(&cps),
+        vec![("orders".into(), "art/parent-seed".into())]
+    );
 }
 
 #[test]
@@ -1690,7 +1745,9 @@ fn an_incomplete_result_is_skipped() {
     let f = flow(&store, "p", "etl");
     let (run, _) = run_of(&store, f, "r1");
     // A checkpoint detail missing `input_hash` must not be picked up.
-    let (id, _) = store.create_task_run(run, "orders", "t", "orders", 0).unwrap();
+    let (id, _) = store
+        .create_task_run(run, "orders", "t", "orders", 0)
+        .unwrap();
     let mut state = State::new(StateType::Completed);
     state.details.insert(
         "checkpoint".into(),
@@ -1740,7 +1797,9 @@ fn backfill_run(store: &Store, flow_id: i64, name: &str, backfill_id: i64, day: 
 }
 
 fn finish(store: &Store, run_id: i64, state: StateType) {
-    store.transition_run(run_id, State::new(state), true).unwrap();
+    store
+        .transition_run(run_id, State::new(state), true)
+        .unwrap();
 }
 
 #[test]
@@ -1768,7 +1827,10 @@ fn a_value_whose_latest_run_failed_is_missing() {
     let done = store
         .latest_completed_param_values(f, "day", &["2026-01-01".to_string()])
         .unwrap();
-    assert!(done.is_empty(), "a failed latest run must not count as done");
+    assert!(
+        done.is_empty(),
+        "a failed latest run must not count as done"
+    );
 }
 
 /// The rule that makes the window function necessary: an older `Completed` run
@@ -1856,7 +1918,9 @@ fn a_mixed_set_reports_only_the_done_values() {
         .unwrap();
     assert_eq!(
         done.into_iter().collect::<std::collections::BTreeSet<_>>(),
-        ["d1".to_string()].into_iter().collect::<std::collections::BTreeSet<_>>(),
+        ["d1".to_string()]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>(),
     );
 }
 
@@ -1949,8 +2013,9 @@ fn the_task_count_index_exists_after_open() {
     let store = open(&dir);
     let names: Vec<String> = store
         .with_reader(|c| {
-            let mut stmt =
-                c.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='task_run'")?;
+            let mut stmt = c.prepare(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='task_run'",
+            )?;
             let rows = stmt
                 .query_map([], |r| r.get::<_, String>(0))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2013,8 +2078,12 @@ fn task_counts_are_unchanged_by_the_index() {
     completed_with_result(&store, run, "orders", 0, "art/1");
 
     // Distinct states, so the map has more than one entry.
-    let (t2, _) = store.create_task_run(run, "billing", "t", "billing", 0).unwrap();
-    let (t3, _) = store.create_task_run(run, "shipping", "t", "shipping", 0).unwrap();
+    let (t2, _) = store
+        .create_task_run(run, "billing", "t", "billing", 0)
+        .unwrap();
+    let (t3, _) = store
+        .create_task_run(run, "shipping", "t", "shipping", 0)
+        .unwrap();
     store
         .transition_task_run(t2, State::new(StateType::Failed), true)
         .unwrap();
@@ -2058,14 +2127,15 @@ fn the_unique_task_run_constraint_still_holds() {
     let store = open(&dir);
     let f = flow(&store, "p", "etl");
     let (run, _) = run_of(&store, f, "r1");
-    store.create_task_run(run, "orders", "t", "same-key", 0).unwrap();
+    store
+        .create_task_run(run, "orders", "t", "same-key", 0)
+        .unwrap();
     let dup = store.create_task_run(run, "orders", "t", "same-key", 0);
     assert!(
         dup.is_err(),
         "UNIQUE(run_id, dynamic_key) stopped being enforced"
     );
 }
-
 
 // ---- reading one pass of a run ------------------------------------------------
 //
@@ -2126,13 +2196,22 @@ fn next_pass_is_one_past_the_highest_pass() {
     let dir = TempDir::new().unwrap();
     let store = open(&dir);
     let f = flow(&store, "p", "etl");
-    assert_eq!(store.next_pass(run_with_passes(&store, f, "none", &[])).unwrap(), 0);
     assert_eq!(
-        store.next_pass(run_with_passes(&store, f, "one", &[0])).unwrap(),
+        store
+            .next_pass(run_with_passes(&store, f, "none", &[]))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        store
+            .next_pass(run_with_passes(&store, f, "one", &[0]))
+            .unwrap(),
         1
     );
     assert_eq!(
-        store.next_pass(run_with_passes(&store, f, "three", &[0, 1, 2])).unwrap(),
+        store
+            .next_pass(run_with_passes(&store, f, "three", &[0, 1, 2]))
+            .unwrap(),
         3
     );
 }
@@ -2155,7 +2234,10 @@ fn reading_a_pass_returns_only_that_pass() {
 
     // And it is exactly the last pass of the unfiltered read.
     let expected: Vec<_> = all.iter().filter(|t| t.pass == last).cloned().collect();
-    assert_eq!(only_last, expected, "filtered read differs from the old filter");
+    assert_eq!(
+        only_last, expected,
+        "filtered read differs from the old filter"
+    );
 }
 
 #[test]
@@ -2178,7 +2260,10 @@ fn task_runs_of_another_run_are_not_included() {
     let a = run_with_passes(&store, f, "a", &[0, 1]);
     let b = run_with_passes(&store, f, "b", &[0, 1, 2, 3]);
     let rows = store.task_runs_by_run(a, Some(1)).unwrap();
-    assert!(rows.iter().all(|t| t.run_id == a), "another run's task run leaked in");
+    assert!(
+        rows.iter().all(|t| t.run_id == a),
+        "another run's task run leaked in"
+    );
     assert_eq!(rows.len(), 1);
     let _ = b;
 }
@@ -2277,7 +2362,10 @@ fn only_the_requested_schedules_are_read() {
 
     let got = store.list_skip_rows_many(&[wanted]).unwrap();
     assert_eq!(got.len(), 1);
-    assert!(got.contains_key(&wanted), "the requested schedule is missing");
+    assert!(
+        got.contains_key(&wanted),
+        "the requested schedule is missing"
+    );
     assert!(
         !got.contains_key(&other),
         "another schedule's skips leaked in"
@@ -2316,15 +2404,11 @@ fn a_name_in_use_is_reported_present() {
     let store = open(&dir);
     let f = flow(&store, "p", "etl");
     let (run, _) = run_of(&store, f, "r1");
-    assert_eq!(
-        store
-            .get_run(run)
-            .unwrap()
-            .expect("row exists")
-            .name,
-        "r1"
+    assert_eq!(store.get_run(run).unwrap().expect("row exists").name, "r1");
+    assert!(
+        store.run_name_exists("r1").unwrap(),
+        "an existing name was absent"
     );
-    assert!(store.run_name_exists("r1").unwrap(), "an existing name was absent");
 }
 
 #[test]
@@ -2384,7 +2468,10 @@ fn the_empty_name_reports_whether_a_run_has_one() {
     );
     let f = flow(&store, "p", "etl");
     run_of(&store, f, "");
-    assert!(store.run_name_exists("").unwrap(), "a run now has an empty name");
+    assert!(
+        store.run_name_exists("").unwrap(),
+        "a run now has an empty name"
+    );
 }
 
 #[test]
@@ -2475,7 +2562,10 @@ fn recent_runs_exclude_flows_that_were_not_asked_about() {
     run_of(&store, b, "b0");
     let got = store.recent_run_states_many(&[a], 10).unwrap();
     assert!(got.contains_key(&a));
-    assert!(!got.contains_key(&b), "an unrequested flow's runs leaked in");
+    assert!(
+        !got.contains_key(&b),
+        "an unrequested flow's runs leaked in"
+    );
 }
 
 #[test]
@@ -2528,7 +2618,10 @@ fn last_completed_at_matches_the_per_flow_query() {
             "last completion differs for flow {id}"
         );
     }
-    assert!(!got.contains_key(&c), "a flow with no completed run has one");
+    assert!(
+        !got.contains_key(&c),
+        "a flow with no completed run has one"
+    );
 }
 
 #[test]
@@ -2706,14 +2799,15 @@ fn targets_carry_their_parameters_and_engine() {
             ..Default::default()
         })
         .unwrap();
-    store.transition_run(id, State::new(StateType::Running), true).unwrap();
+    store
+        .transition_run(id, State::new(StateType::Running), true)
+        .unwrap();
 
     let rows = store.cancellable_runs(Some(f), &[]).unwrap();
     assert_eq!(rows.len(), 1);
     let (rid, params, engine_pid) = &rows[0];
     assert_eq!(*rid, id);
-    let parsed: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str(params).unwrap();
+    let parsed: serde_json::Map<String, serde_json::Value> = serde_json::from_str(params).unwrap();
     assert_eq!(parsed.get("region").unwrap(), "eu");
     assert_eq!(parsed.get("day").unwrap(), "2026-09-29");
     // No engine assigned yet, so the caller sees None and cancels immediately.
@@ -2747,12 +2841,14 @@ fn flows_by_name_finds_unique_ambiguous_and_absent() {
     let unique = store.flows_by_name("unique").unwrap();
     assert_eq!(unique.len(), 1);
     assert_eq!(unique[0].id, a2);
-    assert_eq!(unique[0].project, "proj-a", "the flow row is returned whole");
+    assert_eq!(
+        unique[0].project, "proj-a",
+        "the flow row is returned whole"
+    );
 
     assert!(store.flows_by_name("absent").unwrap().is_empty());
     assert!(store.flows_by_name("").unwrap().is_empty());
 }
-
 
 // ---- median run durations, batched -------------------------------------------
 //
@@ -2804,7 +2900,10 @@ fn batched_medians_match_the_per_flow_read() {
             "batched median differs for flow {id}"
         );
     }
-    assert!(!got.contains_key(&c), "a flow with no timed runs has no median");
+    assert!(
+        !got.contains_key(&c),
+        "a flow with no timed runs has no median"
+    );
 }
 
 /// The case most likely to be got wrong: an even number of samples picks the
@@ -2952,9 +3051,15 @@ fn batched_start_times_match_the_single_reads() {
     }
     // Present with no value, not absent: a run that has not started is
     // distinguishable from a run that does not exist.
-    assert!(got.contains_key(&queued), "an unstarted run must still be present");
+    assert!(
+        got.contains_key(&queued),
+        "an unstarted run must still be present"
+    );
     assert_eq!(got.get(&queued).copied().flatten(), None);
-    assert!(!got.contains_key(&(queued + 9_999)), "an unknown id appeared");
+    assert!(
+        !got.contains_key(&(queued + 9_999)),
+        "an unknown id appeared"
+    );
 }
 
 #[test]
@@ -3028,7 +3133,11 @@ fn a_runs_events_keep_their_rows_and_order() {
     let (mine, _) = run_of(&store, f, "mine");
     let (other, _) = run_of(&store, f, "other");
     for i in 0..5i64 {
-        let _ = store.append_event(new_event("run.updated", Some(mine), serde_json::json!({"i": i})));
+        let _ = store.append_event(new_event(
+            "run.updated",
+            Some(mine),
+            serde_json::json!({"i": i}),
+        ));
         let _ = store.append_event(new_event("other.event", Some(other), serde_json::json!({})));
     }
 
@@ -3052,11 +3161,7 @@ fn a_runs_events_keep_their_rows_and_order() {
         .filter(|e| e.run_id == Some(mine))
         .map(|e| e.id)
         .collect();
-    let mut want: Vec<i64> = ids
-        .iter()
-        .copied()
-        .filter(|id| *id > cursor)
-        .collect();
+    let mut want: Vec<i64> = ids.iter().copied().filter(|id| *id > cursor).collect();
     want.sort_unstable();
     assert_eq!(after, want, "the cursor page differs");
     assert!(
@@ -3072,7 +3177,11 @@ fn a_run_with_no_events_returns_nothing() {
     let f = flow(&store, "p", "etl");
     let (mine, _) = run_of(&store, f, "mine");
     assert!(mine > 0);
-    let _ = store.append_event(new_event("run.updated", Some(mine + 999), serde_json::json!({})));
+    let _ = store.append_event(new_event(
+        "run.updated",
+        Some(mine + 999),
+        serde_json::json!({}),
+    ));
     let got: Vec<_> = store
         .list_events(None, 0, 100)
         .unwrap()
@@ -3140,13 +3249,17 @@ fn the_new_index_does_not_change_the_other_event_plans() {
     // pass on a database with no run index at all.
     let run_sql = "SELECT id FROM event WHERE run_id = 1 ORDER BY id DESC LIMIT 10";
     let with_run = plan(&conn, run_sql);
-    conn.execute_batch("CREATE INDEX event_run_id ON event (run_id, id)").unwrap();
+    conn.execute_batch("CREATE INDEX event_run_id ON event (run_id, id)")
+        .unwrap();
     let without_run = plan(&conn, run_sql);
     assert_ne!(
         with_run, without_run,
         "adding the index must change the run query's plan"
     );
-    assert!(!without_run.contains("SCAN event"), "still scanning: {without_run}");
+    assert!(
+        !without_run.contains("SCAN event"),
+        "still scanning: {without_run}"
+    );
 }
 
 #[test]
@@ -3161,7 +3274,7 @@ fn the_event_run_index_is_added_to_an_older_database() {
             "DROP INDEX event_run_id; DROP INDEX run_parent_run_id; DROP INDEX run_schedule_id; \
              DROP INDEX run_state_scheduled; PRAGMA user_version = 18;",
         )
-            .unwrap();
+        .unwrap();
     }
     let store = open(&dir);
     assert_eq!(
@@ -3202,7 +3315,10 @@ fn the_run_context_matches_the_run_it_came_from() {
         })
         .unwrap();
 
-    let ctx = store.run_event_context(run).unwrap().expect("the run exists");
+    let ctx = store
+        .run_event_context(run)
+        .unwrap()
+        .expect("the run exists");
     let full = store.get_run(run).unwrap().expect("the run exists");
     assert_eq!(ctx.external_id, full.external_id, "external id");
     assert_eq!(ctx.name, full.name, "name");
@@ -3344,7 +3460,9 @@ fn report_run_context_projection_cost() {
                 })
                 .unwrap();
             for t in 0..20 {
-                store.create_task_run(id, &format!("t{t}"), "k", &format!("d{t}"), 0).unwrap();
+                store
+                    .create_task_run(id, &format!("t{t}"), "k", &format!("d{t}"), 0)
+                    .unwrap();
             }
             id
         })
@@ -3359,7 +3477,11 @@ fn report_run_context_projection_cost() {
 
     let t = Instant::now();
     for i in 0..n {
-        std::hint::black_box(store.run_event_context(ids[(i as usize) % ids.len()]).unwrap());
+        std::hint::black_box(
+            store
+                .run_event_context(ids[(i as usize) % ids.len()])
+                .unwrap(),
+        );
     }
     let light = t.elapsed().as_secs_f64() / n as f64 * 1e6;
 
@@ -3379,7 +3501,13 @@ fn report_run_context_projection_cost() {
 // see, so the plan is what it asserts.
 
 /// A run of `schedule_id` in the given state.
-fn scheduled_run_in(store: &Store, flow_id: i64, name: &str, schedule_id: i64, state: Option<StateType>) -> i64 {
+fn scheduled_run_in(
+    store: &Store,
+    flow_id: i64,
+    name: &str,
+    schedule_id: i64,
+    state: Option<StateType>,
+) -> i64 {
     let (id, _) = store
         .create_run_full(CreateRun {
             flow_id,
@@ -3635,7 +3763,7 @@ fn the_run_parent_index_is_added_to_an_older_database() {
             "DROP INDEX run_parent_run_id; DROP INDEX run_schedule_id; \
              DROP INDEX run_state_scheduled; PRAGMA user_version = 19;",
         )
-            .unwrap();
+        .unwrap();
     }
     let store = open(&dir);
     assert_eq!(
@@ -3766,10 +3894,15 @@ fn a_schedules_active_runs_are_unchanged_by_the_index() {
     // Created but never used below: a run with no transition has a NULL state,
     // which the scheduled filter excludes. Kept so the fixture stays realistic.
     let _queued = scheduled_run_in(&store, f, "queued", s, None);
-    let crashed_alone =
-        scheduled_run_in(&store, f, "crashed-alone", s, Some(StateType::Crashed));
+    let crashed_alone = scheduled_run_in(&store, f, "crashed-alone", s, Some(StateType::Crashed));
     let other_sched = schedule(&store, f, "other");
-    let elsewhere = scheduled_run_in(&store, f, "elsewhere", other_sched, Some(StateType::Running));
+    let elsewhere = scheduled_run_in(
+        &store,
+        f,
+        "elsewhere",
+        other_sched,
+        Some(StateType::Running),
+    );
 
     let got: Vec<i64> = store
         .active_runs_of_schedule(s)
@@ -3932,7 +4065,9 @@ fn the_marks_match_the_runs_they_replace() {
                 StateType::Scheduled,
                 Some("skipped"),
                 None,
-                [("skip".to_string(), serde_json::Value::String("user".into()))].into_iter().collect(),
+                [("skip".to_string(), serde_json::Value::String("user".into()))]
+                    .into_iter()
+                    .collect(),
             ),
             true,
         )
@@ -3940,7 +4075,11 @@ fn the_marks_match_the_runs_they_replace() {
 
     let marks = store.future_run_marks(s, 0).unwrap();
     let runs = store.future_runs_of_schedule(s, 0).unwrap();
-    assert_eq!(marks.len(), runs.len(), "the two readers disagree on the count");
+    assert_eq!(
+        marks.len(),
+        runs.len(),
+        "the two readers disagree on the count"
+    );
 
     for run in &runs {
         let mark = marks
@@ -3955,7 +4094,10 @@ fn the_marks_match_the_runs_they_replace() {
     }
     // The skip mark is actually present, so the comparison above is not vacuous.
     assert_eq!(
-        marks.iter().filter(|m| m.details.get("skip").is_some()).count(),
+        marks
+            .iter()
+            .filter(|m| m.details.get("skip").is_some())
+            .count(),
         1,
         "one run carries the skip mark"
     );
@@ -3971,7 +4113,9 @@ fn the_marks_keep_the_reader_order_and_filters() {
 
     // A run in another state, and a run of another schedule.
     let running = run_of(&store, f, "running").0;
-    store.transition_run(running, State::new(StateType::Running), true).unwrap();
+    store
+        .transition_run(running, State::new(StateType::Running), true)
+        .unwrap();
     let other_s = schedule(&store, f, "other");
     schedule_with_future(&store, f, other_s, 2);
 
@@ -3989,7 +4133,10 @@ fn the_marks_keep_the_reader_order_and_filters() {
     assert_eq!(times, sorted, "ordered by scheduled time");
 
     // Only this schedule's Scheduled runs.
-    assert!(!marks.iter().any(|m| m.id == running), "a running run is excluded");
+    assert!(
+        !marks.iter().any(|m| m.id == running),
+        "a running run is excluded"
+    );
     assert!(
         marks.iter().all(|m| ids.contains(&m.id)),
         "another schedule's runs are excluded"
@@ -3999,12 +4146,17 @@ fn the_marks_keep_the_reader_order_and_filters() {
     let cutoff = 13_000;
     let later = store.future_run_marks(s, cutoff).unwrap();
     assert!(
-        later.iter().all(|m| m.scheduled_time.is_some_and(|t| t > cutoff)),
+        later
+            .iter()
+            .all(|m| m.scheduled_time.is_some_and(|t| t > cutoff)),
         "everything returned is after the cutoff"
     );
     assert_eq!(
         later.len(),
-        marks.iter().filter(|m| m.scheduled_time.is_some_and(|t| t > cutoff)).count(),
+        marks
+            .iter()
+            .filter(|m| m.scheduled_time.is_some_and(|t| t > cutoff))
+            .count(),
         "the cutoff selects the same rows the whole reader would"
     );
 }
@@ -4132,7 +4284,11 @@ fn the_labels_match_the_flows_they_came_from() {
 
     let labels = store.flow_labels().unwrap();
     let flows = store.list_flows(None).unwrap();
-    assert_eq!(labels.len(), flows.len(), "the two readers disagree on the count");
+    assert_eq!(
+        labels.len(),
+        flows.len(),
+        "the two readers disagree on the count"
+    );
 
     for f in &flows {
         let label = labels
@@ -4270,7 +4426,11 @@ fn the_queue_runs_match_the_whole_runs_they_replace() {
     let ids = [plain, scheduled, backfilled];
     let rows = store.queue_runs(&ids).unwrap();
     let whole = store.get_runs(&ids).unwrap();
-    assert_eq!(rows.len(), whole.len(), "the two readers disagree on the count");
+    assert_eq!(
+        rows.len(),
+        whole.len(),
+        "the two readers disagree on the count"
+    );
 
     for r in &whole {
         let row = rows
@@ -4387,7 +4547,10 @@ fn the_queue_readers_keep_their_filters_and_order() {
     // has always been; `past` at 100 is below the window.
     let rows = store.scheduled_queue_runs(500, 5_000, 50).unwrap();
     let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
-    assert_eq!(ids, due, "only scheduled runs inside the window, in time order");
+    assert_eq!(
+        ids, due,
+        "only scheduled runs inside the window, in time order"
+    );
     // The whole reader agrees, row for row and in the same order.
     let whole: Vec<i64> = store
         .scheduled_between(500, 5_000, 50)
@@ -4409,7 +4572,11 @@ fn the_queue_readers_keep_their_filters_and_order() {
     // The limit is honoured, and the bounds are half-open at the bottom.
     assert_eq!(store.scheduled_queue_runs(0, 9_999, 2).unwrap().len(), 2);
     assert!(
-        store.scheduled_queue_runs(1_000, 5_000, 50).unwrap().iter().all(|r| r.scheduled_time != Some(1_000)),
+        store
+            .scheduled_queue_runs(1_000, 5_000, 50)
+            .unwrap()
+            .iter()
+            .all(|r| r.scheduled_time != Some(1_000)),
         "a run at exactly the lower bound is excluded, as before"
     );
 }
@@ -4428,7 +4595,10 @@ fn the_queue_readers_skip_what_does_not_exist() {
         "an empty list reads nothing"
     );
     assert!(
-        store.scheduled_queue_runs(0, i64::MAX, 50).unwrap().is_empty(),
+        store
+            .scheduled_queue_runs(0, i64::MAX, 50)
+            .unwrap()
+            .is_empty(),
         "no scheduled runs yields nothing"
     );
 }
@@ -4453,7 +4623,8 @@ fn report_queue_run_projection_cost() {
             .create_run_full(CreateRun {
                 flow_id: f,
                 name: format!("queued-{i}"),
-                parameters: r#"{"day":"2026-09-30","region":"eu","nested":{"a":1,"b":[1,2,3]}}"#.to_string(),
+                parameters: r#"{"day":"2026-09-30","region":"eu","nested":{"a":1,"b":[1,2,3]}}"#
+                    .to_string(),
                 tags: r#"["prod","eu"]"#.into(),
                 created_by: "schedule".into(),
                 initial_state: Some(State::new(StateType::Scheduled)),
@@ -4549,7 +4720,11 @@ fn the_run_parameters_match_the_whole_run() {
     let acme = store.run_parameters(ids[0]).unwrap().unwrap();
     assert_eq!(acme["tenant"], serde_json::json!("acme"));
     let nested = store.run_parameters(ids[1]).unwrap().unwrap();
-    assert_eq!(nested["nested"]["b"][2], serde_json::json!(3), "nesting survives");
+    assert_eq!(
+        nested["nested"]["b"][2],
+        serde_json::json!(3),
+        "nesting survives"
+    );
     assert_eq!(nested["nested"]["b"].as_array().unwrap().len(), 3);
 }
 
@@ -4689,7 +4864,9 @@ fn the_newest_backfill_run_is_the_last_one_created() {
             })
             .unwrap();
         // A run may not be created in a running state, so move it there.
-        store.transition_run(id, State::new(StateType::Running), true).unwrap();
+        store
+            .transition_run(id, State::new(StateType::Running), true)
+            .unwrap();
         ids.push(id);
     }
 
@@ -4702,7 +4879,16 @@ fn the_newest_backfill_run_is_the_last_one_created() {
     // Change the newest run and the answer follows. A sub-state name is carried
     // through, which is what a skipped or replayed run looks like.
     store
-        .transition_run(ids[2], State::from_parts(StateType::Completed, Some("Cached"), None, Default::default()), true)
+        .transition_run(
+            ids[2],
+            State::from_parts(
+                StateType::Completed,
+                Some("Cached"),
+                None,
+                Default::default(),
+            ),
+            true,
+        )
         .unwrap();
     assert_eq!(
         store.newest_backfill_run_state(b).unwrap(),
@@ -4712,7 +4898,10 @@ fn the_newest_backfill_run_is_the_last_one_created() {
 
     // A backfill with no runs has no newest run.
     assert!(
-        store.newest_backfill_run_state(b + 1_000).unwrap().is_none(),
+        store
+            .newest_backfill_run_state(b + 1_000)
+            .unwrap()
+            .is_none(),
         "a backfill with no runs has no newest run"
     );
 }
@@ -4736,9 +4925,11 @@ fn an_unstarted_run_reports_scheduled() {
         .unwrap();
     let raw: Option<String> = store
         .with_reader(|c| {
-            Ok(c.query_row("SELECT state_name FROM run WHERE id = ?1", [id], |r| {
-                r.get(0)
-            })?)
+            Ok(
+                c.query_row("SELECT state_name FROM run WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })?,
+            )
         })
         .unwrap();
     assert!(raw.is_none(), "the fixture really has no state name");
@@ -4782,7 +4973,11 @@ fn the_flow_names_match_the_whole_runs() {
 
     let names = store.flow_names(&ids);
     let whole = store.get_runs(&ids).unwrap();
-    assert_eq!(names.len(), whole.len(), "the two readers disagree on the count");
+    assert_eq!(
+        names.len(),
+        whole.len(),
+        "the two readers disagree on the count"
+    );
     for r in &whole {
         assert_eq!(
             names.get(&r.id).map(|s| s.as_str()),
@@ -4845,7 +5040,9 @@ fn the_whole_run_reader_still_returns_everything() {
         })
         .unwrap();
     for t in 0..3 {
-        store.create_task_run(id, &format!("t{t}"), "k", &format!("d{t}"), 0).unwrap();
+        store
+            .create_task_run(id, &format!("t{t}"), "k", &format!("d{t}"), 0)
+            .unwrap();
     }
     let r = store.get_run(id).unwrap().expect("the run");
     assert_eq!(r.parameters["day"], serde_json::json!("2026-09-30"));
@@ -4895,7 +5092,11 @@ fn the_timeline_rows_match_the_whole_runs() {
     let ids = [scheduled, queued];
     let rows = store.timeline_run_rows(&ids).unwrap();
     let whole = store.get_runs(&ids).unwrap();
-    assert_eq!(rows.len(), whole.len(), "the two readers disagree on the count");
+    assert_eq!(
+        rows.len(),
+        whole.len(),
+        "the two readers disagree on the count"
+    );
 
     for r in &whole {
         let row = rows
@@ -4962,7 +5163,10 @@ fn the_scheduled_timeline_rows_keep_their_window_and_order() {
         ids, due,
         "runs from `after` (exclusive) to `until` (inclusive), in time order"
     );
-    assert!(!ids.contains(&before), "a run before the window is excluded");
+    assert!(
+        !ids.contains(&before),
+        "a run before the window is excluded"
+    );
     assert!(
         !ids.contains(&on_the_lower_edge),
         "`after` is exclusive, so a run due exactly at it is excluded"
@@ -4985,7 +5189,13 @@ fn the_scheduled_timeline_rows_keep_their_window_and_order() {
     sorted.sort_unstable();
     assert_eq!(times, sorted, "ordered by scheduled time");
 
-    assert_eq!(store.scheduled_timeline_run_rows(0, 9_999, 2).unwrap().len(), 2);
+    assert_eq!(
+        store
+            .scheduled_timeline_run_rows(0, 9_999, 2)
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -4996,7 +5206,10 @@ fn the_timeline_readers_skip_what_they_are_not_given() {
     let one = run_of(&store, f, "real").0;
     assert_eq!(store.timeline_run_rows(&[one, 999_999]).unwrap().len(), 1);
     assert!(store.timeline_run_rows(&[]).unwrap().is_empty());
-    assert!(store.scheduled_timeline_run_rows(0, i64::MAX, 50).unwrap().is_empty());
+    assert!(store
+        .scheduled_timeline_run_rows(0, i64::MAX, 50)
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
@@ -5011,16 +5224,21 @@ fn the_flow_options_reader_returns_only_the_asked_for_flows() {
     assert_eq!(got.len(), 2, "only the two that exist");
     assert!(!got.contains_key(&c), "an unasked flow is not read");
     // The options are the flow's own.
-    assert_eq!(got[&a], store.get_flow(a).unwrap().expect("the flow").options);
-    assert_eq!(got[&b], store.get_flow(b).unwrap().expect("the flow").options);
+    assert_eq!(
+        got[&a],
+        store.get_flow(a).unwrap().expect("the flow").options
+    );
+    assert_eq!(
+        got[&b],
+        store.get_flow(b).unwrap().expect("the flow").options
+    );
     // And the remote-eligibility rule still applies to them.
     use cereyan_core::FlowOptions;
     for (id, options) in &got {
         let by_reader = FlowOptions::from_map(options).may_run_remotely();
-        let by_whole = FlowOptions::from_map(
-            &store.get_flow(*id).unwrap().expect("the flow").options,
-        )
-        .may_run_remotely();
+        let by_whole =
+            FlowOptions::from_map(&store.get_flow(*id).unwrap().expect("the flow").options)
+                .may_run_remotely();
         assert_eq!(by_reader, by_whole, "the rule agrees for flow {id}");
     }
 
@@ -5055,7 +5273,6 @@ fn report_timeline_reads() {
                 parameter_schema: r#"{"type":"object","properties":{"day":{"type":"string"},"region":{"type":"string"},"nested":{"type":"object"}}}"#.into(),
                 options: r#"{"retries":5,"remote":"auto"}"#.into(),
                 group: None,
-                ..Default::default()
             })
             .unwrap();
     }
@@ -5108,7 +5325,11 @@ fn report_timeline_reads() {
     let t = std::time::Instant::now();
     for _ in 0..iters {
         let mut c = store.timeline_run_rows(&ids).unwrap();
-        c.extend(store.scheduled_timeline_run_rows(now, horizon, 100).unwrap());
+        c.extend(
+            store
+                .scheduled_timeline_run_rows(now, horizon, 100)
+                .unwrap(),
+        );
         std::hint::black_box(c.len());
     }
     let narrow = ms(t, iters);
@@ -5127,12 +5348,7 @@ fn report_timeline_reads() {
     let narrow_queued = ms(t, iters);
     let t = std::time::Instant::now();
     for _ in 0..iters {
-        std::hint::black_box(
-            store
-                .scheduled_between(now, horizon, 100)
-                .unwrap()
-                .len(),
-        );
+        std::hint::black_box(store.scheduled_between(now, horizon, 100).unwrap().len());
     }
     let whole_scheduled = ms(t, iters);
     let t = std::time::Instant::now();
@@ -5247,9 +5463,7 @@ fn sqlite_master_index_count(db: &std::path::Path, name: &str) -> i64 {
 
 fn plan_on_a_fresh_connection(db: &std::path::Path, sql: &str) -> Vec<String> {
     let conn = rusqlite::Connection::open(db).unwrap();
-    let mut st = conn
-        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-        .unwrap();
+    let mut st = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
     st.query_map([], |r| r.get::<_, String>(3))
         .unwrap()
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -5413,14 +5627,30 @@ fn the_window_index_changes_no_result() {
             .scheduled_timeline_run_rows(after, until, 50)
             .unwrap()
             .iter()
-            .map(|r| (r.id, r.flow_name.clone(), r.flow_id, r.scheduled_time, r.created_at))
+            .map(|r| {
+                (
+                    r.id,
+                    r.flow_name.clone(),
+                    r.flow_id,
+                    r.scheduled_time,
+                    r.created_at,
+                )
+            })
             .collect::<Vec<_>>();
         let without = without_window_index(&dir, || {
             store
                 .scheduled_timeline_run_rows(after, until, 50)
                 .unwrap()
                 .iter()
-                .map(|r| (r.id, r.flow_name.clone(), r.flow_id, r.scheduled_time, r.created_at))
+                .map(|r| {
+                    (
+                        r.id,
+                        r.flow_name.clone(),
+                        r.flow_id,
+                        r.scheduled_time,
+                        r.created_at,
+                    )
+                })
                 .collect::<Vec<_>>()
         });
         assert_eq!(
@@ -5445,8 +5675,14 @@ fn the_window_index_changes_no_result() {
             .map(|r| r.id)
             .collect::<Vec<_>>()
     });
-    assert!(ids_with.contains(&manual), "a manually queued run is offered");
-    assert!(ids_without.contains(&manual), "and stays offered without the index");
+    assert!(
+        ids_with.contains(&manual),
+        "a manually queued run is offered"
+    );
+    assert!(
+        ids_without.contains(&manual),
+        "and stays offered without the index"
+    );
     assert_eq!(ids_with, ids_without, "and the two agree");
 
     // The whole reader, and the queue projection, agree with each other either way.
@@ -5464,7 +5700,10 @@ fn the_window_index_changes_no_result() {
             .map(|r| r.id)
             .collect::<Vec<_>>()
     });
-    assert_eq!(wide_with, wide_without, "scheduled_between agrees either way");
+    assert_eq!(
+        wide_with, wide_without,
+        "scheduled_between agrees either way"
+    );
 
     let queue_with: Vec<i64> = store
         .scheduled_queue_runs(500, 5_000, 50)
@@ -5480,8 +5719,14 @@ fn the_window_index_changes_no_result() {
             .map(|r| r.id)
             .collect::<Vec<_>>()
     });
-    assert_eq!(queue_with, queue_without, "scheduled_queue_runs agrees either way");
-    assert_eq!(wide_with, queue_with, "and the two readers agree with each other");
+    assert_eq!(
+        queue_with, queue_without,
+        "scheduled_queue_runs agrees either way"
+    );
+    assert_eq!(
+        wide_with, queue_with,
+        "and the two readers agree with each other"
+    );
 }
 
 /// The index is on `run`, the fastest-growing table, so adding a fourth
@@ -5510,7 +5755,8 @@ fn the_window_index_displaces_no_other_plan() {
         let with = plan_of(&store, sql);
         let without = without_window_index(&dir, || plan_of(&store, sql));
         assert_eq!(
-            with, without,
+            with,
+            without,
             "`{what}` changed plan: {} -> {}",
             with.join(" | "),
             without.join(" | ")
@@ -5551,7 +5797,6 @@ fn report_scheduled_window() {
                     parameter_schema: "{}".into(),
                     options: "{}".into(),
                     group: None,
-                    ..Default::default()
                 })
                 .unwrap();
         }
@@ -5649,7 +5894,10 @@ fn report_scheduled_window() {
         let without = without_window_index(&dir, || time_window(&db, after, until, 300));
         let with = time_window(&db, after, until, 300);
         let due = rows_due(&db, after, until);
-        assert!(due > 0, "the window must return something, or the timing is hollow");
+        assert!(
+            due > 0,
+            "the window must return something, or the timing is hollow"
+        );
         println!(
             "{:>9} {:>10.1}us {:>10.1}us {:>7.0}x {:>10}",
             n,
@@ -5847,7 +6095,10 @@ fn the_median_duration_of_several_flows_is_the_middle_of_their_sample() {
     assert!(store.median_run_duration_many(&[]).unwrap().is_empty());
     // A flow with no run at all has no median, rather than a median of zero.
     assert!(
-        store.median_run_duration_many(&[999_999]).unwrap().is_empty(),
+        store
+            .median_run_duration_many(&[999_999])
+            .unwrap()
+            .is_empty(),
         "a flow with no runs has no median, not a median of zero"
     );
 }
@@ -5883,7 +6134,11 @@ fn a_newest_completed_run_without_an_end_time_is_not_replaced_by_an_older_one() 
         // Three completed runs, oldest first by id. Only the **newest** lacks an end
         // time, so the two readings disagree: the fall-through one answers with the
         // middle run's end time.
-        for (k, end) in [(1_000i64, Some(5_000i64)), (2_000, Some(6_000)), (3_000, None)] {
+        for (k, end) in [
+            (1_000i64, Some(5_000i64)),
+            (2_000, Some(6_000)),
+            (3_000, None),
+        ] {
             stmt.execute(rusqlite::params![
                 cereyan_core::new_id().as_bytes().as_slice(),
                 f,
@@ -5961,8 +6216,7 @@ fn a_long_history_does_not_truncate_the_sample() {
         })
         .unwrap();
     assert_eq!(
-        many[&ids[0]][0].0,
-        highest.items[0].id,
+        many[&ids[0]][0].0, highest.items[0].id,
         "the first row is the newest run, not the oldest"
     );
 }
@@ -5977,7 +6231,6 @@ fn report_per_flow_window() {
     if std::env::var("CEREYAN_BENCH_REPORT").is_err() {
         return;
     }
-    const MEDIAN_SAMPLE: usize = 101;
 
     /// The batched form these readers replaced, verbatim, so the comparison is the
     /// real query and not a model of it.
@@ -6024,9 +6277,22 @@ fn report_per_flow_window() {
 
     println!(
         "{:>6} {:>10} | {:>11} {:>11} {:>7} | {:>11} {:>11} {:>7}",
-        "flows", "runs/flow", "recent old", "recent new", "ratio", "completed old", "completed new", "ratio"
+        "flows",
+        "runs/flow",
+        "recent old",
+        "recent new",
+        "ratio",
+        "completed old",
+        "completed new",
+        "ratio"
     );
-    for (flows, per_flow) in [(10i64, 100i64), (10, 1_000), (10, 10_000), (50, 2_000), (200, 500)] {
+    for (flows, per_flow) in [
+        (10i64, 100i64),
+        (10, 1_000),
+        (10, 10_000),
+        (50, 2_000),
+        (200, 500),
+    ] {
         let dir = TempDir::new().unwrap();
         let (store, ids) = flows_with_history(&dir, flows, per_flow);
         let conn = rusqlite::Connection::open(store.home().join("db.sqlite")).unwrap();
@@ -6106,7 +6372,6 @@ fn report_per_flow_window() {
     );
 }
 
-
 /// Opt-in: what `checkpoints()` costs on a crash chain, and how much of it is the
 /// chain walk against the checkpoint read.
 ///
@@ -6120,7 +6385,8 @@ fn report_checkpoints() {
     let store = open(&dir);
     let f = flow(&store, "p", "etl");
     let conn = rusqlite::Connection::open(store.home().join("db.sqlite")).unwrap();
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = OFF;").unwrap();
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = OFF;")
+        .unwrap();
 
     println!(
         "{:>6} {:>7} {:>8} {:>10} {:>10} {:>10} {:>8}",
@@ -6136,7 +6402,13 @@ fn report_checkpoints() {
     ] {
         // A fresh chain each time, so one measurement is not polluted by the last.
         let base = store
-            .with_reader(|c| Ok(c.query_row("SELECT COALESCE(MAX(id), 0) FROM run", [], |r| r.get::<_, i64>(0))?))
+            .with_reader(|c| {
+                Ok(
+                    c.query_row("SELECT COALESCE(MAX(id), 0) FROM run", [], |r| {
+                        r.get::<_, i64>(0)
+                    })?,
+                )
+            })
             .unwrap();
         let ids: Vec<i64> = {
             let tx = conn.unchecked_transaction().unwrap();
@@ -6163,7 +6435,11 @@ fn report_checkpoints() {
                         cereyan_core::new_id().as_bytes().as_slice(),
                         f,
                         format!("chain{r}"),
-                        if prev.is_none() { "api".to_string() } else { "crash:x".to_string() },
+                        if prev.is_none() {
+                            "api".to_string()
+                        } else {
+                            "crash:x".to_string()
+                        },
                         prev,
                         id,
                     ])
@@ -6203,11 +6479,17 @@ fn report_checkpoints() {
         let ms = t.elapsed().as_secs_f64() / iters as f64 * 1e3;
         println!(
             "{:>6} {:>7} {:>8} {:>10} {:>10} {:>8.3}ms {:>7.1}us",
-            chain, tasks, passes, scanned, out.len(), ms,
+            chain,
+            tasks,
+            passes,
+            scanned,
+            out.len(),
+            ms,
             ms * 1000.0 / scanned as f64
         );
     }
-    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+        .unwrap();
     println!(
         "\nthe per-row column is the question: if it is flat, the cost is the scan,\n\
          which is what finding the latest checkpoint per key requires, and there is\n\
@@ -6224,10 +6506,18 @@ fn latest_run_with_param_many_finds_each_flows_newest_run() {
     let sales = flow(&store, "p", "sales");
     let inventory = flow(&store, "p", "inventory");
     let empty = flow(&store, "p", "empty");
-    store.create_run(sales, "s1", r#"{"day":"2026-09-06"}"#, "[]").unwrap();
-    let (s2, _) = store.create_run(sales, "s2", r#"{"day":"2026-09-06"}"#, "[]").unwrap();
-    store.create_run(sales, "s3", r#"{"day":"2026-09-07"}"#, "[]").unwrap();
-    let (i1, _) = store.create_run(inventory, "i1", r#"{"day":"2026-09-06"}"#, "[]").unwrap();
+    store
+        .create_run(sales, "s1", r#"{"day":"2026-09-06"}"#, "[]")
+        .unwrap();
+    let (s2, _) = store
+        .create_run(sales, "s2", r#"{"day":"2026-09-06"}"#, "[]")
+        .unwrap();
+    store
+        .create_run(sales, "s3", r#"{"day":"2026-09-07"}"#, "[]")
+        .unwrap();
+    let (i1, _) = store
+        .create_run(inventory, "i1", r#"{"day":"2026-09-06"}"#, "[]")
+        .unwrap();
     let latest = store
         .latest_run_with_param_many(&[sales, inventory, empty], "day", "2026-09-06")
         .unwrap();
