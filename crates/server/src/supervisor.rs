@@ -1459,7 +1459,7 @@ impl Supervisor {
             .values()
             .filter(|e| {
                 matches!(e.location, Location::Worker(w)
-                    if inner.workers.get(&w).is_some_and(&eligible_for))
+                    if inner.workers.get(&w).is_some_and(eligible_for))
                     && e.key.same_code(key)
                     && !e.exit_requested
                     && e.current_run.is_none()
