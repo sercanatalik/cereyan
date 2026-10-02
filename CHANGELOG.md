@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.1.3 (2026-10-02)
+
+- **Fix: an idle processor could sleep for up to 30 seconds with a run waiting for it.** An engine registered for its wake-up only after finding no work, so a run that became ready in between, because another run finished or a resource was released, waited until the engine's poll timed out. The same fix applies to a task waiting to acquire a resource.
+
 ## 3.1.2 (2026-10-02)
 
 - **3.1.0 and 3.1.1 were tagged but never published.** Their CI runs failed: first on lint and a test that only builds on Unix, then on a newer clippy lint, a worker that stalled on a reverse DNS lookup on macOS, and the race below. 3.1.2 is the 3.1 release with those fixed. The notes below describe 3.1.
