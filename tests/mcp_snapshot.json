@@ -978,6 +978,62 @@
     {
       "annotations": {
         "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Runs that are Paused waiting for input or a message, with their prompt, topic, and the flow they belong to. Read-only.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "flow": {
+            "description": "Flow name, or project/flow when the name exists in several projects",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "project": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_waiting_runs"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Send a message to a Paused run on a topic. Resumes the run immediately if it is waiting for this topic, or queues the message for the next receive() call.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "payload": {
+            "description": "The message payload, any JSON"
+          },
+          "run_id": {
+            "type": "integer"
+          },
+          "topic": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "topic",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "name": "send_message"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
         "readOnlyHint": false
       },
       "description": "Create one run per value of a date or datetime parameter between start and end. Defaults to a dry run that only reports how many runs would be created; pass dry_run false to create them. Can create thousands of runs.",

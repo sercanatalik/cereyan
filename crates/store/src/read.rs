@@ -2073,8 +2073,12 @@ impl Store {
             // Keep only the latest run per flow (rows are ordered by id DESC).
             let mut out: HashMap<i64, Option<LatestRunMark>> =
                 flow_ids.iter().map(|id| (*id, None)).collect();
+            // Every flow starts at `None`, so the first row seen for a flow, its
+            // newest, fills the slot; `entry().or_insert` never would.
             for (flow_id, mark) in rows {
-                out.entry(flow_id).or_insert(Some(mark));
+                if let Some(slot @ None) = out.get_mut(&flow_id) {
+                    *slot = Some(mark);
+                }
             }
             Ok(out)
         })

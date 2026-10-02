@@ -97,20 +97,18 @@ pub fn saturation(state: &AppState) -> (bool, Vec<String>, Option<String>) {
     };
     let mut capped: Vec<(String, i64)> = Vec::new();
     let mut short: Vec<String> = Vec::new();
-    // The uncapped flows are the ones that need measuring — and a flow that
-    // declares no cap is the default, so this is usually all of them. Measure
-    // them all in one read and take their schedules in one pass, rather than a
-    // query and a schedule scan per flow.
-    let uncapped: Vec<cereyan_core::Flow> = flows
-        .iter()
-        .filter(|f| state.is_live(f.id))
-        .filter(|f| {
-            FlowOptions::from_map(&f.options)
-                .max_concurrent
-                .is_none_or(|c| c <= 0)
-        })
-        .cloned()
-        .collect();
+    let mut uncapped: Vec<cereyan_core::Flow> = Vec::new();
+    // Capped flows count towards the caps' total; the rest are the ones that
+    // need measuring. A zero cap is not a cap.
+    for f in flows.iter().filter(|f| state.is_live(f.id)) {
+        match FlowOptions::from_map(&f.options).max_concurrent {
+            Some(c) if c > 0 => capped.push((f.name.clone(), c)),
+            _ => uncapped.push(f.clone()),
+        }
+    }
+    // A flow that declares no cap is the default, so this is usually all of
+    // them. Measure them all in one read and take their schedules in one pass,
+    // rather than a query and a schedule scan per flow.
     let medians = state
         .store
         .median_run_duration_many(&uncapped.iter().map(|f| f.id).collect::<Vec<_>>())
@@ -119,14 +117,6 @@ pub fn saturation(state: &AppState) -> (bool, Vec<String>, Option<String>) {
         .scheduler
         .for_flows(&uncapped.iter().map(|f| f.id).collect::<Vec<_>>());
     for f in &uncapped {
-        let o = FlowOptions::from_map(&f.options);
-        if let Some(c) = o.max_concurrent {
-            // A zero cap is not a cap, so a flow only lands here with a real one.
-            if c > 0 {
-                capped.push((f.name.clone(), c));
-            }
-            continue;
-        }
         // Uncapped flow whose schedule is shorter than its median duration.
         // A missing median means either no timed runs or a store error, both of
         // which the old per-flow read turned into 0 and so skipped the check.

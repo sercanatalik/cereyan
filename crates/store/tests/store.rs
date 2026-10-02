@@ -6214,3 +6214,24 @@ fn report_checkpoints() {
          nothing to win without changing the question."
     );
 }
+
+/// Each flow's newest run with the parameter value is found, and a flow with
+/// none reads as `None`: the fan-in check depends on both.
+#[test]
+fn latest_run_with_param_many_finds_each_flows_newest_run() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+    let sales = flow(&store, "p", "sales");
+    let inventory = flow(&store, "p", "inventory");
+    let empty = flow(&store, "p", "empty");
+    store.create_run(sales, "s1", r#"{"day":"2026-09-06"}"#, "[]").unwrap();
+    let (s2, _) = store.create_run(sales, "s2", r#"{"day":"2026-09-06"}"#, "[]").unwrap();
+    store.create_run(sales, "s3", r#"{"day":"2026-09-07"}"#, "[]").unwrap();
+    let (i1, _) = store.create_run(inventory, "i1", r#"{"day":"2026-09-06"}"#, "[]").unwrap();
+    let latest = store
+        .latest_run_with_param_many(&[sales, inventory, empty], "day", "2026-09-06")
+        .unwrap();
+    assert_eq!(latest[&sales].as_ref().map(|m| m.id), Some(s2));
+    assert_eq!(latest[&inventory].as_ref().map(|m| m.id), Some(i1));
+    assert!(latest[&empty].is_none());
+}
