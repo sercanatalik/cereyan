@@ -732,7 +732,18 @@ pub fn continuous_key(schedule_id: i64) -> String {
 /// the wait holds no processor. Called on activation, at start, on resume, and
 /// when a run of the schedule reaches a final state; seeding twice leaves one
 /// run, because the store refuses a second holder of the schedule's key.
+/// Held across `seed_continuous` and `join_now`. Each reads the waiting run,
+/// arms it and updates the cached row; interleaved, a seed that created the
+/// run before a join moved it to now re-arms it for its old time afterwards,
+/// and the joined run waits out the full delay.
+static CONTINUOUS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn continuous_lock() -> std::sync::MutexGuard<'static, ()> {
+    CONTINUOUS_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn seed_continuous(state: &Arc<AppState>, row: &ScheduleRow, flow: &Flow, delay: f64) {
+    let _loop = continuous_lock();
     let now = now_micros();
     let active = state
         .store
@@ -786,6 +797,7 @@ fn seed_continuous(state: &Arc<AppState>, row: &ScheduleRow, flow: &Flow, delay:
 /// once. `Err` when the schedule is not continuous, is paused, or has no run
 /// waiting (it is already in line or running).
 pub fn join_now(state: &Arc<AppState>, schedule_id: i64) -> Result<i64, String> {
+    let _loop = continuous_lock();
     let row = state
         .scheduler
         .get(schedule_id)

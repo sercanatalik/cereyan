@@ -113,29 +113,37 @@ pub(crate) fn decorate(state: &AppState, mut row: ScheduleRow) -> ScheduleRow {
         row.next_fire = cached.next_fire;
     }
     if row.schedule.is_continuous() {
-        row.loop_state = Some(loop_state(state, &row).into());
+        let (loop_state, waiting) = loop_state(state, &row);
+        row.loop_state = Some(loop_state.into());
+        // The waiting run is the truth for when the loop goes next. The cache
+        // is updated only after that run is created, so a read in between
+        // would report a waiting loop with no next fire.
+        if let Some(fire) = waiting.and_then(|r| r.scheduled_time) {
+            row.next_fire = Some(fire + crate::scheduler::jitter_offset(row.id, fire, row.jitter));
+        }
     }
     row
 }
 
-/// Where a continuous schedule's loop is: its one unfinished run decides.
-fn loop_state(state: &AppState, row: &ScheduleRow) -> &'static str {
+/// Where a continuous schedule's loop is: its one unfinished run decides. The
+/// run is returned when it is the one waiting out the delay.
+fn loop_state(state: &AppState, row: &ScheduleRow) -> (&'static str, Option<cereyan_core::Run>) {
     if !row.active {
-        return "paused";
+        return ("paused", None);
     }
-    let active = state
+    let mut active = state
         .store
         .active_runs_of_schedule(row.id)
         .unwrap_or_default();
-    let Some(run) = active.last() else {
-        return "waiting";
+    let Some(run) = active.pop() else {
+        return ("waiting", None);
     };
     if run.state.state_type != cereyan_core::StateType::Scheduled || run.engine_pid.is_some() {
-        "running"
+        ("running", None)
     } else if state.supervisor.queued(run.id) {
-        "in_line"
+        ("in_line", None)
     } else {
-        "waiting"
+        ("waiting", Some(run))
     }
 }
 
