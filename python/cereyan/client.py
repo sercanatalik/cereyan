@@ -250,7 +250,7 @@ class Client:
     def send_message(self, run_id: int, topic: str, payload: Any) -> dict:
         """``POST /api/runs/{id}/messages/{topic}``: send a message to a run on ``topic``."""
         import json
-        return self._request("POST", f"/api/runs/{run_id}/messages/{topic}", body={"payload": json.loads(json.dumps(payload))})
+        return self._request("POST", f"/api/runs/{run_id}/messages/{urllib.parse.quote(topic, safe='')}", body={"payload": json.loads(json.dumps(payload))})
 
     def cancel(self, run_id: int) -> dict:
         """``POST /api/runs/{id}/cancel``: cancel a queued run at once or ask a running one to stop."""

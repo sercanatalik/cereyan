@@ -42,9 +42,13 @@ export function useWorkerStatus(url = "status.json") {
   return { data, error };
 }
 
-/** The worker's status as its own page reads it: not reaching the server comes first. */
+/**
+ * The worker's status as its own page reads it: not reaching the server comes
+ * first, then the states only the worker has, before it is registered.
+ */
 export function pageStatus(s: WorkerStatusPayload): WorkerStatus {
   if (!s.server_reachable) return "unreachable";
+  if (s.state === "registering" || s.state === "refused") return s.state;
   return workerStatus({ state: s.state, drift: s.drift });
 }
 

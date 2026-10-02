@@ -4,6 +4,7 @@ or through the reporter to a server (engine child)."""
 from __future__ import annotations
 
 import json
+from urllib.parse import quote, urlencode
 
 from .. import _core
 from ..exceptions import CereyanError
@@ -340,7 +341,7 @@ class ReporterBackend(Backend):
 
     def claim_message(self, topic: str, index: int = 0):
         status, text = self.client.get(
-            f"/api/runs/{self.run_id}/receive?topic={topic}&index={index}"
+            f"/api/runs/{self.run_id}/receive?{urlencode({'topic': topic, 'index': index})}"
         )
         if status >= 300 or not text:
             return None
@@ -353,7 +354,7 @@ class ReporterBackend(Backend):
         import json as _json
         body = _json.dumps({"payload": payload})
         status, text = self.client.post(
-            f"/api/runs/{self.run_id}/messages/{topic}", body
+            f"/api/runs/{self.run_id}/messages/{quote(topic, safe='')}", body
         )
         if status >= 300:
             raise CereyanError(f"send_message refused ({status}): {text}")

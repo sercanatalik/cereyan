@@ -178,10 +178,17 @@ class ServerResultStore(ResultStore):
         return f"/api/results/{key}"
 
     def _write_bytes(self, key: str, data: bytes) -> str:
+        import uuid
+
+        # The upload id keeps two uploads of one key apart; the offset makes a
+        # retried chunk land where it belongs instead of being appended again.
+        upload = uuid.uuid4().hex
         chunks = [data[i:i + CHUNK_BYTES] for i in range(0, len(data), CHUNK_BYTES)] or [b""]
         for n, chunk in enumerate(chunks):
             self.client._request_bytes(
-                "PUT", self.path(key), chunk, params={"part": n, "last": "true" if n == len(chunks) - 1 else "false"}
+                "PUT", self.path(key), chunk,
+                params={"part": n, "last": "true" if n == len(chunks) - 1 else "false",
+                        "upload": upload, "offset": n * CHUNK_BYTES},
             )
         return self.path(key)
 

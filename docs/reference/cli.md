@@ -77,7 +77,7 @@ cereyan worker [-h] [--host HOST] [--name NAME] [--processors PROCESSORS] [--lab
 | Option | Meaning |
 |---|---|
 | `--host` `HOST` | the server's URL, e.g. https://cereyan.internal (also [worker] host). |
-| `--name` `NAME` | how the server lists this worker (default: the hostname; also [worker] name). |
+| `--name` `NAME` | how the server lists this worker (default: the hostname; also [worker] name; "server" is taken). |
 | `--processors` `PROCESSORS` | engines this worker may run at once, at most its CPU count (default 1; also [worker] processors). |
 | `--labels` `LABELS` | k=v pairs shown on the Workers tab, e.g. gpu=true,zone=eu (also [worker] labels). |
 | `--shared-path` `PATH` | a path this machine shares with the server; a LocalTarget elsewhere is reported (repeat for more; also [worker] shared_paths). |

@@ -1071,7 +1071,8 @@ async fn call_tool(
                     json!({"id": r.id, "flow_id": r.flow_id, "state": r.state, "pending": pending})
                 })
                 .collect();
-            Ok(json!({"runs": runs, "total": page.items.len(), "next_cursor": page.next_cursor}))
+            // `count` is this page's length; `next_cursor` says whether more follow.
+            Ok(json!({"runs": runs, "count": page.items.len(), "next_cursor": page.next_cursor}))
         }
         "send_message" => {
             let id = arg_i64(args, "run_id")?;

@@ -124,6 +124,11 @@ pub struct DepGraphCache {
     /// costs one build rather than one per caller. Separate from `slot` so
     /// readers are never blocked by an in-flight build.
     building: std::sync::Mutex<()>,
+    /// Bumped by every invalidation. A build publishes its graph only if no
+    /// invalidation landed while it read the flows; otherwise the graph it
+    /// built predates the change and caching it would hide that change until
+    /// the next one.
+    generation: std::sync::atomic::AtomicU64,
 }
 
 impl DepGraphCache {
@@ -134,6 +139,14 @@ impl DepGraphCache {
     /// without building. Without the re-check a burst after an invalidation
     /// would run one store read per caller.
     pub fn get_or_build(&self, build: impl FnOnce() -> DepGraph) -> DepGraph {
+        self.try_get_or_build(|| Some(build()))
+    }
+
+    /// As `get_or_build`, for a build that can fail: a failed build returns an
+    /// empty graph to this caller and caches nothing, so the next lookup tries
+    /// again instead of every lookup seeing no dependents until a flow changes.
+    pub fn try_get_or_build(&self, build: impl FnOnce() -> Option<DepGraph>) -> DepGraph {
+        use std::sync::atomic::Ordering;
         if let Some(cached) = self.slot.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return cached.clone();
         }
@@ -141,14 +154,23 @@ impl DepGraphCache {
         if let Some(cached) = self.slot.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
             return cached.clone();
         }
-        let built = build();
-        *self.slot.write().unwrap_or_else(|e| e.into_inner()) = Some(built.clone());
+        let generation = self.generation.load(Ordering::SeqCst);
+        let Some(built) = build() else {
+            return DepGraph::default();
+        };
+        let mut slot = self.slot.write().unwrap_or_else(|e| e.into_inner());
+        if self.generation.load(Ordering::SeqCst) == generation {
+            *slot = Some(built.clone());
+        }
         built
     }
 
     /// Forget the graph; the next lookup rebuilds it.
     pub fn invalidate(&self) {
-        *self.slot.write().unwrap_or_else(|e| e.into_inner()) = None;
+        let mut slot = self.slot.write().unwrap_or_else(|e| e.into_inner());
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        *slot = None;
     }
 
     /// Is a graph currently held?
@@ -338,14 +360,14 @@ impl AppState {
     /// the graph is immutable once built. An invalidated graph is rebuilt once
     /// even if several threads ask at the same time.
     pub fn dep_graph(&self) -> DepGraph {
-        self.dep_graph.get_or_build(|| {
-            let flows = self.store.list_flows(None).unwrap_or_default();
-            std::sync::Arc::new(
+        self.dep_graph.try_get_or_build(|| {
+            let flows = self.store.list_flows(None).ok()?;
+            Some(std::sync::Arc::new(
                 dep_graph_from_flows(&flows)
                     .into_iter()
                     .map(|(k, v)| (k, std::sync::Arc::new(v)))
                     .collect(),
-            )
+            ))
         })
     }
 
@@ -507,9 +529,24 @@ impl AppState {
             Err(e) => return Err(e),
         };
         // The write returns the state as persisted, so the row is not read
-        // back: `previous` already carries every other field, and `get_run`
-        // would run a per-row task-count aggregate for nothing.
+        // back: `get_run` would run a per-row task-count aggregate for nothing.
+        // The counters and timing the write updated are recomputed with the
+        // same `RunCounters::apply` the store ran, so `end_time` and the
+        // durations are not left at their pre-transition values.
         let mut run = previous.clone();
+        let mut counters = cereyan_core::rules::RunCounters {
+            failure_count: run.failure_count,
+            crash_count: run.crash_count,
+            start_time: run.start_time,
+            end_time: run.end_time,
+            total_run_time: run.total_run_time,
+        };
+        counters.apply(&new_state);
+        run.failure_count = counters.failure_count;
+        run.crash_count = counters.crash_count;
+        run.start_time = counters.start_time;
+        run.end_time = counters.end_time;
+        run.total_run_time = counters.total_run_time;
         run.state = new_state;
         let was_active = self.index.get(run_id).is_some();
         if !was_active && !previous.state.is_terminal() {
@@ -1089,6 +1126,32 @@ mod dep_graph_tests {
         assert_eq!(builds.load(Ordering::SeqCst), 1, "rebuilt on a warm cache");
     }
 
+    /// An invalidation that lands while a build reads the flows: the graph that
+    /// build made predates the change, so it is handed to its caller but not
+    /// cached, and the next lookup builds afresh.
+    #[test]
+    fn a_graph_built_across_an_invalidation_is_not_cached() {
+        let cache = DepGraphCache::default();
+        let g = cache.get_or_build(|| {
+            cache.invalidate();
+            sample(1)
+        });
+        assert_eq!(ids(&g, 1), vec![1]);
+        assert!(!cache.is_populated(), "the stale graph was cached");
+        let g = cache.get_or_build(|| sample(2));
+        assert_eq!(ids(&g, 2), vec![2], "the next lookup rebuilt");
+    }
+
+    /// A failed build caches nothing, so the next lookup tries again.
+    #[test]
+    fn a_failed_build_is_not_cached() {
+        let cache = DepGraphCache::default();
+        assert!(cache.try_get_or_build(|| None).is_empty());
+        assert!(!cache.is_populated());
+        let g = cache.try_get_or_build(|| Some(sample(3)));
+        assert_eq!(ids(&g, 3), vec![3]);
+    }
+
     #[test]
     fn invalidating_forces_one_rebuild() {
         let cache = DepGraphCache::default();
@@ -1144,5 +1207,50 @@ mod dep_graph_tests {
         for g in &graphs {
             assert!(std::sync::Arc::ptr_eq(g, &graphs[0]), "threads disagreed");
         }
+    }
+}
+
+#[cfg(test)]
+mod transition_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// The run a transition returns carries the timing and counters the write
+    /// updated, the same as reading the row back would.
+    #[test]
+    fn a_transition_returns_the_updated_timing_and_counters() {
+        let dir = TempDir::new().unwrap();
+        let state = crate::api::flows::list_flows_tests::state_with_flows(
+            &dir,
+            &[("p", "f", None, None)],
+        );
+        let flow_id = state.store.list_flows(None).unwrap()[0].id;
+        let (run_id, _) = state
+            .store
+            .create_run_full(cereyan_store::CreateRun {
+                flow_id,
+                name: "r".into(),
+                parameters: "{}".into(),
+                tags: "[]".into(),
+                created_by: "test".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        for next in [StateType::Pending, StateType::Running, StateType::Failed] {
+            let TransitionResult::Accepted(run) = state
+                .transition_run(run_id, State::new(next), false)
+                .unwrap()
+            else {
+                panic!("{next:?} was rejected");
+            };
+            let stored = state.store.get_run(run_id).unwrap().unwrap();
+            assert_eq!(run.start_time, stored.start_time, "start_time after {next:?}");
+            assert_eq!(run.end_time, stored.end_time, "end_time after {next:?}");
+            assert_eq!(run.total_run_time, stored.total_run_time, "total_run_time after {next:?}");
+            assert_eq!(run.failure_count, stored.failure_count, "failure_count after {next:?}");
+            assert_eq!(run.crash_count, stored.crash_count, "crash_count after {next:?}");
+        }
+        let run = state.store.get_run(run_id).unwrap().unwrap();
+        assert!(run.end_time.is_some() && run.failure_count == 1);
     }
 }

@@ -743,6 +743,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{id}/messages/{topic}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a message to a run on `topic`.
+         * @description If the run is Paused waiting for this topic, the message is stored as the
+         *     answer and the run is resumed. Otherwise the message is queued for the next
+         *     `receive(topic)` call.
+         */
+        post: operations["send_message"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/receive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Atomically check the answer store and pending messages for a `receive(topic)`
+         *     call. Used by the engine during replay so a message that arrives between
+         *     passes is found without pausing again.
+         */
+        get: operations["run_receive"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{id}/resume": {
         parameters: {
             query?: never;
@@ -1253,6 +1296,28 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["heartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/{id}/leave": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The worker is stopping cleanly: it turns offline now. Its own shutdown
+         *     drain is not left behind, so it registers online when it comes back; a
+         *     drain an operator set before the shutdown is kept by the worker not
+         *     calling this.
+         */
+        post: operations["leave"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2045,6 +2110,10 @@ export interface components {
             items: components["schemas"]["Log"][];
             /** Format: int64 */
             next_cursor?: number | null;
+        };
+        MessageBody: {
+            /** @description The message payload: any JSON value. */
+            payload: unknown;
         };
         MetricsHistory: {
             /** Format: int64 */
@@ -4236,8 +4305,18 @@ export interface operations {
             query?: {
                 /** @description Whether this is the last chunk: the result becomes visible when it lands. */
                 last?: boolean;
+                /**
+                 * @description Where this chunk starts in the result. A retried chunk lands at the same
+                 *     place instead of being appended a second time.
+                 */
+                offset?: number | null;
                 /** @description The chunk number, from 0. Part 0 starts the upload over. */
                 part?: number;
+                /**
+                 * @description Names this upload, so two uploads of one key (two workers saving the
+                 *     same cache entry) write separate temporary files.
+                 */
+                upload?: string | null;
             };
             header?: never;
             path: {
@@ -4799,6 +4878,74 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["LogsPage"];
                 };
+            };
+        };
+    };
+    send_message: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                topic: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    run_receive: {
+        parameters: {
+            query: {
+                /** @description The question ordinal this receive call expects. */
+                index: number;
+                topic: string;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description {claimed: bool, answer: {...} or null} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5907,6 +6054,31 @@ export interface operations {
             };
             /** @description Unknown to this server: register again */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    leave: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

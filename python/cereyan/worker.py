@@ -367,7 +367,6 @@ class Worker:
         self.reap()
         now = _fingerprints_now(self.flows)
         changed = now != self.flows
-        self.flows = now
         _, available = _memory()
         body: dict[str, Any] = {
             "engines": sorted(self.engines),
@@ -375,13 +374,18 @@ class Worker:
         }
         if changed:
             body["flows"] = now
+        # The new fingerprints count as sent only once the server has them: a
+        # failed heartbeat leaves `self.flows` alone, so the next one sends them
+        # again.
         try:
             answer = self.client._request("POST", f"/api/workers/{self.worker_id}/heartbeat", body=body)
         except ApiError as exc:
             if exc.status == 409 and isinstance(exc.body, dict) and exc.body.get("register"):
+                self.flows = now
                 self.register()
                 return
             raise
+        self.flows = now
         self._reached()
         with self._lock:
             self.state = answer.get("state", self.state)
@@ -409,7 +413,14 @@ class Worker:
             self.say("info", "resumed")
 
     def drain_and_wait(self) -> None:
-        """Tell the server to send nothing new, then wait for running engines to end."""
+        """Tell the server to send nothing new, wait for running engines to end, then leave.
+
+        The drain is this shutdown's own, so the worker leaves (turns offline) once
+        its engines are done: a restart then registers online. A drain an operator
+        set earlier is kept, by not leaving.
+        """
+        with self._lock:
+            drained_before = self.state == "draining"
         try:
             self.client._request("POST", f"/api/workers/{self.worker_id}/drain")
         except (ApiError, ServerUnavailable):
@@ -417,6 +428,12 @@ class Worker:
         while self.engines:
             self.reap()
             time.sleep(0.5)
+        if drained_before:
+            return
+        try:
+            self.client._request("POST", f"/api/workers/{self.worker_id}/leave")
+        except (ApiError, ServerUnavailable):
+            pass
 
     def run(self) -> int:
         self.open_status_page()

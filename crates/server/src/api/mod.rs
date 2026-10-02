@@ -162,6 +162,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         workers::patch,
         workers::drain,
         workers::resume,
+        workers::leave,
         workers::forget,
         results::put,
         results::get,
@@ -350,6 +351,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/workers/{id}/timeline", get(workers::timeline))
         .route("/api/workers/{id}/drain", post(workers::drain))
         .route("/api/workers/{id}/resume", post(workers::resume))
+        .route("/api/workers/{id}/leave", post(workers::leave))
         .route("/api/openapi.json", get(openapi))
         .route("/api/flows", get(flows::list_flows))
         .route(

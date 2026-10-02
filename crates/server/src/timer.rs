@@ -109,11 +109,14 @@ impl Inner {
             | TimerEvent::StartDeadline(_)
             | TimerEvent::FlowTimeout(_)
             | TimerEvent::CrashRerun(_)
-            | TimerEvent::WakeRun(_)
-            | TimerEvent::Expectation(_) => Side::Run,
-            TimerEvent::Fire(_) | TimerEvent::ResumeFlow(_) => Side::Schedule,
+            | TimerEvent::WakeRun(_) => Side::Run,
+            TimerEvent::Fire(_) => Side::Schedule,
             TimerEvent::RuleClock(_) => Side::Rule,
             // Global ticks carry no id and are never removed individually.
+            // `ResumeFlow` carries a flow id and `Expectation` an expectation id,
+            // so neither belongs in `by_schedule` or `by_run`: filed there, a
+            // schedule's or a run's removal cancelled whichever flow resume or
+            // expectation deadline happened to share its id.
             _ => return,
         };
         let map = match side {
@@ -145,9 +148,7 @@ fn id_of(event: &TimerEvent) -> &i64 {
         | TimerEvent::FlowTimeout(r)
         | TimerEvent::CrashRerun(r)
         | TimerEvent::WakeRun(r)
-        | TimerEvent::Expectation(r)
         | TimerEvent::Fire(r)
-        | TimerEvent::ResumeFlow(r)
         | TimerEvent::RuleClock(r) => r,
         _ => unreachable!("event has no removal id"),
     }
@@ -319,6 +320,28 @@ mod tests {
         t.remove_run_events(3);
         assert!(t.is_empty());
     }
+
+/// Removing a schedule's events must not cancel a flow's resume that shares the id.
+#[test]
+fn removing_a_schedule_keeps_a_flow_resume_with_the_same_id() {
+    let t = Timer::new();
+    t.push(10, TimerEvent::Fire(3));
+    t.push(20, TimerEvent::ResumeFlow(3));
+    t.remove_schedule_events(3);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t.pop_due(100), vec![(20, TimerEvent::ResumeFlow(3))]);
+}
+
+/// Removing a run's events must not cancel an expectation that shares the id.
+#[test]
+fn removing_a_run_keeps_an_expectation_with_the_same_id() {
+    let t = Timer::new();
+    t.push(10, TimerEvent::Due(42));
+    t.push(20, TimerEvent::Expectation(42));
+    t.remove_run_events(42);
+    assert_eq!(t.len(), 1);
+    assert_eq!(t.pop_due(100), vec![(20, TimerEvent::Expectation(42))]);
+}
 
 /// A compaction must not stop the timer cancelling events.
 ///

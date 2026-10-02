@@ -447,6 +447,10 @@ struct Inner {
     /// Runs already reported as waiting for a resource (avoid repeated transitions).
     waiting_marked: HashMap<i64, String>,
     failures: HashMap<i64, Vec<i64>>,
+    /// Local engines queued for creation but not yet registered, by key.
+    /// Creation happens with `inner` released, so without this the cap check
+    /// and the usable count would both miss engines already on their way.
+    starting: HashMap<EngineKey, usize>,
 }
 
 impl Inner {
@@ -512,7 +516,44 @@ impl Inner {
     /// Engines counted against the pool: every one but those told to exit
     /// while idle (they are on their way out).
     fn occupying(&self) -> usize {
-        self.occupying_at(Location::Local)
+        self.occupying_at(Location::Local) + self.starting.values().sum::<usize>()
+    }
+
+    /// Local engines of `key` that can take a run now or soon: idle, or still
+    /// being created.
+    fn usable_local(&self, key: &EngineKey) -> usize {
+        let idle = self
+            .engines
+            .values()
+            .filter(|e| {
+                e.location == Location::Local
+                    && e.key == *key
+                    && !e.exit_requested
+                    && e.current_run.is_none()
+            })
+            .count();
+        idle + self.starting.get(key).copied().unwrap_or(0)
+    }
+
+    /// Queue a local engine for creation once `inner` is released.
+    fn request_spawn(&mut self, key: &EngineKey, requests: &mut Vec<(String, EngineKey)>) {
+        let id = format!("engine-{}-{}", std::process::id(), self.next_engine);
+        self.next_engine += 1;
+        *self.starting.entry(key.clone()).or_default() += 1;
+        requests.push((id, key.clone()));
+    }
+
+    /// Drop the reservations of requests whose creation has finished,
+    /// successfully or not.
+    fn finish_starting<'a>(&mut self, keys: impl IntoIterator<Item = &'a EngineKey>) {
+        for key in keys {
+            if let Some(n) = self.starting.get_mut(key) {
+                *n -= 1;
+                if *n == 0 {
+                    self.starting.remove(key);
+                }
+            }
+        }
     }
 
     fn occupying_at(&self, location: Location) -> usize {
@@ -841,16 +882,28 @@ impl Supervisor {
             .map(|(id, _)| *id)
             .collect();
         for id in &quiet {
-            if let Some(slot) = inner.workers.get_mut(id) {
-                slot.state = "offline".into();
-                slot.commands.clear();
-            }
-            let location = Location::Worker(*id);
-            inner
-                .engines
-                .retain(|_, e| e.location != location || e.current_run.is_some());
+            Self::take_offline(&mut inner, *id);
         }
         quiet
+    }
+
+    /// A worker said it is stopping: it turns offline now rather than after
+    /// three missed heartbeats.
+    pub fn worker_left(&self, worker_id: i64) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        Self::take_offline(&mut inner, worker_id);
+    }
+
+    /// Mark a worker offline and forget its idle engines. The caller holds `inner`.
+    fn take_offline(inner: &mut Inner, worker_id: i64) {
+        if let Some(slot) = inner.workers.get_mut(&worker_id) {
+            slot.state = "offline".into();
+            slot.commands.clear();
+        }
+        let location = Location::Worker(worker_id);
+        inner
+            .engines
+            .retain(|_, e| e.location != location || e.current_run.is_some());
     }
 
     /// The worker whose engine holds `run_id`, if a worker's does.
@@ -1245,16 +1298,7 @@ impl Supervisor {
                 let key = key.clone();
                 let pending = *pending;
                 let remote_flows = remote_flows.clone();
-                let usable = inner
-                    .engines
-                    .values()
-                    .filter(|e| {
-                        e.location == Location::Local
-                            && e.key == key
-                            && !e.exit_requested
-                            && e.current_run.is_none()
-                    })
-                    .count();
+                let usable = inner.usable_local(&key);
                 let mut to_spawn = pending.saturating_sub(usable);
                 // The server's own processors first: they are warm and nearest.
                 while to_spawn > 0 {
@@ -1272,9 +1316,7 @@ impl Supervisor {
                         }
                         break;
                     }
-                    let id = format!("engine-{}-{}", std::process::id(), inner.next_engine);
-                    inner.next_engine += 1;
-                    spawn_requests.push((id, key.clone()));
+                    inner.request_spawn(&key, &mut spawn_requests);
                     to_spawn -= 1;
                 }
                 // What the server cannot take now spills over to workers.
@@ -1284,10 +1326,12 @@ impl Supervisor {
             }
         }
         // Spawn processes outside the lock so other threads can enqueue/dequeue.
+        let spawn_keys: Vec<EngineKey> = spawn_requests.iter().map(|(_, k)| k.clone()).collect();
         let spawned = self.spawn_all(spawn_requests);
         // Re-acquire the lock to insert engine records and handle spill-over.
         {
             let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.finish_starting(&spawn_keys);
             Self::register_engines(&mut inner, spawned);
             for (key, to_spawn, remote_flows) in spill_requests {
                 Self::spill_over(&mut inner, &key, to_spawn, &remote_flows);
@@ -1300,23 +1344,11 @@ impl Supervisor {
             // more runs while we were spawning. Only spawn more if there is
             // still unmet demand and we haven't hit the engine cap.
             for (key, (pending, _)) in demand.iter() {
-                let usable = inner
-                    .engines
-                    .values()
-                    .filter(|e| {
-                        e.location == Location::Local
-                            && e.key == *key
-                            && !e.exit_requested
-                            && e.current_run.is_none()
-                    })
-                    .count();
-                let still_needed = pending.saturating_sub(usable);
+                let still_needed = pending.saturating_sub(inner.usable_local(key));
                 if still_needed > 0 && inner.occupying() < self.max_engines() {
                     // Queue one more engine for this key; it is created after
                     // the lock is released, like the first round.
-                    let id = format!("engine-{}-{}", std::process::id(), inner.next_engine);
-                    inner.next_engine += 1;
-                    respawn_requests.push((id, key.clone()));
+                    inner.request_spawn(key, &mut respawn_requests);
                 }
             }
         }
@@ -1324,9 +1356,12 @@ impl Supervisor {
         // and exec with the lock released, exactly as the first round does:
         // `spawn` starts a Python interpreter, and holding `inner` across that
         // blocks every other supervisor operation.
+        let respawn_keys: Vec<EngineKey> =
+            respawn_requests.iter().map(|(_, k)| k.clone()).collect();
         let respawned = self.spawn_all(respawn_requests);
-        if !respawned.is_empty() {
+        if !respawn_keys.is_empty() {
             let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.finish_starting(&respawn_keys);
             Self::register_engines(&mut inner, respawned);
         }
         self.notify.notify_waiters();
@@ -2398,6 +2433,27 @@ mod tests {
         for h in handles {
             h.join().expect("thread should not deadlock");
         }
+    }
+
+    /// Engines queued for creation count against the cap and as usable for
+    /// their key until registered, so neither one pass nor a concurrent
+    /// `ensure_capacity` can queue past `max_engines`.
+    #[test]
+    fn starting_engines_count_against_the_cap() {
+        let s = sup(2);
+        let mut inner = s.inner.lock().unwrap();
+        let mut requests = Vec::new();
+        let etl = key("etl");
+        while inner.occupying() < s.max_engines() {
+            inner.request_spawn(&etl, &mut requests);
+        }
+        assert_eq!(requests.len(), 2, "the cap stops the pass at two queued engines");
+        assert_eq!(inner.usable_local(&etl), 2);
+        assert_eq!(inner.usable_local(&key("ml")), 0);
+        let keys: Vec<EngineKey> = requests.iter().map(|(_, k)| k.clone()).collect();
+        inner.finish_starting(&keys);
+        assert_eq!(inner.occupying(), 0, "a failed or registered start frees its reservation");
+        assert!(inner.starting.is_empty());
     }
 
     /// `spawn_all` must never take `inner` itself.

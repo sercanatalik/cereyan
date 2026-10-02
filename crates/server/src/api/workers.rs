@@ -300,6 +300,13 @@ pub async fn register(
     if body.name.trim().is_empty() {
         return Err(ApiError::Unprocessable("a worker needs a name".into()));
     }
+    // The queue, the timeline and the UI name the server's own processors
+    // "server"; a worker by that name would merge into its row.
+    if body.name.trim().eq_ignore_ascii_case("server") {
+        return Err(ApiError::Unprocessable(
+            "\"server\" names the server's own processors; start the worker with another --name".into(),
+        ));
+    }
     let st = state.clone();
     let response = tokio::task::spawn_blocking(move || -> ApiResult<RegisterResponse> {
         let Evaluation {
@@ -376,10 +383,19 @@ pub async fn heartbeat(
             st.supervisor.clear_broken(id);
         }
         let (eligible, drift) = evaluate_stored(&st, id)?;
-        let state_now = if worker.state == "offline" {
+        // The state is read again under the lock a drain or resume takes, so
+        // one landing since `worker` was read is not overwritten with the old
+        // state until the next heartbeat.
+        let state_lock = worker_state_lock();
+        let stored = st
+            .store
+            .get_worker(id)?
+            .map(|w| w.state)
+            .unwrap_or_else(|| worker.state.clone());
+        let state_now = if stored == "offline" {
             "online".to_string()
         } else {
-            worker.state.clone()
+            stored
         };
         st.supervisor.sync_worker(
             id,
@@ -388,6 +404,7 @@ pub async fn heartbeat(
             &state_now,
             eligible,
         );
+        drop(state_lock);
         let Some(commands) = st.supervisor.worker_heartbeat(id, &body.engines) else {
             return Err(ApiError::Conflict(
                 json!({"error": "unknown worker", "register": true}),
@@ -648,6 +665,15 @@ pub async fn patch(
     Ok(Json(views(&state)?))
 }
 
+/// Held while a worker's state is written to the store and the supervisor, and
+/// while a heartbeat reads it and syncs the supervisor, so the two never
+/// interleave.
+static WORKER_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn worker_state_lock() -> std::sync::MutexGuard<'static, ()> {
+    WORKER_STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 async fn set_state(state: Arc<AppState>, id: i64, to: &str) -> ApiResult<Json<Vec<WorkerView>>> {
     let worker = state
         .store
@@ -658,8 +684,11 @@ async fn set_state(state: Arc<AppState>, id: i64, to: &str) -> ApiResult<Json<Ve
             json!({"error": "the worker is offline"}),
         ));
     }
-    state.store.set_worker_state(id, to)?;
-    state.supervisor.set_worker_state(id, to);
+    {
+        let _state_lock = worker_state_lock();
+        state.store.set_worker_state(id, to)?;
+        state.supervisor.set_worker_state(id, to);
+    }
     state.supervisor.command_worker(
         id,
         json!({"cmd": if to == "draining" { "drain" } else { "resume" }}),
@@ -685,6 +714,37 @@ pub async fn resume(
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Vec<WorkerView>>> {
     set_state(state, id, "online").await
+}
+
+/// The worker is stopping cleanly: it turns offline now. Its own shutdown
+/// drain is not left behind, so it registers online when it comes back; a
+/// drain an operator set before the shutdown is kept by the worker not
+/// calling this.
+#[utoipa::path(post, path = "/api/workers/{id}/leave", params(("id" = i64, Path)), responses((status = 204), (status = 404)))]
+pub async fn leave(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
+    state
+        .store
+        .get_worker(id)?
+        .ok_or_else(|| ApiError::NotFound("worker not found".into()))?;
+    {
+        let _state_lock = worker_state_lock();
+        state.store.set_worker_state(id, "offline")?;
+        state.supervisor.worker_left(id);
+    }
+    let _ = state.record_engine_event(
+        EventName::WorkerOffline,
+        None,
+        None,
+        json!({"worker_id": id, "name": state.supervisor.worker_name(id), "left": true}),
+    );
+    state
+        .stream
+        .publish("worker.updated", id.to_string(), json!({"id": id}));
+    state.supervisor.ensure_capacity(&state);
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(delete, path = "/api/workers/{id}", params(("id" = i64, Path)), responses((status = 204), (status = 404), (status = 409, description = "The worker is not offline")))]

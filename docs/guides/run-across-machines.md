@@ -80,7 +80,7 @@ Start the server with `--base-path /cereyan` and the worker with `--host https:/
 ## Drain, stop and forget
 
 - **Drain** on the Workers tab, or `POST /api/workers/{id}/drain`: the worker takes no new run; its current runs finish. **Resume** puts it back.
-- **Stopping the worker process** (`SIGTERM`, Ctrl-C) drains it and exits once its runs end; a second signal leaves running engines to finish on their own.
+- **Stopping the worker process** (`SIGTERM`, Ctrl-C) drains it and exits once its runs end, turning offline at once; started again, it comes back online, unless you had drained it before the stop. A second signal leaves running engines to finish on their own.
 - **A worker that stops heartbeating** is offline after three missed heartbeats, and `worker.offline` is recorded. Runs it held are crashed and rerun elsewhere by their own heartbeats.
 - **Forget** removes an offline worker's record. A worker that comes back registers again under its name.
 

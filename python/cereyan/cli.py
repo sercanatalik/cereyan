@@ -63,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker = sub.add_parser("worker", help="add this machine's processors to a server's queue, running this checkout's flows")
     worker.add_argument("dir", nargs="?", help="this machine's checkout of the project (default: current directory)")
     worker.add_argument("--host", help="the server's URL, e.g. https://cereyan.internal (also [worker] host)")
-    worker.add_argument("--name", help="how the server lists this worker (default: the hostname; also [worker] name)")
+    worker.add_argument("--name", help="how the server lists this worker (default: the hostname; also [worker] name; \"server\" is taken)")
     worker.add_argument("--processors", type=int, help="engines this worker may run at once, at most its CPU count (default 1; also [worker] processors)")
     worker.add_argument("--labels", help="k=v pairs shown on the Workers tab, e.g. gpu=true,zone=eu (also [worker] labels)")
     worker.add_argument("--shared-path", action="append", dest="shared_paths", metavar="PATH", help="a path this machine shares with the server; a LocalTarget elsewhere is reported (repeat for more; also [worker] shared_paths)")

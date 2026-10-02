@@ -7025,6 +7025,32 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "description": "Names this upload, so two uploads of one key (two workers saving the\nsame cache entry) write separate temporary files.",
+            "in": "query",
+            "name": "upload",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "Where this chunk starts in the result. A retried chunk lands at the same\nplace instead of being appended a second time.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -9636,6 +9662,34 @@
             "description": "Unknown to this server: register again"
           }
         },
+        "tags": [
+          "workers"
+        ]
+      }
+    },
+    "/api/workers/{id}/leave": {
+      "post": {
+        "operationId": "leave",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "summary": "The worker is stopping cleanly: it turns offline now. Its own shutdown\ndrain is not left behind, so it registers online when it comes back; a\ndrain an operator set before the shutdown is kept by the worker not\ncalling this.",
         "tags": [
           "workers"
         ]

@@ -1169,51 +1169,39 @@ pub async fn resume_inner(state: &Arc<AppState>, id: i64, input: Value) -> ApiRe
         .get_run(id)?
         .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
     if run.state.state_type != StateType::Paused {
-        return Err(ApiError::Conflict(serde_json::json!({
-            "error": format!("run is {}, not Paused", run.state.state_type.as_str()),
-            "current": run.state,
-        })));
+        return Err(not_paused(&run));
     }
-    let flow = state
-        .store
-        .get_flow(run.flow_id)?
-        .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
     // The answer belongs to the question the run is actually waiting on, which
-    // its Paused state names. The caller sends only the answer, so a stale
-    // client cannot answer a question that has already moved on.
-    let index = run
-        .state
-        .details
-        .get("index")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
-    let prompt = run
-        .state
-        .details
-        .get("prompt")
-        .cloned()
-        .unwrap_or(Value::Null);
-    let mut answers = stored_answers(state, id)?;
-    answers.insert(
-        index.to_string(),
-        serde_json::json!({"prompt": prompt, "input": input}),
-    );
-    let answer = answers_value(&answers);
+    // its Paused state names. The caller sends only the answer, and it lands
+    // only if the run is still in the pause read here: a stale client cannot
+    // answer a question that has already moved on, nor overwrite an answer
+    // another caller gave first.
     let st = state.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        st.store.kv_set(&crate::state::run_input_key(id), &answer)?;
-        let mut next = RunState::new(StateType::Scheduled);
-        next.name = "Resuming".into();
-        st.transition_run(id, next, false)
+    let woke = tokio::task::spawn_blocking(move || {
+        crate::waits::wake_paused(&st, &run, |_| Some(input))
     })
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))??;
+    match woke {
+        crate::waits::Woke::Moved(current) => Err(not_paused(&current)),
+        crate::waits::Woke::Done(result) => resumed(result),
+    }
+}
+
+/// 409 for an answer to a run that is not (or no longer) in the pause it was meant for.
+fn not_paused(run: &Run) -> ApiError {
+    let error = if run.state.state_type == StateType::Paused {
+        "run is waiting on a different question now".to_string()
+    } else {
+        format!("run is {}, not Paused", run.state.state_type.as_str())
+    };
+    ApiError::Conflict(serde_json::json!({"error": error, "current": run.state}))
+}
+
+/// The response for an answered pause: the scheduled run, or why it was refused.
+fn resumed(result: TransitionResult) -> ApiResult<Run> {
     match result {
-        TransitionResult::Accepted(run) => {
-            let run = *run;
-            crate::dispatch::enqueue_run(state, &run, &flow, None);
-            Ok(run)
-        }
+        TransitionResult::Accepted(run) => Ok(*run),
         TransitionResult::Rejected { reason, current } => Err(ApiError::Conflict(
             serde_json::to_value(TransitionRejected {
                 error: format!("cannot resume: {reason}"),
@@ -1359,81 +1347,19 @@ pub async fn send_message(
     Path((id, topic)): Path<(i64, String)>,
     Json(body): Json<MessageBody>,
 ) -> ApiResult<Json<Run>> {
-    let run = state
-        .store
-        .get_run(id)?
-        .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
-    // If the run is Paused waiting for exactly this topic, resume it.
-    if run.state.state_type == StateType::Paused {
-        let waiting_topic = run
-            .state
-            .details
-            .get("topic")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        if waiting_topic == topic {
-            let flow = state
-                .store
-                .get_flow(run.flow_id)?
-                .ok_or_else(|| ApiError::NotFound("flow not found".into()))?;
-            let index = run
-                .state
-                .details
-                .get("index")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
-            let prompt = run
-                .state
-                .details
-                .get("prompt")
-                .cloned()
-                .unwrap_or(Value::Null);
-            let mut answers = stored_answers(&state, id)?;
-            answers.insert(
-                index.to_string(),
-                serde_json::json!({"topic": topic, "prompt": prompt, "input": body.payload}),
-            );
-            let answer = answers_value(&answers);
-            let st = state.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                st.store.kv_set(&crate::state::run_input_key(id), &answer)?;
-                let mut next = RunState::new(StateType::Scheduled);
-                next.name = "Resuming".into();
-                st.transition_run(id, next, false)
-            })
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))??;
-            return match result {
-                TransitionResult::Accepted(run) => {
-                    let run = *run;
-                    crate::dispatch::enqueue_run(&state, &run, &flow, None);
-                    Ok(Json(run))
-                }
-                TransitionResult::Rejected { reason, current } => Err(ApiError::Conflict(
-                    serde_json::to_value(TransitionRejected {
-                        error: format!("cannot resume: {reason}"),
-                        reason: reason.to_string(),
-                        current,
-                    })
-                    .unwrap_or_default(),
-                )),
-            };
-        }
-    }
-    // Run is not paused for this topic: queue the message.
-    if run.state.state_type.is_terminal() {
-        return Err(ApiError::Conflict(
-            serde_json::json!({"error": "run is terminal"}).into(),
-        ));
-    }
-    let payload_str = body.payload.to_string();
+    // A run Paused waiting for exactly this topic resumes with the payload;
+    // otherwise the message is queued for its `receive`.
     let st = state.clone();
-    tokio::task::spawn_blocking(move || {
-        st.store.run_message_insert(id, &topic, &payload_str)
+    let delivered = tokio::task::spawn_blocking(move || {
+        crate::waits::deliver_message(&st, id, &topic, body.payload)
     })
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))??;
-    Ok(Json(run))
+    match delivered {
+        crate::waits::Delivered::Queued(run) => Ok(Json(run)),
+        crate::waits::Delivered::Woke(crate::waits::Woke::Done(result)) => Ok(Json(resumed(result)?)),
+        crate::waits::Delivered::Woke(crate::waits::Woke::Moved(run)) => Err(not_paused(&run)),
+    }
 }
 
 #[utoipa::path(post, path = "/api/runs/{id}/cancel", params(("id" = i64, Path)), responses((status = 200, body = Run), (status = 404)))]

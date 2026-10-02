@@ -58,6 +58,7 @@ pub const BUILTIN_PATHS: &[&str] = &[
     "/api/workers/{id}/timeline",
     "/api/workers/{id}/drain",
     "/api/workers/{id}/resume",
+    "/api/workers/{id}/leave",
     "/api/flows",
     "/api/flows/{id}",
     "/api/flows/{id}/runs",

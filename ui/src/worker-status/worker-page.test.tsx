@@ -114,6 +114,14 @@ test("draining shows its pill and banner", () => {
   expect(screen.getByTestId("worker-banner")).toHaveTextContent(/takes no new run/);
 });
 
+test("a worker not yet registered, or refused, does not read as Online", () => {
+  const { unmount } = render(<WorkerPage s={payload({ state: "registering" })} />);
+  expect(screen.getByTestId("worker-status")).toHaveTextContent("Registering");
+  unmount();
+  render(<WorkerPage s={payload({ state: "refused" })} />);
+  expect(screen.getByTestId("worker-status")).toHaveTextContent("Refused");
+});
+
 test("older code names the module and marks its flow", () => {
   render(<WorkerPage s={payload({ drift: ["pipelines.reports"] })} />);
   expect(screen.getByTestId("worker-status")).toHaveTextContent("Older code");

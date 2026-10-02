@@ -80,6 +80,7 @@
   "/api/workers/{id}",
   "/api/workers/{id}/drain",
   "/api/workers/{id}/heartbeat",
+  "/api/workers/{id}/leave",
   "/api/workers/{id}/resume",
   "/api/workers/{id}/timeline"
 ]

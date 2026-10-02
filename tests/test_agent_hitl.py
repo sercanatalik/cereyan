@@ -96,6 +96,20 @@ def signal_flow():
     note(f"signal:{value}")
     return value
 
+@task
+def slow_until_go():
+    note("slow:waiting")
+    while not os.path.exists(TRACE + ".go"):
+        time.sleep(0.02)
+    return 1
+
+@app.flow
+def signal_while_running():
+    slow_until_go.submit()
+    value = receive("signal")
+    note(f"late:{value}")
+    return value
+
 @app.flow
 def publish_and_complete():
     publish_state("progress", {"step": 1})
@@ -107,6 +121,17 @@ def timeout_flow():
     value = receive("signal", timeout=1, default="defaulted")
     note(f"timeout:{value}")
     return value
+
+@app.flow
+def odd_topic_flow():
+    value = receive("a/b x+y#c&d=e")
+    note(f"odd:{value}")
+
+@app.flow
+def timeout_values():
+    none = receive("a", timeout=0.5, default=None)
+    number = receive("b", timeout=0.5, default=42)
+    note(f"defaults:{none!r}:{number!r}")
 '''
 
 
@@ -350,6 +375,35 @@ def test_receive_topic_message_resumes_run(hitl):
     assert lines(hitl)[-1] == "signal:{'x': 42}"
 
 
+def test_resume_answers_a_receive_topic(hitl):
+    """Resume answers the topic the run waits on, so receive('signal') completes."""
+    run = start(hitl, "signal_flow")
+    paused(hitl, run["id"])
+    hitl.client.resume(run["id"], {"x": 7})
+    final = hitl.wait_run(run["id"])
+    assert final["state"]["type"] == "Completed"
+    assert lines(hitl)[-1] == "signal:{'x': 7}"
+
+
+def test_message_sent_before_the_pause_lands_resumes_the_run(hitl):
+    """A message sent while the run is still Running, after receive() missed it,
+    is delivered once the run pauses on that topic."""
+    import time
+
+    run = start(hitl, "signal_while_running")
+    deadline = time.time() + 30
+    while "slow:waiting" not in lines(hitl):
+        assert time.time() < deadline, "the task never started"
+        time.sleep(0.02)
+    # receive() has missed and the runner is waiting for the task: still Running.
+    assert hitl.client.get_run(run["id"])["state"]["type"] == "Running"
+    hitl.client.send_message(run["id"], "signal", {"x": 5})
+    (hitl.trace.parent / (hitl.trace.name + ".go")).write_text("")
+    final = hitl.wait_run(run["id"])
+    assert final["state"]["type"] == "Completed"
+    assert lines(hitl)[-1] == "late:{'x': 5}"
+
+
 def test_publish_state_is_readable_via_api(hitl):
     """publish_state stores flow-level state readable from the API."""
     run = start(hitl, "publish_and_complete")
@@ -366,4 +420,23 @@ def test_receive_timeout_uses_default(hitl):
     run = start(hitl, "timeout_flow")
     final = hitl.wait_run(run["id"])
     assert final["state"]["type"] == "Completed"
-    assert lines(hitl)[-1] == 'timeout:"defaulted"'
+    assert lines(hitl)[-1] == "timeout:defaulted"
+
+
+def test_topics_with_url_characters_round_trip(hitl):
+    """A topic with '/', '+', '#', '&', '=' and a space is claimed and sent intact."""
+    run = start(hitl, "odd_topic_flow")
+    p = paused(hitl, run["id"])
+    assert p["state"]["details"]["topic"] == "a/b x+y#c&d=e"
+    hitl.client.send_message(run["id"], "a/b x+y#c&d=e", 9)
+    final = hitl.wait_run(run["id"])
+    assert final["state"]["type"] == "Completed"
+    assert lines(hitl)[-1] == "odd:9"
+
+
+def test_receive_timeout_defaults_keep_their_type(hitl):
+    """default=None comes back as None and default=42 as 42, not their JSON text."""
+    run = start(hitl, "timeout_values")
+    final = hitl.wait_run(run["id"])
+    assert final["state"]["type"] == "Completed"
+    assert lines(hitl)[-1] == "defaults:None:42"

@@ -246,7 +246,10 @@ pub fn after_transition(state: &Arc<AppState>, run: &Run, previous: Option<&Stat
             }
             trigger_dependents(state, &flow, run);
         }
-        StateType::Paused => crate::waits::arm(state, run),
+        StateType::Paused => {
+            crate::waits::arm(state, run);
+            crate::waits::deliver_queued(state, run);
+        }
         _ => {}
     }
     // A continuous schedule's run ended: its next run joins the line after the

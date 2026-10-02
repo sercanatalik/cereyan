@@ -76,10 +76,13 @@ def receive(topic: str, *, prompt: str | None = None, schema: dict | None = None
     details: dict[str, Any] = {"topic": topic}
     if timeout is not None and timeout > 0:
         details["wake_at"] = int((time.time() + timeout) * 1_000_000)
+        # The details travel as JSON already: the default goes in as a value, so
+        # the timeout hands it back as one, not as its encoding.
         try:
-            details["default"] = json.dumps(default)
+            json.dumps(default)
+            details["default"] = default
         except (TypeError, ValueError):
-            details["default"] = json.dumps(str(default))
+            details["default"] = str(default)
     task = context.current_task_run()
     raise RunPaused(display, schema, task.id if task else None, index,
                     details=details)

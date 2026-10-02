@@ -3,8 +3,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * How a worker's status reads, shared by the server's Workers tab and the
- * worker's own status page so the two never disagree. `unreachable` is the
- * worker's view only: the server calls a silent worker Offline.
+ * worker's own status page so the two never disagree. `unreachable`,
+ * `registering` and `refused` are the worker's view only: the server calls a
+ * silent worker Offline and never lists one it has not registered.
  */
 export const STATUS = {
   server: { label: "Server", pill: "bg-muted text-foreground", dot: "bg-foreground" },
@@ -27,6 +28,16 @@ export const STATUS = {
     label: "Older code",
     pill: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
     dot: "bg-amber-500",
+  },
+  registering: {
+    label: "Registering",
+    pill: "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-200",
+    dot: "bg-sky-500",
+  },
+  refused: {
+    label: "Refused",
+    pill: "bg-red-100 text-red-900 dark:bg-red-900/40 dark:text-red-200",
+    dot: "bg-red-500",
   },
   unreachable: {
     label: "Server unreachable",

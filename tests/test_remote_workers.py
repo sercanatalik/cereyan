@@ -170,6 +170,18 @@ def test_a_server_without_a_token_refuses_workers(isolated_home, project, tmp_pa
         server.stop()
 
 
+def test_a_worker_cannot_take_the_servers_name(srv):
+    """'server' names the server's own processors in the queue and the UI."""
+    from cereyan import __version__
+
+    body = {"name": "Server", "version": __version__, "cpus": 1, "processors": 1,
+            "labels": {}, "shared_paths": [], "meta": {}, "flows": []}
+    with pytest.raises(ApiError) as err:
+        api(srv, "POST", "/api/workers/register", body)
+    assert err.value.status == 422
+    assert "--name" in str(err.value.body)
+
+
 def test_runs_spill_over_to_a_worker_and_record_where_they_ran(srv, workers, tmp_path):
     # The extra flow sits in a package of its own: a file beside pipeline.py
     # would change pipeline's fingerprint, which is drift.
@@ -271,6 +283,26 @@ def test_drain_offline_and_forget(srv, workers):
     assert worker_view(srv, "w1") is None
 
 
+def test_a_clean_stop_leaves_and_a_restart_comes_back_online(srv, workers, tmp_path, project):
+    """A worker's own shutdown drain is not left behind: it leaves on stop, so a
+    restart registers online. An operator's drain survives the restart."""
+    w = workers(name="w1")
+    wait_for(lambda: online(srv, "w1"), what="w1 online")
+    w.stop()
+    assert worker_view(srv, "w1")["state"] == "offline", "a clean stop leaves at once"
+
+    again = tmp_path / "again"
+    again.mkdir()
+    w2 = WorkerProcess(again, srv.info["url"], source=project, name="w1")
+    try:
+        view = wait_for(lambda: online(srv, "w1"), what="w1 online after a restart")
+        api(srv, "POST", f"/api/workers/{view['id']}/drain")
+        wait_for(lambda: "draining" in w2.read_log(), what="the worker hears the drain")
+    finally:
+        w2.stop()
+    assert worker_view(srv, "w1")["state"] == "draining", "an operator's drain is kept"
+
+
 def test_cancel_a_run_on_a_worker(srv, workers, tmp_path):
     workers(name="w1")
     wait_for(lambda: online(srv, "w1"), what="w1 online")
@@ -330,6 +362,26 @@ def test_results_upload_in_chunks_and_read_back_whole(srv):
     assert bad.value.status in (400, 404)
 
 
+def test_concurrent_and_retried_chunks_do_not_corrupt_a_result(srv):
+    """Two uploads of one key write separate files, and a retried chunk lands at
+    its offset instead of being appended twice."""
+    def put(upload, part, offset, last, data):
+        params = {"part": part, "last": "true" if last else "false", "upload": upload, "offset": offset}
+        srv.client._request_bytes("PUT", "/api/results/ckpt-c-d", data, params=params)
+
+    put("one", 0, 0, False, b"AAA")
+    put("two", 0, 0, False, b"xxx")
+    put("one", 1, 3, False, b"BBB")
+    put("one", 1, 3, False, b"BBB")  # a retry of the same chunk
+    put("two", 1, 3, True, b"yyy")
+    assert srv.client._request_bytes("GET", "/api/results/ckpt-c-d") == b"xxxyyy"
+    put("one", 2, 6, True, b"CCC")
+    assert srv.client._request_bytes("GET", "/api/results/ckpt-c-d") == b"AAABBBCCC"
+    with pytest.raises(ApiError) as gap:
+        put("three", 1, 3, False, b"late")
+    assert gap.value.status == 409, "a chunk past what arrived is refused"
+
+
 def test_the_engine_side_store_splits_a_large_result(monkeypatch):
     from cereyan import results
 
@@ -349,3 +401,36 @@ def test_the_engine_side_store_splits_a_large_result(monkeypatch):
     assert [p[3]["last"] for p in parts] == ["false"] * (len(parts) - 1) + ["true"]
     assert all(p[2] <= 10 for p in parts)
     assert sum(p[2] for p in parts) > 25
+
+
+def test_a_failed_heartbeat_sends_changed_fingerprints_again(monkeypatch, tmp_path):
+    """New fingerprints count as sent only once a heartbeat reaches the server."""
+    from cereyan import worker as worker_mod
+    from cereyan.client import ServerUnavailable
+
+    w = worker_mod.Worker("http://127.0.0.1:9", str(tmp_path))
+    w.worker_id = 1
+    old = [{"project": "p", "name": "f", "module": "m", "module_hash": "old"}]
+    new = [{**old[0], "module_hash": "new"}]
+    w.flows = old
+    monkeypatch.setattr(worker_mod, "_fingerprints_now", lambda flows: new)
+    monkeypatch.setattr(worker_mod, "git_state", lambda directory: None)
+
+    def down(method, path, body=None, **kwargs):
+        raise ServerUnavailable("down")
+
+    monkeypatch.setattr(w.client, "_request", down)
+    with pytest.raises(ServerUnavailable):
+        w.heartbeat()
+    assert w.flows == old
+
+    sent = []
+
+    def up(method, path, body=None, **kwargs):
+        sent.append(body)
+        return {"state": "online"}
+
+    monkeypatch.setattr(w.client, "_request", up)
+    w.heartbeat()
+    assert sent[0]["flows"] == new
+    assert w.flows == new

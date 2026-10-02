@@ -4,7 +4,7 @@
 //! retention treats them as before. Uploads come in chunks so a proxy with a
 //! small body limit in front of the server does not refuse a large result.
 
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -47,6 +47,12 @@ pub struct PartQuery {
     /// Whether this is the last chunk: the result becomes visible when it lands.
     #[serde(default)]
     pub last: bool,
+    /// Names this upload, so two uploads of one key (two workers saving the
+    /// same cache entry) write separate temporary files.
+    pub upload: Option<String>,
+    /// Where this chunk starts in the result. A retried chunk lands at the same
+    /// place instead of being appended a second time.
+    pub offset: Option<u64>,
 }
 
 #[utoipa::path(put, path = "/api/results/{key}", params(("key" = String, Path), PartQuery),
@@ -59,18 +65,53 @@ pub async fn put(
     body: Bytes,
 ) -> ApiResult<StatusCode> {
     let key = checked_key(&key)?.to_string();
+    if let Some(upload) = &q.upload {
+        let ok = !upload.is_empty()
+            && upload.len() <= 64
+            && upload.chars().all(|c| c.is_ascii_alphanumeric());
+        if !ok {
+            return Err(ApiError::BadRequest(format!("invalid upload id {upload:?}")));
+        }
+    }
     let dir = storage(&state);
     tokio::task::spawn_blocking(move || -> ApiResult<StatusCode> {
         std::fs::create_dir_all(&dir).map_err(|e| ApiError::Internal(e.to_string()))?;
-        let partial = dir.join(format!("{key}.upload"));
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(q.part > 0)
-            .truncate(q.part == 0)
-            .open(&partial)
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-        let size = file.metadata().map(|m| m.len()).unwrap_or(0) + body.len() as u64;
+        let partial = match &q.upload {
+            Some(upload) => dir.join(format!("{key}.{upload}.upload")),
+            None => dir.join(format!("{key}.upload")),
+        };
+        let mut file = match q.offset {
+            Some(offset) => {
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(false)
+                    .open(&partial)
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
+                let have = file.metadata().map(|m| m.len()).unwrap_or(0);
+                if offset > have {
+                    return Err(ApiError::Conflict(serde_json::json!({
+                        "error": format!("chunk starts at {offset} but {have} bytes arrived"),
+                        "received": have,
+                    })));
+                }
+                // Drop whatever followed this chunk's start: a retry of it, or
+                // of a later chunk, is written again from here.
+                file.set_len(offset)
+                    .and_then(|_| file.seek(SeekFrom::Start(offset)))
+                    .map_err(|e| ApiError::Internal(e.to_string()))?;
+                file
+            }
+            // A client that sends no offset appends, as before.
+            None => std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .append(q.part > 0)
+                .truncate(q.part == 0)
+                .open(&partial)
+                .map_err(|e| ApiError::Internal(e.to_string()))?,
+        };
+        let size = file.stream_position().unwrap_or(0) + body.len() as u64;
         if size > MAX_RESULT_BYTES {
             drop(file);
             let _ = std::fs::remove_file(&partial);
