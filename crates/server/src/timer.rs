@@ -130,8 +130,14 @@ impl Inner {
     }
 
     /// Cancel a set of sequence numbers, counting each once.
+    ///
+    /// The caller has already removed the side-index vector holding `seqs`, so
+    /// their `side_of` entries are dropped here too. Leaving them for the pop
+    /// was not enough: compaction discards cancelled tuples without popping
+    /// them, and each one stranded a `side_of` entry for the life of the server.
     fn cancel_all(&mut self, seqs: Vec<u64>) {
         for seq in seqs {
+            self.side_of.remove(&seq);
             if self.cancelled.insert(seq) {
                 self.active_count -= 1;
             }
@@ -395,6 +401,27 @@ mod tests {
             t.pop_due(2_000_000).is_empty(),
             "and the cancelled events must not fire"
         );
+    }
+
+    /// Cancelled events dropped by compaction must not leave `side_of` entries.
+    #[test]
+    fn compaction_does_not_leak_side_of() {
+        let t = Timer::new();
+        t.push(1_000_000, TimerEvent::Due(7));
+        for i in 0..20 {
+            t.push(900_000 + i, TimerEvent::Due(1000 + i));
+            t.push(900_000 + i, TimerEvent::Fire(2000 + i));
+            t.push(900_000 + i, TimerEvent::RuleClock(3000 + i));
+        }
+        for i in 0..20 {
+            t.remove_run_events(1000 + i);
+            t.remove_schedule_events(2000 + i);
+            t.remove_rule_clock(3000 + i);
+        }
+        assert!(t.pop_due(50_000).is_empty(), "compaction only");
+        let inner = t.inner.lock().unwrap();
+        assert_eq!(inner.heap.len(), 1, "compaction dropped the dead tuples");
+        assert_eq!(inner.side_of.len(), 1, "only the live event stays indexed");
     }
 
     /// `side_of` must route a sequence to the index it was filed under.

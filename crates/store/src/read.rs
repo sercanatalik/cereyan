@@ -1505,6 +1505,68 @@ impl Store {
         })
     }
 
+    /// `active_runs_of_schedule` for many schedules in one query per chunk,
+    /// keyed by schedule id; a schedule with no unfinished run is absent.
+    pub fn active_runs_of_schedules(&self, schedule_ids: &[i64]) -> Result<HashMap<i64, Vec<Run>>> {
+        let mut out: HashMap<i64, Vec<Run>> = HashMap::new();
+        for chunk in schedule_ids.chunks(500) {
+            let marks = vec!["?"; chunk.len()].join(", ");
+            let sql = format!(
+                "SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id
+                 WHERE r.schedule_id IN ({marks})
+                   AND (r.state_type NOT IN ('Completed', 'Failed', 'Cancelled', 'Crashed')
+                        OR (r.state_type = 'Crashed'
+                            AND NOT EXISTS (SELECT 1 FROM run c WHERE c.parent_run_id = r.id)))
+                 ORDER BY r.id"
+            );
+            let rows = self.with_reader(|conn| {
+                let mut stmt = conn.prepare(&sql)?;
+                let rows = stmt
+                    .query_map(params_from_iter(chunk.iter()), run_from_row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })?;
+            for run in rows {
+                if let Some(sid) = run.schedule_id {
+                    out.entry(sid).or_default().push(run);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Does any run name `run_id` as its parent (a crash rerun was created)?
+    pub fn has_child_run(&self, run_id: i64) -> Result<bool> {
+        self.with_reader(|conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT 1 FROM run WHERE parent_run_id = ?1 LIMIT 1",
+                    [run_id],
+                    |_| Ok(()),
+                )
+                .optional()?
+                .is_some())
+        })
+    }
+
+    /// Crashed runs since `since` (microseconds) whose crash chain has no
+    /// follow-up run yet. The rerun timer lives only in memory, so these are
+    /// the chains a restart interrupted.
+    pub fn crashed_without_rerun(&self, since: i64) -> Result<Vec<i64>> {
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(
+                "SELECT r.id FROM run r
+                 WHERE r.state_type = 'Crashed' AND r.state_timestamp >= ?1
+                   AND NOT EXISTS (SELECT 1 FROM run c WHERE c.parent_run_id = r.id)
+                 ORDER BY r.id",
+            )?;
+            let rows = stmt
+                .query_map([since], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<i64>>>()?;
+            Ok(rows)
+        })
+    }
+
     /// When the schedule's most recent finished run ended, in microseconds.
     pub fn last_end_of_schedule(&self, schedule_id: i64) -> Result<Option<i64>> {
         self.with_reader(|conn| {

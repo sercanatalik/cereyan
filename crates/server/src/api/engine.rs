@@ -203,6 +203,57 @@ async fn build_job_item(
     }))
 }
 
+/// A run taken off the queue for one `work` request. Dropped before
+/// `complete`, it undoes the hand-off: clears the engine it was given to and
+/// puts the run back in line with its resources released.
+struct Handoff {
+    state: Arc<AppState>,
+    run_id: i64,
+    done: bool,
+}
+
+impl Handoff {
+    fn new(state: &Arc<AppState>, run_id: i64) -> Handoff {
+        Handoff {
+            state: state.clone(),
+            run_id,
+            done: false,
+        }
+    }
+
+    fn complete(&mut self) {
+        self.done = true;
+        self.state.supervisor.handoff_done(self.run_id);
+    }
+}
+
+impl Drop for Handoff {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        let state = self.state.clone();
+        let run_id = self.run_id;
+        let undo = move || {
+            // The engine fields are cleared before the run is requeued, so a
+            // late clear cannot overwrite the next engine's claim. Cleared
+            // unconditionally: the drop may land while the write is in flight.
+            let _ = state.store.set_run_engine(run_id, None, None);
+            state.index.update(run_id, |r| {
+                r.engine_pid = None;
+                r.engine_id = None;
+            });
+            state.supervisor.abort_handoff(run_id);
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(rt) => {
+                rt.spawn_blocking(undo);
+            }
+            Err(_) => undo(),
+        }
+    }
+}
+
 #[utoipa::path(post, path = "/api/engine/work", request_body = WorkRequest, responses((status = 200, body = WorkResponse)))]
 pub async fn work(
     State(state): State<Arc<AppState>>,
@@ -237,9 +288,27 @@ pub async fn work(
         let notified = state.supervisor.notify.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();
-        let decision = state
-            .supervisor
-            .take_work(&req.engine_id, req.pid, &key, &url);
+        // `take_work` scans the queue under the supervisor's locks and may
+        // stat the module: keep it off the async workers that serve polls.
+        //
+        // A taken run's guard is made in the same task, so a request dropped
+        // while it runs drops the guard with the result and the run goes back
+        // in line.
+        let (decision, handoff) = {
+            let st = state.clone();
+            let (engine_id, pid, key, url) =
+                (req.engine_id.clone(), req.pid, key.clone(), url.clone());
+            tokio::task::spawn_blocking(move || {
+                let decision = st.supervisor.take_work(&engine_id, pid, &key, &url);
+                let handoff = match decision {
+                    WorkDecision::Run(run_id) => Some(Handoff::new(&st, run_id)),
+                    _ => None,
+                };
+                (decision, handoff)
+            })
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+        };
         match decision {
             WorkDecision::Exit => {
                 return Ok(Json(WorkResponse {
@@ -257,6 +326,10 @@ pub async fn work(
                 None => continue,
             },
             WorkDecision::Run(run_id) => {
+                // Until the item is returned, the run is off the queue with
+                // its resources held: an error here, or the request future
+                // being dropped, must put it back rather than orphan it.
+                let mut handoff = handoff.unwrap_or_else(|| Handoff::new(&state, run_id));
                 let st = state.clone();
                 let engine_id = req.engine_id.clone();
                 let pid = req.pid as i64;
@@ -277,12 +350,14 @@ pub async fn work(
                     .map_err(|e| ApiError::Internal(e.to_string()))??;
                 match build_work_item(&state, run_id).await? {
                     Some(item) => {
+                        handoff.complete();
                         return Ok(Json(WorkResponse {
                             run: Some(item),
                             exit: false,
-                        }))
+                        }));
                     }
                     None => {
+                        handoff.complete();
                         state.supervisor.run_finished(run_id);
                         continue;
                     }

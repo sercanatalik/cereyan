@@ -23,6 +23,8 @@ pub enum StoreError {
     UniqueConflict { existing: i64 },
     #[error("invalid {0}")]
     Invalid(String),
+    #[error("commit failed: {0}")]
+    CommitFailed(String),
     #[error("writer thread is gone")]
     WriterGone,
     #[error(transparent)]

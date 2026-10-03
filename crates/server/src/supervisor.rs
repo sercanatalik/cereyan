@@ -451,6 +451,10 @@ struct Inner {
     /// Creation happens with `inner` released, so without this the cap check
     /// and the usable count would both miss engines already on their way.
     starting: HashMap<EngineKey, usize>,
+    /// Runs taken off the queue whose work item has not yet reached the
+    /// engine. Kept so a failed or abandoned hand-off can put the run back in
+    /// line instead of leaving it dequeued with its resources held.
+    handoff: HashMap<i64, QueuedRun>,
 }
 
 impl Inner {
@@ -588,7 +592,15 @@ pub struct Supervisor {
     engine_max_runs: u32,
     pub cancel_grace: Duration,
     pub heartbeat: Duration,
+    /// Module mtimes by engine key, each with when it was read. `take_work`
+    /// runs on every engine poll and every wake-up, so the stat is cached for
+    /// `MTIME_TTL` and never taken under `inner`.
+    mtimes: Mutex<HashMap<EngineKey, (Instant, Option<SystemTime>)>>,
 }
+
+/// How long a module's mtime is trusted before it is read again: an edit is
+/// noticed within this long, rather than on the very next poll.
+const MTIME_TTL: Duration = Duration::from_secs(1);
 
 /// Work handed to an engine.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -664,7 +676,29 @@ impl Supervisor {
             engine_max_runs: config.engine_max_runs.max(1),
             cancel_grace: Duration::from_secs(config.cancel_grace_secs.max(1)),
             heartbeat: Duration::from_secs(config.heartbeat_secs.max(1)),
+            mtimes: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// The module's mtime, read at most once per `MTIME_TTL` per key.
+    fn module_mtime(&self, key: &EngineKey) -> Option<SystemTime> {
+        if let Some((at, mtime)) = self
+            .mtimes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(key)
+        {
+            if at.elapsed() < MTIME_TTL {
+                return *mtime;
+            }
+        }
+        // The stat runs with no lock held.
+        let mtime = key.module_mtime();
+        self.mtimes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.clone(), (Instant::now(), mtime));
+        mtime
     }
 
     /// The pool size in force: how many engines may run at once.
@@ -1631,7 +1665,9 @@ impl Supervisor {
             engine.current_run = Some(item.run_id);
             engine.run_since = Some(Instant::now());
         }
-        WorkDecision::Run(item.run_id)
+        let run_id = item.run_id;
+        inner.handoff.insert(run_id, item);
+        WorkDecision::Run(run_id)
     }
 
     /// Give an engine its next run, or tell it to exit. Returns Ok(None)
@@ -1643,9 +1679,16 @@ impl Supervisor {
         key: &EngineKey,
         server_url: &str,
     ) -> WorkDecision {
+        let location = Location::of_engine(engine_id);
+        // Read before taking `inner`: a filesystem stat must not hold up every
+        // other engine poll and enqueue, least of all on a network mount.
+        let mtime = if location == Location::Local {
+            self.module_mtime(key)
+        } else {
+            None
+        };
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let inner = &mut *guard;
-        let location = Location::of_engine(engine_id);
         let known = inner.engines.contains_key(engine_id);
         if !known {
             // An engine we did not spawn (previous server) or one that
@@ -1668,7 +1711,7 @@ impl Supervisor {
         engine.current_run = None;
         engine.run_since = None;
         engine.drained_at = None;
-        let stale = match (engine.module_mtime, key.module_mtime()) {
+        let stale = match (engine.module_mtime, mtime) {
             (Some(a), Some(b)) => a != b,
             _ => false,
         };
@@ -1745,11 +1788,44 @@ impl Supervisor {
             engine.current_run = Some(item.run_id);
             engine.run_since = Some(Instant::now());
         }
-        WorkDecision::Run(item.run_id)
+        let run_id = item.run_id;
+        inner.handoff.insert(run_id, item);
+        WorkDecision::Run(run_id)
+    }
+
+    /// The work item for a taken run reached its engine: nothing to undo.
+    pub fn handoff_done(&self, run_id: i64) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.handoff.remove(&run_id);
+    }
+
+    /// Undo `take_work` for a run whose work item never reached its engine:
+    /// free the engine and the resources and put the run back in line.
+    /// Returns whether the run was requeued.
+    pub fn abort_handoff(&self, run_id: i64) -> bool {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(item) = inner.handoff.remove(&run_id) else {
+            return false;
+        };
+        for e in inner.engines.values_mut() {
+            if e.current_run == Some(run_id) {
+                e.current_run = None;
+                e.run_since = None;
+            }
+        }
+        inner.push(item);
+        drop(inner);
+        self.resources
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .release_all(run_id);
+        self.notify.notify_waiters();
+        true
     }
 
     pub fn run_finished(&self, run_id: i64) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.handoff.remove(&run_id);
         for e in inner.engines.values_mut() {
             if e.current_run == Some(run_id) {
                 e.current_run = None;
@@ -2029,12 +2105,10 @@ fn supervise_once(state: &Arc<AppState>) {
     }
     // 2. Heartbeat timeouts for runs whose engine we do not own as a child.
     let heartbeat_limit = sup.heartbeat * 3;
-    for active in state.index.active_runs() {
-        if active.state.state_type != StateType::Running
-            && active.state.state_type != StateType::Cancelling
-        {
-            continue;
-        }
+    for active in state
+        .index
+        .active_runs_in(&[StateType::Running, StateType::Cancelling])
+    {
         let Some(pid) = active.engine_pid else {
             continue;
         };
@@ -2088,10 +2162,7 @@ fn supervise_once(state: &Arc<AppState>) {
         }
     }
     // 3. Cancellation escalation.
-    for active in state.index.active_runs() {
-        if active.state.state_type != StateType::Cancelling {
-            continue;
-        }
+    for active in state.index.active_runs_in(&[StateType::Cancelling]) {
         let Some(since) = active.cancelling_since else {
             continue;
         };

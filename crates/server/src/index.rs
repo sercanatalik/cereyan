@@ -312,6 +312,20 @@ impl ActiveIndex {
             .collect()
     }
 
+    /// Active runs in one of `types`. Filters under the read lock and clones
+    /// only the matches, for periodic sweeps that look at a few states of a
+    /// set that may hold a large backlog of Scheduled runs.
+    pub fn active_runs_in(&self, types: &[StateType]) -> Vec<ActiveRun> {
+        self.inner
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .active
+            .values()
+            .filter(|r| types.contains(&r.state.state_type))
+            .cloned()
+            .collect()
+    }
+
     /// Active runs of one flow. Clones only this flow's rows rather than the
     /// whole active set, which is what a per-flow read used to do.
     pub fn active_runs_for_flow(&self, flow_id: i64) -> Vec<ActiveRun> {
