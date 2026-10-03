@@ -1146,18 +1146,28 @@ async fn call_tool(
                 None => None,
             };
             let project = arg_str(args, "project");
-            let rows = state.store.list_schedules(flow_id)?;
-            let flows = state.store.list_flows(None)?;
+            let st = state.clone();
+            let (rows, flows) = tokio::task::spawn_blocking(move || {
+                let rows = st.store.list_schedules(flow_id)?;
+                let flows = st.store.list_flows(None)?;
+                // Only the rows shown are decorated, with one batched query.
+                let rows: Vec<_> = rows
+                    .into_iter()
+                    .filter(|row| {
+                        flows.iter().any(|f| {
+                            f.id == row.flow_id && project.as_ref().is_none_or(|p| &f.project == p)
+                        })
+                    })
+                    .collect();
+                let rows = crate::api::schedules::decorate_all(&st, rows);
+                Ok::<_, cereyan_store::StoreError>((rows, flows))
+            })
+            .await
+            .map_err(|e| ToolError::Failed(e.to_string()))??;
             let schedules: Vec<Value> = rows
                 .into_iter()
                 .filter_map(|row| {
                     let flow = flows.iter().find(|f| f.id == row.flow_id)?;
-                    if let Some(p) = &project {
-                        if &flow.project != p {
-                            return None;
-                        }
-                    }
-                    let row = crate::api::schedules::decorate(state, row);
                     Some(json!({
                         "id": row.id, "flow": flow.name, "project": flow.project,
                         "schedule": row.schedule, "catchup": row.catchup, "catchup_max": row.catchup_max,

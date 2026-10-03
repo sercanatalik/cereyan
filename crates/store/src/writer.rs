@@ -578,8 +578,19 @@ impl WriteCommand {
     }
 }
 
-/// Deferred acknowledgement: the closure is run after the commit.
-type Ack = Box<dyn FnOnce() + Send>;
+/// Deferred acknowledgement, sent once the enclosing transaction settles.
+///
+/// `failed` records whether the command itself returned an error, so its
+/// savepoint is rolled back; `send` receives the commit error, if any, so a
+/// result computed inside a transaction that failed to commit is never
+/// delivered as a success.
+struct Ack {
+    failed: bool,
+    send: SendAck,
+}
+
+/// Delivers a reply, given the commit error of its transaction, if any.
+type SendAck = Box<dyn FnOnce(Option<&str>) + Send>;
 
 /// Commit latency bounds in seconds, a millisecond to a second.
 pub const COMMIT_BOUNDS: [f64; 8] = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.5, 1.0];
@@ -651,9 +662,12 @@ pub fn run(
         }
         last_was_batch = batch.len() > 1;
 
-        let mut acks: Vec<Ack> = Vec::with_capacity(batch.len());
+        // Acks settled with the outcome of their transaction, in order.
+        let mut settled: Vec<(Ack, Option<String>)> = Vec::with_capacity(batch.len());
+        // Acks of commands inside the open transaction, not yet committed.
+        let mut group: Vec<Ack> = Vec::new();
         let mut shutdown = false;
-        let mut in_tx = conn.execute_batch("BEGIN IMMEDIATE").is_ok();
+        let mut in_tx = begin(&conn);
         for cmd in batch {
             if let WriteCommand::Shutdown = cmd {
                 shutdown = true;
@@ -661,20 +675,47 @@ pub fn run(
             }
             if cmd.outside_transaction() {
                 if in_tx {
-                    commit(&conn, &commits, &stats);
+                    let err = commit(&conn, &commits, &stats);
+                    settled.extend(group.drain(..).map(|a| (a, err.clone())));
                 }
-                acks.push(execute(&conn, cmd));
-                in_tx = conn.execute_batch("BEGIN IMMEDIATE").is_ok();
+                settled.push((execute(&conn, cmd), None));
+                in_tx = begin(&conn);
                 continue;
             }
-            acks.push(execute(&conn, cmd));
+            if !in_tx {
+                // No transaction (BEGIN failed): each statement autocommits.
+                settled.push((execute(&conn, cmd), None));
+                continue;
+            }
+            // A savepoint per command keeps a command that fails partway
+            // from committing its partial writes with the rest of the group.
+            let savepoint = conn.execute_batch("SAVEPOINT cmd").is_ok();
+            let ack = execute(&conn, cmd);
+            if conn.is_autocommit() {
+                // SQLite rolled the whole transaction back (SQLITE_FULL,
+                // IOERR, ...): nothing in this group was written.
+                let err = Some("transaction rolled back by the database".to_string());
+                settled.extend(group.drain(..).map(|a| (a, err.clone())));
+                settled.push((ack, err));
+                in_tx = begin(&conn);
+                continue;
+            }
+            if savepoint {
+                if ack.failed {
+                    let _ = conn.execute_batch("ROLLBACK TO cmd; RELEASE cmd");
+                } else {
+                    let _ = conn.execute_batch("RELEASE cmd");
+                }
+            }
+            group.push(ack);
         }
         if in_tx {
-            commit(&conn, &commits, &stats);
+            let err = commit(&conn, &commits, &stats);
+            settled.extend(group.drain(..).map(|a| (a, err.clone())));
         }
         last_commit = Instant::now();
-        for ack in acks {
-            ack();
+        for (ack, err) in settled {
+            (ack.send)(err.as_deref());
         }
         if shutdown {
             break;
@@ -683,24 +724,44 @@ pub fn run(
     let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
 }
 
-fn commit(conn: &Connection, commits: &AtomicU64, stats: &CommitStats) {
+fn begin(conn: &Connection) -> bool {
+    match conn.execute_batch("BEGIN IMMEDIATE") {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("cereyan writer: begin failed: {e}");
+            false
+        }
+    }
+}
+
+/// Commits the open transaction; on failure rolls back and returns the error.
+fn commit(conn: &Connection, commits: &AtomicU64, stats: &CommitStats) -> Option<String> {
     let started = Instant::now();
     match conn.execute_batch("COMMIT") {
         Ok(()) => {
             commits.fetch_add(1, Ordering::Relaxed);
             stats.observe(started.elapsed());
+            None
         }
         Err(e) => {
             eprintln!("cereyan writer: commit failed: {e}");
             let _ = conn.execute_batch("ROLLBACK");
+            Some(e.to_string())
         }
     }
 }
 
 fn ack<T: Send + 'static>(reply: Reply<T>, value: Result<T>) -> Ack {
-    Box::new(move || {
-        let _ = reply.send(value);
-    })
+    Ack {
+        failed: value.is_err(),
+        send: Box::new(move |commit_err| {
+            let value = match commit_err {
+                Some(e) if value.is_ok() => Err(StoreError::CommitFailed(e.to_string())),
+                _ => value,
+            };
+            let _ = reply.send(value);
+        }),
+    }
 }
 
 fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
@@ -1276,7 +1337,10 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
         } => ack(reply, reset(conn, scope, &live_flows)),
         WriteCommand::Vacuum(reply) => ack(reply, conn.execute_batch("VACUUM").map_err(Into::into)),
         WriteCommand::Flush(reply) => ack(reply, Ok(())),
-        WriteCommand::Shutdown => Box::new(|| {}),
+        WriteCommand::Shutdown => Ack {
+            failed: false,
+            send: Box::new(|_| {}),
+        },
     }
 }
 
@@ -2446,5 +2510,91 @@ mod retention_tests {
         let gone = delete_expired_runs(&conn, 100, 100, 1, 500).unwrap();
         assert_eq!(gone.iter().map(|g| g.0).collect::<Vec<_>>(), vec![5, 6, 8]);
         assert_eq!(ids(&conn), vec![3, 4, 9]);
+    }
+}
+
+#[cfg(test)]
+mod group_commit_tests {
+    use super::*;
+
+    fn conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE t (k TEXT PRIMARY KEY);
+             CREATE TABLE parent (id INTEGER PRIMARY KEY);
+             CREATE TABLE child (pid INTEGER REFERENCES parent (id) DEFERRABLE INITIALLY DEFERRED);",
+        )
+        .unwrap();
+        conn
+    }
+
+    type Exec = ExecFn;
+
+    /// Queue every command before the writer starts, so they share one
+    /// transaction, then run the writer to completion.
+    fn run_batch(conn: Connection, cmds: Vec<Exec>) -> Vec<Result<Value>> {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let mut replies = Vec::new();
+        for f in cmds {
+            let (rtx, rrx) = crossbeam_channel::bounded(1);
+            tx.send(WriteCommand::Exec(f, rtx)).unwrap();
+            replies.push(rrx);
+        }
+        tx.send(WriteCommand::Shutdown).unwrap();
+        run(
+            conn,
+            rx,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(CommitStats::default()),
+        );
+        replies.into_iter().map(|r| r.recv().unwrap()).collect()
+    }
+
+    fn insert(k: &'static str) -> Exec {
+        Box::new(move |c: &Connection| {
+            c.execute("INSERT INTO t (k) VALUES (?1)", [k])?;
+            Ok(Value::Null)
+        })
+    }
+
+    #[test]
+    fn a_failed_command_does_not_commit_its_partial_writes() {
+        let path = std::env::temp_dir().join(format!("cereyan-writer-{}.db", new_id()));
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch("CREATE TABLE t (k TEXT PRIMARY KEY)")
+            .unwrap();
+        let failing: Exec = Box::new(|c: &Connection| {
+            c.execute("INSERT INTO t (k) VALUES ('b')", [])?;
+            Err(StoreError::Invalid("after a write".into()))
+        });
+        let out = run_batch(c, vec![insert("a"), failing, insert("c")]);
+        assert!(out[0].is_ok() && out[1].is_err() && out[2].is_ok());
+        let c = Connection::open(&path).unwrap();
+        let keys: Vec<String> = c
+            .prepare("SELECT k FROM t ORDER BY k")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(keys, vec!["a", "c"], "the failed command's write was kept");
+    }
+
+    #[test]
+    fn a_failed_commit_fails_every_reply_in_the_group() {
+        let orphan: Exec = Box::new(|c: &Connection| {
+            // The deferred foreign key is checked only at COMMIT.
+            c.execute("INSERT INTO child (pid) VALUES (99)", [])?;
+            Ok(Value::Null)
+        });
+        let out = run_batch(conn(), vec![insert("a"), orphan]);
+        for r in &out {
+            assert!(
+                matches!(r, Err(StoreError::CommitFailed(_))),
+                "a reply claimed success for a rolled-back write: {r:?}"
+            );
+        }
     }
 }

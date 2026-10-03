@@ -108,18 +108,63 @@ pub struct PreviewResponse {
     pub timezone: String,
 }
 
-pub(crate) fn decorate(state: &AppState, mut row: ScheduleRow) -> ScheduleRow {
+pub(crate) fn decorate(state: &AppState, row: ScheduleRow) -> ScheduleRow {
+    let active = if row.schedule.is_continuous() && row.active {
+        state
+            .store
+            .active_runs_of_schedule(row.id)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    decorate_with(state, row, active)
+}
+
+/// `decorate` for a list: the unfinished runs of every continuous schedule
+/// come from one query rather than one per row.
+pub(crate) fn decorate_all(state: &AppState, rows: Vec<ScheduleRow>) -> Vec<ScheduleRow> {
+    let ids: Vec<i64> = rows
+        .iter()
+        .filter(|r| r.schedule.is_continuous() && r.active)
+        .map(|r| r.id)
+        .collect();
+    let mut active = if ids.is_empty() {
+        Default::default()
+    } else {
+        state
+            .store
+            .active_runs_of_schedules(&ids)
+            .unwrap_or_default()
+    };
+    rows.into_iter()
+        .map(|row| {
+            let runs = active.remove(&row.id).unwrap_or_default();
+            decorate_with(state, row, runs)
+        })
+        .collect()
+}
+
+/// Decorate a row given its schedule's unfinished runs, oldest first.
+fn decorate_with(
+    state: &AppState,
+    mut row: ScheduleRow,
+    active: Vec<cereyan_core::Run>,
+) -> ScheduleRow {
     if let Some(cached) = state.scheduler.get(row.id) {
         row.next_fire = cached.next_fire;
     }
     if row.schedule.is_continuous() {
-        let (loop_state, waiting) = loop_state(state, &row);
+        let (loop_state, waiting) = loop_state(state, &row, active);
         row.loop_state = Some(loop_state.into());
         // The waiting run is the truth for when the loop goes next. The cache
         // is updated only after that run is created, so a read in between
         // would report a waiting loop with no next fire.
+        //
+        // Matching `seed_continuous`, a fire already passed is not a next
+        // fire: the run's `Due` timer is about to queue it.
         if let Some(fire) = waiting.and_then(|r| r.scheduled_time) {
-            row.next_fire = Some(fire + crate::scheduler::jitter_offset(row.id, fire, row.jitter));
+            let due = fire + crate::scheduler::jitter_offset(row.id, fire, row.jitter);
+            row.next_fire = Some(due).filter(|d| *d > now_micros());
         }
     }
     row
@@ -127,14 +172,14 @@ pub(crate) fn decorate(state: &AppState, mut row: ScheduleRow) -> ScheduleRow {
 
 /// Where a continuous schedule's loop is: its one unfinished run decides. The
 /// run is returned when it is the one waiting out the delay.
-fn loop_state(state: &AppState, row: &ScheduleRow) -> (&'static str, Option<cereyan_core::Run>) {
+fn loop_state(
+    state: &AppState,
+    row: &ScheduleRow,
+    mut active: Vec<cereyan_core::Run>,
+) -> (&'static str, Option<cereyan_core::Run>) {
     if !row.active {
         return ("paused", None);
     }
-    let mut active = state
-        .store
-        .active_runs_of_schedule(row.id)
-        .unwrap_or_default();
     let Some(run) = active.pop() else {
         return ("waiting", None);
     };
@@ -172,10 +217,14 @@ pub async fn list_schedules(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> ApiResult<Json<Vec<ScheduleRow>>> {
-    let rows = state.store.list_schedules(Some(id))?;
-    Ok(Json(
-        rows.into_iter().map(|r| decorate(&state, r)).collect(),
-    ))
+    // Store reads: off the async workers that serve engine long-polls.
+    let rows = tokio::task::spawn_blocking(move || {
+        let rows = state.store.list_schedules(Some(id))?;
+        Ok::<_, cereyan_store::StoreError>(decorate_all(&state, rows))
+    })
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))??;
+    Ok(Json(rows))
 }
 
 #[utoipa::path(post, path = "/api/flows/{id}/schedules", params(("id" = i64, Path)), request_body = ScheduleBody, responses((status = 201, body = ScheduleRow), (status = 422)))]

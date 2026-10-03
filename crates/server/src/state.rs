@@ -426,7 +426,7 @@ impl AppState {
 
     /// Rebuild the working set from the store and adopt or crash runs that
     /// were in flight when the previous server stopped.
-    pub fn reconcile(&self) -> Result<(), ServerError> {
+    pub fn reconcile(self: &Arc<Self>) -> Result<(), ServerError> {
         let flows = self.store.list_flows(None)?;
         self.index.load_counts(
             self.store.run_counts()?,
@@ -444,6 +444,8 @@ impl AppState {
             .ok()
             .flatten()
             .is_some();
+        // Crash chains whose rerun timer died with the previous server.
+        crate::dispatch::rearm_crash_chains(self);
         for run in self.store.active_runs()? {
             let Some(flow) = flows.iter().find(|f| f.id == run.flow_id) else {
                 continue;
@@ -490,9 +492,14 @@ impl AppState {
                         self.supervisor.adopt(&run, key);
                     } else {
                         self.index.adopt_run(&run, key);
-                        let state = State::new(StateType::Crashed)
-                            .with_message("server restarted while run was in progress");
-                        let _ = self.transition_run(run.id, state, false);
+                        // Through the crash chain, so the run is retried (or
+                        // failed at its limit) rather than left Crashed with
+                        // no rerun, which stalls a continuous schedule.
+                        crate::dispatch::crash_run(
+                            self,
+                            run.id,
+                            "server restarted while run was in progress",
+                        );
                     }
                 }
             }

@@ -378,11 +378,51 @@ pub fn crash_run(state: &Arc<AppState>, run_id: i64, message: &str) {
     }
 }
 
+/// How far back startup looks for crash chains a restart interrupted.
+const CRASH_CHAIN_LOOKBACK_MICROS: i64 = 24 * 3_600 * 1_000_000;
+
+/// Re-arm the rerun of every recent crash chain that has no follow-up run.
+///
+/// `crash_run` arms the rerun on the in-memory timer only, so a restart inside
+/// its 5-15 s window would end the chain for good, and a continuous schedule
+/// would keep counting the childless Crashed run as active and never loop again.
+pub fn rearm_crash_chains(state: &Arc<AppState>) {
+    let since = now_micros() - CRASH_CHAIN_LOOKBACK_MICROS;
+    let Ok(ids) = state.store.crashed_without_rerun(since) else {
+        return;
+    };
+    let default_limit = state
+        .crash_retries_default
+        .load(std::sync::atomic::Ordering::Relaxed);
+    for run_id in ids {
+        let Ok(Some(run)) = state.store.get_run(run_id) else {
+            continue;
+        };
+        let Ok(Some(flow)) = state.store.get_flow(run.flow_id) else {
+            continue;
+        };
+        let limit = FlowOptions::from_map(&flow.options)
+            .crash_retries
+            .unwrap_or(default_limit);
+        if run.attempt < limit {
+            state
+                .timer
+                .push(now_micros() + 200_000, TimerEvent::CrashRerun(run_id));
+        }
+    }
+}
+
 /// Create the next run of a crash chain.
 pub fn crash_rerun(state: &Arc<AppState>, crashed_id: i64) {
     let Ok(Some(crashed)) = state.store.get_run(crashed_id) else {
         return;
     };
+    // Once per chain link: a re-armed rerun must not fork the chain.
+    if crashed.state.state_type != StateType::Crashed
+        || state.store.has_child_run(crashed_id).unwrap_or(true)
+    {
+        return;
+    }
     let Ok(Some(flow)) = state.store.get_flow(crashed.flow_id) else {
         return;
     };

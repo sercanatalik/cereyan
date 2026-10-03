@@ -727,23 +727,33 @@ pub fn continuous_key(schedule_id: i64) -> String {
     format!("continuous:{schedule_id}")
 }
 
+/// Serializes `seed_continuous` and `join_now` for one schedule. Each reads the
+/// waiting run, arms it and updates the cached row; interleaved, a seed that
+/// created the run before a join moved it to now re-arms it for its old time
+/// afterwards, and the joined run waits out the full delay.
+///
+/// The race is per schedule, so the lock is striped by schedule id: unrelated
+/// schedules finishing runs together do not queue behind each other's store
+/// round trips, and the stripes are fixed, so nothing grows with the number
+/// of schedules a long-running server has seen.
+const CONTINUOUS_STRIPES: usize = 64;
+
+static CONTINUOUS_LOCKS: [std::sync::Mutex<()>; CONTINUOUS_STRIPES] =
+    [const { std::sync::Mutex::new(()) }; CONTINUOUS_STRIPES];
+
+fn continuous_lock(schedule_id: i64) -> std::sync::MutexGuard<'static, ()> {
+    CONTINUOUS_LOCKS[schedule_id.rem_euclid(CONTINUOUS_STRIPES as i64) as usize]
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 /// A continuous schedule has at most one run that has not finished. With none,
 /// create it, due at the later of now and the last run's end plus `delay`, so
 /// the wait holds no processor. Called on activation, at start, on resume, and
 /// when a run of the schedule reaches a final state; seeding twice leaves one
 /// run, because the store refuses a second holder of the schedule's key.
-/// Held across `seed_continuous` and `join_now`. Each reads the waiting run,
-/// arms it and updates the cached row; interleaved, a seed that created the
-/// run before a join moved it to now re-arms it for its old time afterwards,
-/// and the joined run waits out the full delay.
-static CONTINUOUS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn continuous_lock() -> std::sync::MutexGuard<'static, ()> {
-    CONTINUOUS_LOCK.lock().unwrap_or_else(|e| e.into_inner())
-}
-
 fn seed_continuous(state: &Arc<AppState>, row: &ScheduleRow, flow: &Flow, delay: f64) {
-    let _loop = continuous_lock();
+    let _loop = continuous_lock(row.id);
     let now = now_micros();
     let active = state
         .store
@@ -797,7 +807,7 @@ fn seed_continuous(state: &Arc<AppState>, row: &ScheduleRow, flow: &Flow, delay:
 /// once. `Err` when the schedule is not continuous, is paused, or has no run
 /// waiting (it is already in line or running).
 pub fn join_now(state: &Arc<AppState>, schedule_id: i64) -> Result<i64, String> {
-    let _loop = continuous_lock();
+    let guard = continuous_lock(schedule_id);
     let row = state
         .scheduler
         .get(schedule_id)
@@ -828,12 +838,35 @@ pub fn join_now(state: &Arc<AppState>, schedule_id: i64) -> Result<i64, String> 
     {
         return Err("the run started meanwhile".into());
     }
-    arm_run(state, waiting.id, now, false);
+    let run = state.store.get_run(waiting.id).ok().flatten();
+    let flow = run
+        .as_ref()
+        .and_then(|r| state.store.get_flow(r.flow_id).ok().flatten());
+    // Join the line now rather than through a `Due` timer, so the reply (and
+    // any read after it) already sees the run in line instead of still
+    // waiting, with a jittered next fire, for a timer to queue it. Held by
+    // the global pause, it is armed instead and resume_all re-arms it.
+    let enqueue_now = match (&run, &flow) {
+        (Some(run), Some(flow)) if !state.is_paused() => {
+            state.timer.remove_run_events(run.id);
+            Some((run.clone(), flow.clone()))
+        }
+        _ => {
+            arm_run(state, waiting.id, now, false);
+            None
+        }
+    };
     let mut updated = row;
     updated.next_fire = None;
     state.scheduler.put(updated);
-    if let Ok(Some(run)) = state.store.get_run(waiting.id) {
-        state.publish_run(&run);
+    // Enqueueing can end the run (an overlap policy), and its final state
+    // seeds the loop again, which takes this lock: release it first.
+    drop(guard);
+    if let Some((run, flow)) = enqueue_now {
+        crate::dispatch::enqueue_run(state, &run, &flow, None);
+    }
+    if let Some(run) = &run {
+        state.publish_run(run);
     }
     state.publish_schedule(schedule_id);
     Ok(waiting.id)
