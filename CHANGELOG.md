@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.4 (2026-10-03)
+
+- **Fix: a continuous schedule stopped looping after a server restart.** A run whose engine died while the server was down was marked Crashed without a retry, and a Crashed run with no retry still counts as the loop's active run, so no next run was ever created. Startup now sends such runs through the crash-retry chain, and schedules again any retry that was waiting when the previous server stopped.
+- **Fix: a database write could be reported as saved after it was rolled back.** Writes are committed in groups. If the commit failed, every caller in the group still got a success reply. They now get an error. A write that fails partway is also rolled back on its own, instead of committing its partial changes with the rest of the group.
+- **Fix: a run could be lost between the queue and its engine.** If handing a run to an engine failed, or the engine's request was dropped, the run left the queue but never reached the engine, and its resources stayed held. It now goes back in line with its resources released.
+- **Fix: "Run now" on a continuous schedule** queues the run at once, and the schedule no longer shows a next run time in the future or one that has already passed.
+- **Long-running servers:** cancelled timers no longer leak memory. Continuous schedules no longer wait on each other's locks. Engine polls no longer check the module file while holding the queue lock. The supervisor's half-second check no longer copies every queued run. Schedule lists use one database query instead of one per schedule.
+
 ## 3.1.3 (2026-10-02)
 
 - **Fix: an idle processor could sleep for up to 30 seconds with a run waiting for it.** An engine registered for its wake-up only after finding no work, so a run that became ready in between, because another run finished or a resource was released, waited until the engine's poll timed out. The same fix applies to a task waiting to acquire a resource.
