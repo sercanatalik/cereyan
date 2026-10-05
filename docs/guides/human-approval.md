@@ -1,6 +1,6 @@
 # How to pause a run for approval
 
-Call `wait_for_input` where the flow needs a decision. The run pauses with the question visible in the UI and the API, the engine is released, and the answer resumes it. Pausing needs a running server; offline, the question is asked on the terminal.
+Call `wait_for_input` where the flow needs a decision. The run pauses with the question visible in the UI and the API, the engine is released, and the answer resumes it. Pausing needs a running server; offline, the question is asked on the terminal. A question is a message on the `input` topic: `wait_for_input(prompt)` is `receive("input", prompt=prompt)`, and [Send a message to a running flow](messages.md) covers other topics, timeouts, and state a run publishes while it waits.
 
 ## Ask the question
 
@@ -76,4 +76,4 @@ An answer is used only while the prompt at that position still matches the one i
 
 Without a server, `wait_for_input` reads the answer from the terminal (as JSON when a schema is given) and raises `CereyanError` when there is no interactive terminal, so scripts under cron fail fast instead of hanging.
 
-Related: [Use cereyan with an AI agent](agents.md) for answering questions from an agent, [Cache task results](cache-results.md).
+Related: [Send a message to a running flow](messages.md), [Use cereyan with an AI agent](agents.md) for answering questions from an agent, [Cache task results](cache-results.md).

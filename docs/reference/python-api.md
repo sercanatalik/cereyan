@@ -115,9 +115,13 @@ assert report().endswith("/record-0")   # "report#1: <run name>/record-0"
     options:
       members: [get, set, unset]
 
-## Human input
+## Messages and human input
+
+::: cereyan.receive
 
 ::: cereyan.wait_for_input
+
+::: cereyan.publish_state
 
 ## Durable waits
 
@@ -163,7 +167,7 @@ The module-level functions use the server recorded in `server.json` of the runti
 
 ::: cereyan.client.Client
     options:
-      members: [health, server, flows, flow, runs, get_run, task_runs, logs, resume, cancel, delete_run, counts, backfill, backfill_status, cancel_backfill, schedules, upcoming, settings, events, rules, create_rule, variables, artifacts, submit, run]
+      members: [health, server, flows, flow, runs, get_run, task_runs, logs, resume, send_message, run_state, cancel, delete_run, counts, backfill, backfill_status, cancel_backfill, schedules, upcoming, settings, events, rules, create_rule, variables, artifacts, submit, run]
 
 ::: cereyan.client.find_server
 

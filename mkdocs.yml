@@ -54,7 +54,7 @@ theme:
 # pyproject.toml, Cargo.toml, Cargo.lock, uv.lock, ui/package.json and
 # python/cereyan/__init__.py.
 extra:
-  version_display: "2.3.0"
+  version_display: "3.2.0"
 
 extra_css:
   - stylesheets/brand.css
@@ -180,6 +180,7 @@ nav:
           - React to events with rules: guides/rules.md
           - Detect when something did not happen: guides/detect-missing-events.md
           - Pause a run for approval: guides/human-approval.md
+          - Send a message to a running flow: guides/messages.md
           - Wait without holding an engine: guides/wait-durably.md
       - Extending:
           - Add custom HTTP routes: guides/custom-routes.md
@@ -216,6 +217,7 @@ nav:
       - Durable load: examples/durable_load.md
       - Admission control: examples/admission.md
       - Freshness and deadlines: examples/freshness.md
+      - Messages: examples/messages.md
   - Design:
       - Design and limitations: design/limitations.md
       - Architecture: design/architecture.md

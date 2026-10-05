@@ -1,6 +1,6 @@
 # Tour of the UI
 
-`cereyan serve` opens the UI at `http://127.0.0.1:4200`. It is built for a desktop browser and updates live from the server's event stream. One top bar carries everything that is not a page: the eight sections (Dashboard, Runs, Flows, Events, Artifacts, Rules, Variables, and Settings), a search box (or **⌘K**, **Ctrl+K** elsewhere) that jumps to a section, a flow, a run by name, or an artifact by key, the connection indicator that reads **live** while the stream is connected, and the theme toggle.
+`cereyan serve` opens the UI at `http://127.0.0.1:4200`. It is built for a desktop browser and updates live from the server's event stream. One top bar carries everything that is not a page: the nine sections (Dashboard, Runs, Queue, Flows, Events, Artifacts, Rules, Variables, and Settings), a search box (or **⌘K**, **Ctrl+K** elsewhere) that jumps to a section, a flow, a run by name, or an artifact by key, the connection indicator that reads **live** while the stream is connected, and the theme toggle.
 
 Dashboard, Runs, Flows, Events, and Artifacts carry the **scope sidebar** on the left: **All projects**, then every project with a bar of its flows' last-run states and its flow count, and under each project its groups, marked when their flows have upstream dependencies. A project with both its own flows and groups lists its own flows as **(project)**. Picking an entry scopes the page and is kept across reloads: Runs and Flows narrow to the group, and Dashboard, Events, and Artifacts to its project. A link carrying `?project=` or `?group=` overrides the sidebar for that page. How projects and groups are declared is in [How to organise flows into projects and groups](../guides/organise-projects-and-groups.md).
 
@@ -24,7 +24,7 @@ Every run in the sidebar's scope, newest first, in collapsible sections nested p
 
 ![Run detail as a workbench: the header band, the tasks rail on the left, and the Logs tab with the level filter, search, and Follow switch over the run's log lines](../images/run-detail.png)
 
-The header band shows the run's name, state, flow, tags, and a line with its start, elapsed or total time, attempt, what created it, and its parameters. **Run again** and **Cancel** sit on the right; **Delete** is in the overflow menu. A paused run shows its question and the **Resume** form in the band.
+The header band shows the run's name, state, flow, tags, and a line with its start, elapsed or total time, attempt, what created it, where it ran (the server or a worker's name with the processor slot, linking to the Workers tab), and its parameters. **Run again** and **Cancel** sit on the right; **Delete** is in the overflow menu. A paused run shows its question, or the topic it waits for a message on, and the **Resume** form in the band; a run sleeping or waiting for an event or a target says so, with **Wake now**.
 
 The **tasks rail** on the left lists every task run with its state, duration, and, for a task waiting to retry, the attempt and a countdown. Click a task to focus it: the **Logs** tab then shows only that task run's lines, with a chip you can clear. A task run also has a page of its own, opened from the **Task runs** tab of the runs page or from a bar on the Timeline, carrying its logs, artifacts, and details. The tabs on the right:
 
@@ -37,6 +37,12 @@ The **tasks rail** on the left lists every task run with its state, duration, an
 ![The run page in the dark theme](../images/run-detail-dark.png)
 
 ![The Timeline tab: the run's task runs as bars on a time axis, with the switch to the dependency view](../images/run-timeline.png)
+
+## Queue
+
+![The Queue page: a Processors card showing four idle processors of 14 CPUs with add and remove buttons and a CPU gauge, an empty In line table, and three runs for later under Joining the line](../images/queue.png)
+
+The one line every run waits in, whatever created it. **Processors** shows the engine pool as tiles grouped by host, each running, idle, or draining, with its run and module, over a CPU gauge; **+** and **−** add or remove processors while the server runs, and a removed processor finishes its run first. **In line** lists the runs in dispatch order with why each can or cannot start yet and how many went ahead of it. **Joining the line** lists the runs due in the next hour, including the waiting run of each continuous schedule with a switch to pause or resume its loop; none of them holds a processor. The **Workers** tab lists every remote worker with its status, host details, labels, version, the modules whose code differs from the server's, a six-hour schedule per processor, and **Drain**, **Resume**, and **Forget worker**. How the queue orders runs is in [Engines and the home directory](../concepts/engines-and-home.md#processors-and-the-queue), and workers in [How to run across machines](../guides/run-across-machines.md).
 
 ## Flows
 
@@ -52,7 +58,7 @@ Each row shows the flow's name and description, the schedule in words with the n
 
 ![Flow detail on the Upcoming tab: a skipped fire struck through with a dashed Skipped badge, who skipped it and when, and Undo; the materialised runs with how far off each is; and the fires past the look-ahead listed as projected below a divider, under the schedule summary with its skipped count, Reschedule, and the Run, Backfill, Skip next, and Pause actions](../images/flow-detail.png)
 
-The flow's description (rendered from its docstring), its schedule summary with the next fire that will run and how many are skipped, chips for priority, concurrency cap, and overlap policy, the last ten runs as dots, and **Run**, **Backfill**, **Skip next…**, and **Pause** actions, with **Reschedule** beside the schedule summary. Tabs list the runs; the upcoming runs, each with how far off it is and **Skip** or **Undo**, a skipped one saying who skipped it and when, several skippable at once or all from the header checkbox, and the fires past the look-ahead listed as projected, ten more at a time; the schedules with an editor and a preview of upcoming fire times; and the parameter schema.
+The flow's description (rendered from its docstring), its schedule summary with the next fire that will run and how many are skipped, chips for priority, concurrency cap, and overlap policy, the last ten runs as dots, and **Run**, **Backfill**, **Skip next…**, and **Pause** actions, with **Reschedule** beside the schedule summary. Tabs list the runs; the upcoming runs, each with how far off it is and **Skip** or **Undo**, a skipped one saying who skipped it and when, several skippable at once or all from the header checkbox, and the fires past the look-ahead listed as projected, ten more at a time; the schedules with an editor (Cron, Interval, RRule, or Continuous) and a preview of upcoming fire times; and the parameter schema. A continuous schedule shows where its loop is, running or waiting for its delay, with **Join the line now** to move the waiting run to now.
 
 ## Events
 

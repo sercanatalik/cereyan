@@ -1,6 +1,6 @@
 # How to use cereyan with an AI agent
 
-Cereyan has a built-in [MCP](https://modelcontextprotocol.io) server, so an agent can list flows, start runs, follow and diagnose them, backfill, manage schedules, and answer a paused run's question. Nothing extra to install; it ships in the wheel and runs inside `cereyan serve`.
+Cereyan has a built-in [MCP](https://modelcontextprotocol.io) server, so an agent can list flows, start runs, follow and diagnose them, backfill, manage schedules, answer a paused run's question, and send a waiting run a message. Nothing extra to install; it ships in the wheel and runs inside `cereyan serve`.
 
 ## Connect Claude Code or Claude Desktop
 
@@ -49,7 +49,7 @@ assert {"list_flows", "run_flow", "explain_failure", "resume_run"} <= tools
 
 ## What the agent can do
 
-The tool set is curated: eighteen read-only tools (`list_flows`, `list_runs`, `get_run`, `compare_runs`, `run_logs`, `list_events`, `list_artifacts`, `list_rules`, `list_schedules`, `explain_failure`, `list_backfills`, `get_backfill`, `get_flow_source`, `server_health`, `list_variables`, `list_resources`, `flow_dependencies`, `check_flows`) and fifteen that change state (`run_flow`, `rerun_run`, `cancel_run`, `resume_run`, `backfill`, `cancel_backfill`, `create_schedule`, `edit_schedule`, `delete_schedule`, `pause_schedule`, `resume_schedule`, `pause_scheduler`, `resume_scheduler`, `set_variable`). Every description states its effect, every tool carries the MCP `readOnlyHint` and `destructiveHint` annotations so a client can gate approval on them, `backfill` dry-runs unless told otherwise, `list_variables` never returns a secret's value, `get_flow_source` reads only from the flow's own source directory, `check_flows` runs [`cereyan check`](test-a-pipeline.md#check-the-directory-before-serving) on the served directory in a child process, and rule creation is not exposed. The full list with each argument's type, default, and range, and the keys every tool returns, is on the [MCP reference](../reference/mcp.md) page.
+The tool set is curated: twenty read-only tools (`list_flows`, `list_runs`, `get_run`, `compare_runs`, `run_logs`, `list_events`, `list_artifacts`, `list_rules`, `list_schedules`, `explain_failure`, `list_waiting_runs`, `list_backfills`, `get_backfill`, `get_flow_source`, `server_health`, `list_variables`, `list_workers`, `list_resources`, `flow_dependencies`, `check_flows`) and fifteen that change state (`run_flow`, `rerun_run`, `cancel_run`, `resume_run`, `send_message`, `backfill`, `cancel_backfill`, `create_schedule`, `edit_schedule`, `delete_schedule`, `pause_schedule`, `resume_schedule`, `pause_scheduler`, `resume_scheduler`, `set_variable`). Every description states its effect, every tool carries the MCP `readOnlyHint` and `destructiveHint` annotations so a client can gate approval on them, `backfill` dry-runs unless told otherwise, `list_variables` never returns a secret's value, `get_flow_source` reads only from the flow's own source directory, `check_flows` runs [`cereyan check`](test-a-pipeline.md#check-the-directory-before-serving) on the served directory in a child process, and rule creation is not exposed. The full list with each argument's type, default, and range, and the keys every tool returns, is on the [MCP reference](../reference/mcp.md) page.
 
 A flow can publish itself as a tool: `@flow(mcp_tool=True)` lists it as `flow__<project>__<name>` with the flow's parameters as the tool's arguments, so an agent starts it without knowing `run_flow`. Nothing else changes; the run is the same run.
 
@@ -74,9 +74,9 @@ mcp_read_only = true
 
 Or `--mcp-read-only`, `CEREYAN_MCP_READ_ONLY`, or `app.serve(mcp_read_only=True)`. `tools/list` then returns only the tools whose `readOnlyHint` is true (flow tools included in what is hidden), any other tool call answers an error naming read-only mode, and the `initialize` instructions say so. The REST API and the UI are unaffected; to offer both an agent that reads and one that acts, run a second server on the same home and another port.
 
-## Let the agent answer questions
+## Let the agent answer questions and send messages
 
-A flow paused with `wait_for_input` shows its question in `get_run`; the agent answers with `resume_run`. Combine this with a proactive rule on `run.paused` so a human is paged when neither an agent nor a person has answered in time. See [Pause a run for approval](human-approval.md).
+A flow paused with `wait_for_input` shows its question in `get_run`; the agent answers with `resume_run`. A flow paused on `receive(topic)` shows the topic instead, and the agent sends the payload with `send_message`. `list_waiting_runs` returns every paused run with its prompt or topic, so an agent can find the ones it owns. Combine this with a proactive rule on `run.paused` so a human is paged when neither an agent nor a person has answered in time. See [Pause a run for approval](human-approval.md) and [Send a message to a running flow](messages.md).
 
 ## Point the agent at the docs
 

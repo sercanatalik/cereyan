@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **`Client.run_state(run_id, scope=None, key=None)`** reads what a run stored with `publish_state` and `task_state`, wrapping `GET /api/runs/{id}/state`.
+- **Documentation.** A guide and an example for `receive(topic)`, messages and `publish_state`, which 3.1 added without a page: [Send a message to a running flow](https://sercanatalik.github.io/cereyan/guides/messages/). The tour covers the Queue page and the Workers tab. The events reference lists `worker.registered` and `worker.offline`, which its generator had dropped, and the `worker.updated` stream message. The Python API page lists `receive` and `publish_state`.
+
 ## 3.1.4 (2026-10-03)
 
 - **Fix: a continuous schedule stopped looping after a server restart.** A run whose engine died while the server was down was marked Crashed without a retry, and a Crashed run with no retry still counts as the loop's active run, so no next run was ever created. Startup now sends such runs through the crash-retry chain, and schedules again any retry that was waiting when the previous server stopped.

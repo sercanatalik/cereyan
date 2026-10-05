@@ -39,7 +39,7 @@ Scheduled ──▶ Pending ──▶ Running ──▶ Completed
 | `Scheduled` | Created; waiting for its time, a retry delay, or a resource |
 | `Pending` | Dispatched to an engine |
 | `Running` | Executing |
-| `Paused` | Waiting for a person to answer `wait_for_input`; the engine is free |
+| `Paused` | Waiting for a person to answer `wait_for_input`, for a message on a `receive` topic, or for a durable wait to end; the engine is free |
 | `Cancelling` | Asked to stop |
 | `Completed`, `Failed`, `Cancelled`, `Crashed` | Terminal |
 

@@ -252,6 +252,14 @@ class Client:
         import json
         return self._request("POST", f"/api/runs/{run_id}/messages/{urllib.parse.quote(topic, safe='')}", body={"payload": json.loads(json.dumps(payload))})
 
+    def run_state(self, run_id: int, scope: str | None = None, key: str | None = None) -> Any:
+        """``GET /api/runs/{id}/state``: the values a run stored with ``publish_state`` and ``task_state``.
+
+        Without ``key``, a list of ``{scope, key, value}``; ``scope`` is ``""`` for the flow body
+        and a task's dynamic key otherwise. With ``key`` (and ``scope``, default the flow body),
+        ``{found, value}`` for that one entry."""
+        return self._request("GET", f"/api/runs/{run_id}/state", params={"scope": scope, "key": key})
+
     def cancel(self, run_id: int) -> dict:
         """``POST /api/runs/{id}/cancel``: cancel a queued run at once or ask a running one to stop."""
         return self._request("POST", f"/api/runs/{run_id}/cancel")

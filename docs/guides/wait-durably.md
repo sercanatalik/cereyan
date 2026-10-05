@@ -49,6 +49,19 @@ def load(day: str) -> str:
 
 `wait_for_target` returns at once when the [target](idempotent-reruns.md) exists; otherwise the run pauses as `AwaitingTarget` and is poked every `poke` seconds, each poke replaying the body to this call, until the target exists or `timeout` passes.
 
+## Wait for a message
+
+```python
+from cereyan import flow, receive
+
+@flow
+def load(day: str) -> str:
+    go = receive("go", timeout=3600, default={"proceed": False})
+    return "loaded" if go["proceed"] else "held"
+```
+
+`receive(topic)` pauses the run as `Paused` with the topic in its details until `POST /api/runs/{id}/messages/{topic}` delivers a payload, or `timeout` passes and the call returns `default`. A message sent before the run reaches the call is queued for it. [Send a message to a running flow](messages.md) has the details, and `wait_for_input` is the same wait on the `input` topic.
+
 ## Snooze
 
 ```python
@@ -71,4 +84,4 @@ def nightly() -> str:
 
 While it waits the run page's banner says what it waits for and offers **Wake now**, which resumes the run at once; `run.paused` and `run.resumed` events mark both moments, and the same rules that page on a paused question apply. Waits belong in the flow body: from a task submitted to a worker thread they end the task, not the run.
 
-Related: [Pause a run for approval](human-approval.md), [Runs and states](../concepts/runs-and-states.md).
+Related: [Pause a run for approval](human-approval.md), [Send a message to a running flow](messages.md), [Runs and states](../concepts/runs-and-states.md).

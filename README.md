@@ -47,9 +47,9 @@ cereyan worker . --host https://cereyan.internal      # on another machine: its 
 
 - **Offline first.** A script records runs into a local SQLite file; nothing else needs to run.
 - **One process to serve.** The API, the web UI, the scheduler, one queue, a warm pool of engine processes, rules, and MCP, in one `cereyan serve`. The Queue page shows every run in line and why it waits, and lets you add or remove processors while the server runs.
-- **Workers when you need them.** `cereyan worker` runs on another machine with its own checkout and connects out to the server: when the server's processors are full, runs spill over to workers whose code matches. The store, results and secrets stay on the server, every hand-off carries a lease, and the Workers tab shows each machine's status, host and schedule.
+- **Workers when you need them.** `cereyan worker` runs on another machine with its own checkout and connects out to the server: when the server's processors are full, runs spill over to workers whose code matches. The store, results and secrets stay on the server, every hand-off carries a lease, and the Workers tab shows each machine's status, host and schedule, and each worker serves a status page of its own.
 - **Data-pipeline semantics.** Targets make reruns idempotent, backfills cover date ranges or listed values, resources are named semaphores that can be keyed by parameter, flows chain and fan in by key, unique keys stop duplicate runs, continuous schedules run a flow again a set time after each run ends, and rules react to events or to their absence.
-- **Durable runs.** Every completed task is checkpointed, so a crash rerun or a retry from failure resumes after the last finished task; a run can sleep, wait for an event or a target, or snooze without holding an engine; and a task keeps notes that survive its retries.
+- **Durable runs.** Every completed task is checkpointed, so a crash rerun or a retry from failure resumes after the last finished task; a run can sleep, wait for an event, a target, or a message sent through the API, or snooze without holding an engine; and a task keeps notes that survive its retries.
 
 ## Screenshots
 
