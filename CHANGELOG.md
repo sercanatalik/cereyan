@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 3.2.0 (2026-10-05)
 
+- **Artifacts are paged.** The Artifacts page, a key's history, and a run's or task run's Artifacts tab show a page at a time, newest first, with Previous and Next, in place of a list that grew with every Load more. `GET /api/artifacts` takes `task_run_id` beside `run_id`, so a task run's artifacts page like the rest. [Artifacts](https://sercanatalik.github.io/cereyan/guides/artifacts/)
+- **Runs say where they ran.** The Runs list has a Host column, the server or the worker's name with the processor slot, and the run page says the same in its header. Both link to the Workers tab. [Run across machines](https://sercanatalik.github.io/cereyan/guides/run-across-machines/)
 - **`Client.run_state(run_id, scope=None, key=None)`** reads what a run stored with `publish_state` and `task_state`, wrapping `GET /api/runs/{id}/state`.
 - **Documentation.** A guide and an example for `receive(topic)`, messages and `publish_state`, which 3.1 added without a page: [Send a message to a running flow](https://sercanatalik.github.io/cereyan/guides/messages/). The tour covers the Queue page and the Workers tab. The events reference lists `worker.registered` and `worker.offline`, which its generator had dropped, and the `worker.updated` stream message. The Python API page lists `receive` and `publish_state`.
 

@@ -8,7 +8,7 @@ import { JsonView } from "@/components/json-view";
 import { KeyValueList } from "@/components/key-value-list";
 import { PausedBanner } from "@/components/paused-banner";
 import { RunLogs } from "@/components/run-logs";
-import { Tags } from "@/components/run-table";
+import { RunHost, Tags } from "@/components/run-table";
 import { Crumb, Page } from "@/components/shell";
 import { StateBadge } from "@/components/state-badge";
 import { TaskRail } from "@/components/task-rail";
@@ -252,6 +252,11 @@ function RunDetail() {
                 <span className="text-foreground">{by.label}</span>
               )}
             </span>
+            {r.host ? (
+              <span>
+                Ran on <RunHost run={r} />
+              </span>
+            ) : null}
             {params ? (
               <span>
                 Parameters <span className="font-mono text-muted-foreground">{params}</span>

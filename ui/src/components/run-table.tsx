@@ -33,6 +33,35 @@ export function Tags({ tags }: { tags: string[] | null | undefined }) {
   );
 }
 
+/**
+ * Where the run executed: the server, or the worker that took it, with the
+ * processor slot. Nothing before an engine has picked the run up.
+ */
+export function RunHost({ run, className }: { run: Run; className?: string }) {
+  if (!run.host) return <span className={cn("text-muted-foreground", className)}>-</span>;
+  const remote = run.host !== "server";
+  const label = `${run.host}${run.processor != null ? ` · ${run.processor}` : ""}`;
+  const title = remote
+    ? `Ran on worker ${run.host}${run.processor != null ? `, processor ${run.processor}` : ""}`
+    : `Ran on the server${run.processor != null ? `, processor ${run.processor}` : ""}`;
+  return (
+    <Link
+      to="/queue"
+      search={{ tab: "workers" }}
+      className={cn(
+        "inline-flex h-5 items-center rounded-full px-1.5 font-mono text-[11px] hover:underline",
+        remote ? "bg-muted text-foreground" : "text-muted-foreground",
+        className,
+      )}
+      title={title}
+      data-testid="run-host"
+      data-remote={remote ? "true" : undefined}
+    >
+      {label}
+    </Link>
+  );
+}
+
 export function RunTable({
   runs,
   selected,
@@ -97,17 +126,13 @@ export function RunTable({
       cell: ({ row }) => (
         <span className="text-muted-foreground">
           {row.original.project}/{row.original.flow_name}
-          {row.original.host && row.original.host !== "server" ? (
-            <span
-              className="ml-2 rounded-full bg-muted px-1.5 font-mono text-[11px] text-foreground"
-              title="Ran on this remote worker"
-              data-testid="run-host"
-            >
-              {row.original.host}
-            </span>
-          ) : null}
         </span>
       ),
+    },
+    {
+      accessorKey: "host",
+      header: "Host",
+      cell: ({ row }) => <RunHost run={row.original} />,
     },
     {
       id: "tasks",
@@ -239,7 +264,7 @@ function GroupedRunBodies({
       <Td className="text-xs">
         <GroupCount shown={runs.length} />
       </Td>
-      <Td colSpan={3} />
+      <Td colSpan={4} />
       <Td>
         <GroupTags tags={Array.from(new Set(runs.flatMap((r) => r.tags ?? []))).sort()} />
       </Td>

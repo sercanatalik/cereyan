@@ -102,6 +102,8 @@ pub struct ArtifactFilter {
     #[serde(default)]
     pub run_id: Option<i64>,
     #[serde(default)]
+    pub task_run_id: Option<i64>,
+    #[serde(default)]
     pub limit: Option<usize>,
     /// Keyset cursor: the id of the last artifact of the previous page.
     #[serde(default)]
@@ -2250,6 +2252,9 @@ impl Store {
         }
         if let Some(r) = filter.run_id {
             q.push("a.run_id = ?", SqlValue::Integer(r));
+        }
+        if let Some(t) = filter.task_run_id {
+            q.push("a.task_run_id = ?", SqlValue::Integer(t));
         }
         if let Some(c) = filter.after {
             q.push("a.id < ?", SqlValue::Integer(c));

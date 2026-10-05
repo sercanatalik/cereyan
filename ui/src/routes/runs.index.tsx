@@ -5,6 +5,7 @@ import { useState } from "react";
 import { api, type StateType, unwrap } from "@/api/client";
 import { DateRangeSelect, type RangePreset, rangeStart } from "@/components/date-range";
 import { FilterSelect } from "@/components/filter-select";
+import { PageFooter } from "@/components/pager";
 import { RunTable } from "@/components/run-table";
 import { Page } from "@/components/shell";
 import { StateBadge } from "@/components/state-badge";
@@ -146,40 +147,6 @@ function RunsPage() {
         <TaskRunsTab search={scoped} project={project} start={rangeStart(range)} />
       )}
     </Page>
-  );
-}
-
-function PageFooter({
-  from,
-  count,
-  noun,
-  hasPrev,
-  hasNext,
-  onPrev,
-  onNext,
-}: {
-  from: number;
-  count: number;
-  noun: string;
-  hasPrev: boolean;
-  hasNext: boolean;
-  onPrev: () => void;
-  onNext: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-between border-t px-4 py-2.5">
-      <span className="text-xs tabular-nums text-muted-foreground">
-        {count === 0 ? `No ${noun}` : `${from}–${from + count - 1}${hasNext ? " of more" : ""} ${noun}`}
-      </span>
-      <div className="flex gap-1.5">
-        <Button variant="outline" size="sm" disabled={!hasPrev} onClick={onPrev}>
-          Previous
-        </Button>
-        <Button variant="outline" size="sm" disabled={!hasNext} onClick={onNext}>
-          Next
-        </Button>
-      </div>
-    </div>
   );
 }
 

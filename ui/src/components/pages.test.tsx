@@ -63,6 +63,26 @@ test("run table renders rows with state badge and link", async () => {
   expect(screen.getByText("1.00 s")).toBeInTheDocument();
 });
 
+test("run table says where each run executed", async () => {
+  const [base] = runs;
+  renderWithRouter(
+    <RunTable
+      runs={[
+        { ...base, id: 1, name: "on-server", host: "server", processor: 2 },
+        { ...base, id: 2, name: "on-worker", host: "gpu-box", processor: 1 },
+        { ...base, id: 3, name: "not-started", host: null, processor: null },
+      ]}
+    />,
+  );
+  await waitFor(() => expect(screen.getByText("on-worker")).toBeInTheDocument());
+  expect(screen.getByRole("columnheader", { name: "Host" })).toBeInTheDocument();
+  const hosts = screen.getAllByTestId("run-host");
+  expect(hosts.map((h) => h.textContent)).toEqual(["server · 2", "gpu-box · 1"]);
+  expect(hosts[1]).toHaveAttribute("data-remote", "true");
+  expect(hosts[1]).toHaveAttribute("href", "/queue?tab=workers");
+  expect(hosts[0]).not.toHaveAttribute("data-remote");
+});
+
 test("histogram buckets runs by state", () => {
   const { container } = render(<Histogram runs={runs} start={0} end={3_000_000} buckets={3} />);
   expect(container.querySelectorAll("rect").length).toBe(1);

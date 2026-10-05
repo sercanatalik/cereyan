@@ -63,7 +63,7 @@ Bytes are embedded as a data URI, so keep images small; link large ones by URL.
 
 ## Track a value over time
 
-Give artifacts that recur a stable `key`. The Artifacts page filters by kind, key, flow, and project, and opening a key shows every value published under it across runs, newest first. Row counts, data-quality scores, and file sizes are good keys.
+Give artifacts that recur a stable `key`. The Artifacts page filters by kind, key, flow, and project, and opening a key shows every value published under it across runs, newest first. Every list, a key's history and a run's Artifacts tab included, shows a page at a time with Previous and Next. Row counts, data-quality scores, and file sizes are good keys.
 
 ## Read them programmatically
 

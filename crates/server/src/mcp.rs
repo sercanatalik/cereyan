@@ -925,6 +925,7 @@ async fn call_tool(
                 project: arg_str(args, "project"),
                 group: None,
                 run_id: args.get("run_id").and_then(|v| v.as_i64()),
+                task_run_id: None,
                 limit: Some(arg_usize(args, "limit", 50, 200)),
                 after: None,
             })?;

@@ -51,7 +51,7 @@ Any run can: one a schedule, a rule, the API, an agent, or a backfill created. T
 - the worker's code for the run's module matches the server's (its fingerprint), so a worker whose checkout is behind takes none of that module's runs until it is updated; the Workers tab names the modules that differ;
 - the worker is online and not draining.
 
-A resumed run, a `wait_for_target` poke, or a crash rerun prefers the worker that ran the previous attempt for ten seconds, then any host may take it. Every run records where it ran; the run page and the Runs list show the host.
+A resumed run, a `wait_for_target` poke, or a crash rerun prefers the worker that ran the previous attempt for ten seconds, then any host may take it. Every run records where it ran: the Runs list has a Host column, the server or the worker's name with the processor slot, the run page says the same in its header, and both link to the Workers tab.
 
 ## Files, results and secrets
 

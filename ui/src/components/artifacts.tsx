@@ -1,11 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { marked } from "marked";
+import { useState } from "react";
 import { api, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
+import { PageFooter } from "@/components/pager";
 import { useLiveEvent } from "@/lib/live";
 import { formatTime } from "@/lib/utils";
 
 export type Artifact = components["schemas"]["ArtifactRow"];
+export type ArtifactItem = components["schemas"]["ArtifactListItem"];
+
+/** What `/api/artifacts` filters by. */
+export type ArtifactFilter = {
+  kind?: string;
+  key?: string;
+  flow?: string;
+  project?: string;
+  run_id?: number;
+  task_run_id?: number;
+};
 
 export function ArtifactView({ artifact }: { artifact: Artifact }) {
   const d = artifact.data as any;
@@ -82,34 +96,121 @@ export function ArtifactView({ artifact }: { artifact: Artifact }) {
   }
 }
 
-export function ArtifactsTab({ runId, taskRunId }: { runId: number; taskRunId?: number }) {
-  const key = taskRunId ? ["artifacts", "task", taskRunId] : ["artifacts", "run", runId];
-  const query = useQuery({
-    queryKey: key,
-    queryFn: async () =>
-      taskRunId
-        ? unwrap(await api.GET("/api/task-runs/{id}/artifacts", { params: { path: { id: taskRunId } } }))
-        : unwrap(await api.GET("/api/runs/{id}/artifacts", { params: { path: { id: runId } } })),
-  });
-  useLiveEvent("artifact.updated", (data) => {
-    if (data?.run_id === runId) query.refetch();
-  });
-  const items = query.data ?? [];
-  if (!items.length) return <div className="text-muted-foreground">No artifacts</div>;
+/** One artifact row: identity line, run link, and the rendered artifact. */
+export function ArtifactCard({
+  item,
+  onHistory,
+  showRun = true,
+}: {
+  item: ArtifactItem;
+  onHistory?: (key: string) => void;
+  /** Off inside a run, where every artifact is the run's own. */
+  showRun?: boolean;
+}) {
   return (
-    <div className="space-y-3">
-      {items.map((a) => (
-        <div key={a.id} className="rounded-md border bg-card p-3" data-testid={`artifact-${a.kind}`}>
-          <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
-            <span>
-              {a.kind}
-              {a.key ? ` · ${a.key}` : ""}
-            </span>
-            <span>{formatTime(a.updated_at)}</span>
-          </div>
-          <ArtifactView artifact={a} />
-        </div>
-      ))}
+    <div className="rounded-md border bg-card p-3" data-testid={`artifact-item-${item.id}`}>
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+        <span className="flex items-center gap-2">
+          <span className="font-medium text-foreground">{item.kind}</span>
+          {item.key ? (
+            onHistory ? (
+              <button
+                type="button"
+                className="underline-offset-2 hover:underline"
+                onClick={() => onHistory(item.key ?? "")}
+              >
+                {item.key}
+              </button>
+            ) : (
+              <span>{item.key}</span>
+            )
+          ) : null}
+          {showRun ? (
+            <>
+              <span>·</span>
+              <Link
+                to="/runs/$runId"
+                params={{ runId: String(item.run_id) }}
+                className="hover:underline"
+                data-testid={`artifact-run-${item.id}`}
+              >
+                {item.project}/{item.flow_name} · {item.run_name}
+              </Link>
+            </>
+          ) : null}
+        </span>
+        <span>{formatTime(item.updated_at)}</span>
+      </div>
+      <ArtifactView artifact={item} />
     </div>
   );
+}
+
+/**
+ * A page of artifacts for a filter, newest first, with Previous / Next.
+ * Used by the Artifacts page, the key history drawer, and a run's or task
+ * run's Artifacts tab. Pages are keyset cursors (the last id of the page
+ * before), so the caller's filter must stay fixed: remount on change.
+ */
+export function ArtifactList({
+  filter,
+  onHistory,
+  pageSize = 20,
+  showRun = true,
+}: {
+  filter: ArtifactFilter;
+  onHistory?: (key: string) => void;
+  pageSize?: number;
+  showRun?: boolean;
+}) {
+  const [cursor, setCursor] = useState<number | undefined>(undefined);
+  const [history, setHistory] = useState<number[]>([]);
+  const query = useQuery({
+    queryKey: ["artifacts", "list", filter, cursor, pageSize],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/artifacts", { params: { query: { ...filter, limit: pageSize, after: cursor } } }),
+      ),
+  });
+  useLiveEvent("artifact.updated", (data) => {
+    if (filter.run_id != null && data?.run_id !== filter.run_id) return;
+    // Later pages are anchored by id, so only the first page moves.
+    if (!cursor) query.refetch();
+  });
+  const items = query.data?.items ?? [];
+  if (!items.length && !history.length) {
+    if (query.isLoading) return null;
+    return <div className="text-muted-foreground">No artifacts</div>;
+  }
+  return (
+    <div className="space-y-3" data-testid="artifact-list">
+      {items.map((a) => (
+        <ArtifactCard key={a.id} item={a} onHistory={onHistory} showRun={showRun} />
+      ))}
+      <PageFooter
+        className="flex items-center justify-between pt-1"
+        from={history.length * pageSize + 1}
+        count={items.length}
+        noun="artifacts"
+        hasPrev={history.length > 0}
+        hasNext={!!query.data?.next_cursor}
+        onPrev={() => {
+          const prev = history.slice();
+          const c = prev.pop();
+          setHistory(prev);
+          setCursor(c || undefined);
+        }}
+        onNext={() => {
+          setHistory((h) => [...h, cursor ?? 0]);
+          setCursor(query.data?.next_cursor ?? undefined);
+        }}
+      />
+    </div>
+  );
+}
+
+/** The Artifacts tab of a run or task run: that scope's artifacts, paged. */
+export function ArtifactsTab({ runId, taskRunId }: { runId: number; taskRunId?: number }) {
+  const filter: ArtifactFilter = taskRunId ? { task_run_id: taskRunId } : { run_id: runId };
+  return <ArtifactList key={JSON.stringify(filter)} filter={filter} showRun={false} />;
 }

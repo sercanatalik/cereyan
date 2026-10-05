@@ -11,14 +11,19 @@ from server_helpers import ServerProcess
 
 PIPELINE = '''
 import os
-from cereyan import App, artifacts
+from cereyan import App, artifacts, task
 
 app = App("arts")
+
+@task
+def note(n: int):
+    artifacts.create_markdown(f"task {n}", key="note")
 
 @app.flow
 def etl(n: int = 1):
     artifacts.create_progress(n, key="rows")
     artifacts.create_markdown(f"# run {n}", key="report")
+    note(n)
     return n
 
 @app.flow(priority=-10)
@@ -69,7 +74,11 @@ def test_key_history_and_pagination(arts):
     assert all(a["kind"] == "markdown" for a in arts.client._request("GET", "/api/artifacts", params={"kind": "markdown"})["items"])
     assert arts.client._request("GET", "/api/artifacts", params={"flow": "nope"})["items"] == []
     by_run = arts.client._request("GET", "/api/artifacts", params={"run_id": runs[0]["id"]})
-    assert {a["key"] for a in by_run["items"]} == {"rows", "report"}
+    assert {a["key"] for a in by_run["items"]} == {"rows", "report", "note"}
+    task_id = next(a["task_run_id"] for a in by_run["items"] if a["task_run_id"])
+    by_task = arts.client._request("GET", "/api/artifacts", params={"task_run_id": task_id, "limit": 1})
+    assert by_task["items"] and all(a["task_run_id"] == task_id for a in by_task["items"])
+    assert all(a["task_run_id"] == task_id for a in arts.client._request("GET", "/api/artifacts", params={"task_run_id": task_id})["items"])
 
 
 @pytest.mark.skipif(not hasattr(os, "getpriority") or sys.platform.startswith("win"), reason="Unix niceness")

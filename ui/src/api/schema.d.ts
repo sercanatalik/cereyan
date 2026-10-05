@@ -3347,6 +3347,7 @@ export interface operations {
                 limit?: number | null;
                 project?: string | null;
                 run_id?: number | null;
+                task_run_id?: number | null;
             };
             header?: never;
             path?: never;
