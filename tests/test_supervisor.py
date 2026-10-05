@@ -148,7 +148,13 @@ def test_import_failure_fails_runs_and_marks_flow(server, tmp_path):
     assert done["state"]["type"] == "Failed"
     assert "SyntaxError" in done["state"]["details"]["traceback"]
     assert time.time() - t0 < 5.5
-    flow = next(f for f in server.client.flows() if f["name"] == "b")
+    # The runs are failed before the flow's error is written, so wait for the error.
+    deadline = time.time() + 5
+    while True:
+        flow = next(f for f in server.client.flows() if f["name"] == "b")
+        if flow["error"] or time.time() > deadline:
+            break
+        time.sleep(0.05)
     assert flow["error"]
     assert flow["live"] is False
 

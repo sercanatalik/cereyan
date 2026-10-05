@@ -236,8 +236,10 @@ def test_debounce_cap_and_throttle(burst):
     c = burst.client
     t0 = time.time()
     run = c.run("render", doc="cap", version=0)
+    # Pace the burst from t0 so request latency does not add up and push the last
+    # call past the cap; each gap stays under the debounce of three seconds.
     for i in range(1, 8):
-        time.sleep(1)
+        time.sleep(max(0.0, t0 + i * 0.9 - time.time()))
         moved = c.run("render", doc="cap", version=i)
         assert moved["id"] == run["id"]
     # max_wait=8: the run started about eight seconds after its creation despite the burst.
