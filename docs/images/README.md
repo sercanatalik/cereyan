@@ -8,7 +8,7 @@ node scripts/capture_screenshots.mjs      # all images
 node scripts/capture_screenshots.mjs flows flow-detail --out /tmp/shots   # some, elsewhere
 ```
 
-It needs Node 22 and Chrome (set `CHROME` if Chrome is not in a standard place), and it never touches a server already running on 4200. Check each image by eye before committing, and keep each under 300 KB; the script flags a larger one.
+The `worker` image starts its own server, with a token and one processor, and a worker beside it, both on a temporary copy of `examples/`; it adds about a minute. It needs Node 22 and Chrome (set `CHROME` if Chrome is not in a standard place), and it never touches a server already running on 4200. Check each image by eye before committing, and keep each under 300 KB; the script flags a larger one.
 
 | Image | Shows |
 |---|---|
@@ -22,5 +22,6 @@ It needs Node 22 and Chrome (set `CHROME` if Chrome is not in a standard place),
 | `events.png` | The Events feed with a `run.failed` event open |
 | `artifacts.png`, `rules.png`, `variables.png`, `settings.png` | Those pages with the seeded artifacts, rules, and variables |
 | `queue.png` | The Queue page with four idle processors and three runs for later joining the line |
+| `worker.png` | A worker's status page, from a second server with a token and one processor so runs spill over to the worker: seven completed runs and one failed, in the light theme |
 
 Every file here must be referenced from a page with alt text that says what the picture shows. When the script changes what a picture shows, update its alt text on the pages that use it.

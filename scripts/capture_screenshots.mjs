@@ -5,12 +5,13 @@
 // Serves examples/ on a free port with a temporary home, gives it some history
 // (completed, failed, and paused runs, a skipped fire, artifacts, variables, a rule),
 // and captures each page at 1440x900 with headless Chrome over the DevTools protocol.
+// The worker image starts its own server, with a token, and a worker.
 // Names restrict the capture to those images. Needs a built UI (`just ui`), the
 // extension (`just dev`), Node 22, and Chrome; set CHROME to its path if it is not
 // found. A server already listening on 4200 is not touched.
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -100,6 +101,97 @@ class Demo {
       process.kill(-this.proc.pid, "SIGTERM");
     } catch {}
     for (const dir of [this.home, this.cwd]) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  }
+}
+
+// A second, short-lived server for the worker's status page: workers need a
+// token, which the main demo must not have, and one processor, so runs spill
+// over to the worker. Both serve a copy of examples/, because a worker's
+// engines start in its checkout and the examples write files relative to it.
+class WorkerDemo {
+  constructor(port, statusPort) {
+    this.token = "screenshots";
+    this.base = `http://127.0.0.1:${port}`;
+    this.status = `http://127.0.0.1:${statusPort}`;
+    this.statusPort = statusPort;
+    this.home = mkdtempSync(path.join(tmpdir(), "cereyan-shots-home-"));
+    this.workerHome = mkdtempSync(path.join(tmpdir(), "cereyan-shots-worker-home-"));
+    this.checkout = mkdtempSync(path.join(tmpdir(), "cereyan-shots-checkout-"));
+    cpSync(path.join(ROOT, "examples"), this.checkout, { recursive: true, filter: (p) => !p.includes("__pycache__") });
+    this.server = spawn(
+      "uv",
+      ["run", "--project", ROOT, "cereyan", "serve", this.checkout, "--port", String(port), "--max-engines", "1", "--token", this.token],
+      { cwd: this.checkout, env: { ...process.env, CEREYAN_HOME: this.home }, stdio: "ignore", detached: true },
+    );
+  }
+
+  async request(method, route, body) {
+    const r = await fetch(this.base + route, {
+      method,
+      headers: { authorization: `Bearer ${this.token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`${method} ${route}: ${r.status} ${await r.text()}`);
+    return r.json();
+  }
+
+  async statusJson() {
+    return (await fetch(`${this.status}/status.json`)).json();
+  }
+
+  async until(check, what, timeout = 120_000) {
+    const end = Date.now() + timeout;
+    while (Date.now() < end) {
+      try {
+        if (await check()) return;
+      } catch {}
+      await sleep(500);
+    }
+    throw new Error(`timed out waiting for ${what}`);
+  }
+
+  async start() {
+    await this.until(() => this.request("GET", "/api/server"), "the worker demo server");
+    this.worker = spawn(
+      "uv",
+      ["run", "--project", ROOT, "cereyan", "worker", this.checkout, "--host", this.base, "--token", this.token,
+        "--name", "build-02", "--processors", "2", "--labels", "zone=eu,disk=ssd", "--status-port", String(this.statusPort)],
+      { cwd: this.checkout, env: { ...process.env, CEREYAN_HOME: this.workerHome }, stdio: "ignore", detached: true },
+    );
+    await this.until(async () => (await this.statusJson()).state === "online", "the worker to come online");
+  }
+
+  // Hold the server's one processor with a long run, so the rest go to the
+  // worker. A worker keeps an engine per module, so its two processors serve two
+  // modules: `flaky_load` (one fails) first, then the `load_*` flows.
+  async seed() {
+    const flows = Object.fromEntries((await this.request("GET", "/api/flows")).map((f) => [f.name, f]));
+    const run = async (name, parameters = {}) => (await this.request("POST", `/api/flows/${flows[name].id}/runs`, { parameters })).id;
+    const state = async (id) => (await this.request("GET", `/api/runs/${id}`)).state.type;
+    const hold = await run("usually_quick", { seconds: 45 });
+    await this.until(async () => (await state(hold)) === "Running", "the server to be busy");
+    const first = await run("flaky_load", { rows: 2 });
+    await this.until(async () => ["Completed", "Failed"].includes(await state(first)), "the first worker run");
+    const started = [await run("flaky_load", { rows: 5 })];
+    for (const day of ["2026-09-12", "2026-09-13", DAY]) {
+      started.push(await run("load_orders", { day }));
+      started.push(await run("load_customers", { day }));
+    }
+    const settled = new Set(["Completed", "Failed", "Crashed", "Cancelled"]);
+    for (const id of [...started, hold]) await this.until(async () => settled.has(await state(id)), `run ${id}`);
+    await this.until(async () => {
+      const s = await this.statusJson();
+      return (s.stats?.by_flow ?? []).filter((f) => f.completed + f.failed > 0).length >= 2;
+    }, "runs on the worker in its stats");
+  }
+
+  stop() {
+    for (const p of [this.worker, this.server]) {
+      try {
+        if (p) process.kill(-p.pid, "SIGTERM");
+      } catch {}
+    }
+    for (const dir of [this.home, this.workerHome, this.checkout]) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 }
 
@@ -405,8 +497,25 @@ function images({ base, flows, etl }) {
       await b.until("document.querySelectorAll('[data-testid=processor-tile]').length >= 4", "the processors");
       await b.until("document.querySelector('main').innerText.includes('sales')", "the runs joining the line");
     },
+    worker: async (b) => {
+      // Its own server and worker; stopped once every image is written.
+      const wd = new WorkerDemo(await freePort(), await freePort());
+      cleanups.push(() => wd.stop());
+      await wd.start();
+      await wd.seed();
+      // The worker is its own origin: set the theme there, as `go` does for the server.
+      await b.send("Page.navigate", { url: `${wd.status}/status.json` });
+      await b.until("document.readyState === 'complete'");
+      await b.eval(`localStorage.setItem('cereyan-theme', 'light'); true`);
+      b.theme = undefined;
+      await b.send("Page.navigate", { url: `${wd.status}/` });
+      await b.until("document.querySelectorAll('[data-testid=flow-row]').length >= 2", "the worker's flows");
+      await b.until("document.querySelector('[data-testid=connection]').innerText.includes('connected')", "the connection");
+    },
   };
 }
+
+const cleanups = [];
 
 // ---------------------------------------------------------------- main
 
@@ -435,6 +544,7 @@ try {
   try {
     await browser.close();
   } finally {
+    for (const stop of cleanups) stop();
     demo.stop();
   }
 }
