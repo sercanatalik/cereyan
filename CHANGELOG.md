@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.3.0 (2026-10-06)
 
 - **The UI has a sidebar.** The sections move from the top bar to a sidebar on every page, grouped as Operate (Dashboard, Runs, Queue), Build (Flows, Variables, Rules), Observe (Events, Artifacts, Workers) and System (Settings). The project and group tree becomes a scope picker at the top of the sidebar that you can type into. The top bar keeps search, the live indicator and the theme toggle, and adds **New run**. Every URL and ⌘K work as before. [Tour of the UI](https://sercanatalik.github.io/cereyan/get-started/tour/)
 - **A quieter dashboard that opens logs in place.** Counts that are zero (Running, Crashed, Late) are hidden, and the proportion bar is gone. A new Flows card shows each flow's last ten runs as squares; click one, or a run in Recently completed, to read its logs on the dashboard. Upcoming, Needs attention and Running now share one row, and the queue-depth sparkline moves to the Queue page.
