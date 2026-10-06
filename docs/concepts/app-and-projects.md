@@ -50,7 +50,7 @@ A group name used in two projects appears under each of them, summarising only t
 
 A run is grouped by its flow's group, read through the flow rather than stored on the run, so renaming a group moves the run history with it.
 
-In the UI, the scope sidebar beside Dashboard, Runs, Flows, Events, and Artifacts lists each project with its groups; picking a group narrows Runs and Flows to it, and picking a project narrows every scoped page. The Runs page nests its rows project then group in collapsible sections, and the Flows page bands its rows by group; both are on the [tour](../get-started/tour.md#flows). The API, the CLI, and the MCP tools filter by group too:
+In the UI, the scope picker at the top of the sidebar on Dashboard, Runs, Flows, Events, and Artifacts lists each project with its groups; picking a group narrows Runs and Flows to it, and picking a project narrows every scoped page. The Runs page nests its rows project then group in collapsible sections, and the Flows page bands its rows by group; both are on the [tour](../get-started/tour.md#flows). The API, the CLI, and the MCP tools filter by group too:
 
 ```bash
 cereyan runs ls --group nightly

@@ -86,12 +86,13 @@ body {
 }
 * { border-color: var(--border); }
 
-/* One frame for the top bar's row and every page: at most 1920 px, centred, with a
-   gutter that grows from 24 px at 1440 px to 40 px from 2500 px. */
+/* One frame for every page, in the column right of the sidebar: at most 1920 px,
+   on the column's left edge so it stays next to the sidebar, with a gutter that
+   grows from 24 px at 1440 px to 40 px from 2500 px. */
 :root { --gutter: clamp(24px, 1.6vw, 40px); }
 @utility frame {
   width: 100%;
   max-width: 1920px;
-  margin-inline: auto;
+  margin-inline: 0;
   padding-inline: var(--gutter);
 }

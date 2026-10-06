@@ -1,6 +1,6 @@
 # How to organise flows into projects and groups
 
-Name a project with an App, and sort its flows into groups with `group=`. The UI's scope sidebar lists each project with its groups beneath it.
+Name a project with an App, and sort its flows into groups with `group=`. The UI's scope picker lists each project with its groups beneath it.
 
 ```python
 from cereyan import App
@@ -19,7 +19,7 @@ assert (load_orders.project, load_orders.group) == ("warehouse", "nightly")
 assert compact_tables.group == "warehouse"
 ```
 
-`load_orders` is listed under `warehouse › nightly`. `compact_tables` declares no group, so its group is its project and it is listed as one of the project's own flows, shown as `(project)` in the sidebar. What a project and a group are is on [App and projects](../concepts/app-and-projects.md). The runnable [Projects and groups](../examples/projects_and_groups.md) example lays out a whole project.
+`load_orders` is listed under `warehouse › nightly`. `compact_tables` declares no group, so its group is its project and it is listed as one of the project's own flows, shown as **Ungrouped flows** in the scope picker. What a project and a group are is on [App and projects](../concepts/app-and-projects.md). The runnable [Projects and groups](../examples/projects_and_groups.md) example lays out a whole project.
 
 ## Name the project
 
@@ -68,7 +68,7 @@ Declaring the project's own name as the group is the same as declaring none.
 
 ## Scope the UI and filter by group
 
-Pick a project, or a group under it, in the sidebar beside Dashboard, Runs, Flows, Events, and Artifacts. The choice is kept across reloads. Runs and Flows narrow to the group; Dashboard, Events, and Artifacts narrow to its project. A link carrying `?project=` or `?group=` overrides the sidebar for that page.
+Pick a project, or a group under it, in the scope picker at the top of the sidebar on Dashboard, Runs, Flows, Events, and Artifacts; type to narrow the list. The choice is kept across reloads. Runs and Flows narrow to the group; Dashboard, Events, and Artifacts narrow to its project. A link carrying `?project=` or `?group=` overrides the picker for that page.
 
 Outside the UI, filter by the same names:
 

@@ -1,16 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { ChevronRight, Moon, Search, Sun } from "lucide-react";
+import { ChevronRight, Moon, Plus, Search, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { CommandPalette } from "@/components/command-palette";
 import { Mark, useTheme } from "@/components/mark";
+import { NavSidebar } from "@/components/nav-sidebar";
+import { NewRunDialog } from "@/components/new-run-dialog";
 import { PauseBanner } from "@/components/pause-banner";
-import { ScopeSidebar } from "@/components/scope-sidebar";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { useLiveUpdates } from "@/lib/live";
-import { NAV } from "@/lib/nav";
 import { useProject } from "@/lib/project";
 import { cn } from "@/lib/utils";
 
@@ -55,26 +55,6 @@ export function useUiTitle(): string {
   return title;
 }
 
-/** The queue depth on the Queue tab, hidden while nothing waits. */
-function QueueBadge() {
-  const server = useQuery({
-    queryKey: ["server"],
-    queryFn: async () => unwrap(await api.GET("/api/server")),
-    refetchInterval: 5000,
-  });
-  const queued = server.data?.queued ?? 0;
-  if (queued <= 0) return null;
-  return (
-    <span
-      className="ml-1.5 rounded-full bg-muted px-1.5 font-mono text-[11px] leading-[18px] text-foreground"
-      title={`${queued} in line`}
-      data-testid="queue-badge"
-    >
-      {queued}
-    </span>
-  );
-}
-
 const SECURE_GUIDE = "https://sercanatalik.github.io/cereyan/guides/secure-the-server/";
 
 /**
@@ -103,13 +83,14 @@ export function ExposedBanner() {
   );
 }
 
-/** The list pages the project scope narrows, which carry the scope sidebar. */
+/** The list pages the project scope narrows, which carry the scope picker. */
 const SCOPED = ["/", "/runs", "/flows", "/events", "/artifacts"];
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const { dark, toggle } = useTheme();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [newRunOpen, setNewRunOpen] = useState(false);
   const title = useUiTitle();
   const { scope, group } = useProject();
   const scoped = SCOPED.includes(path.replace(/(.)\/$/, "$1"));
@@ -131,62 +112,44 @@ export function Shell({ children }: { children: React.ReactNode }) {
       data-scope-group={group}
     >
       <header className="shrink-0 border-b bg-card">
-        <div className="frame flex h-[52px] items-center gap-7" data-testid="top-bar-row">
+        <div className="flex h-[52px] items-center gap-6 px-[var(--gutter)]" data-testid="top-bar-row">
           <Link to="/" className="flex min-w-0 items-center gap-2 text-sm font-semibold tracking-tight">
             <Mark />
             <span className="max-w-60 truncate" title={title} data-testid="ui-title">
               {title}
             </span>
           </Link>
-          <nav className="flex h-full items-stretch gap-0.5" aria-label="Sections">
-            {NAV.map((item) => {
-              const active = item.to === "/" ? path === "/" : path.startsWith(item.to);
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "-mb-px flex items-center border-b-2 border-transparent px-2.5 text-sm font-medium text-muted-foreground hover:text-foreground",
-                    active && "border-foreground text-foreground",
-                  )}
-                >
-                  {item.label}
-                  {item.to === "/queue" ? <QueueBadge /> : null}
-                </Link>
-              );
-            })}
-          </nav>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 w-full max-w-[480px] min-w-48 flex-1 justify-start gap-2 bg-background font-normal text-muted-foreground"
+            onClick={() => setPaletteOpen(true)}
+            aria-label="Search"
+          >
+            <Search className="size-3.5" />
+            <span className="flex-1 text-left">Search runs, flows, artifacts</span>
+            <Kbd>{isMac ? "⌘K" : "Ctrl K"}</Kbd>
+          </Button>
           <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-[30px] w-60 justify-start gap-2 font-normal text-muted-foreground"
-              onClick={() => setPaletteOpen(true)}
-              aria-label="Search"
-            >
-              <Search className="size-3.5" />
-              <span className="flex-1 text-left">Search runs, flows, artifacts</span>
-              <Kbd>{isMac ? "⌘K" : "Ctrl K"}</Kbd>
-            </Button>
             <LiveIndicator />
             <Button variant="ghost" size="icon-sm" aria-label="Toggle theme" onClick={toggle}>
               {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            </Button>
+            <Button size="sm" className="h-8 gap-1.5" onClick={() => setNewRunOpen(true)}>
+              <Plus className="size-3.5" />
+              New run
             </Button>
           </div>
         </div>
       </header>
       <ExposedBanner />
       <PauseBanner />
-      {scoped ? (
-        <div className="grid min-h-0 flex-1 grid-cols-[248px_minmax(0,1fr)]">
-          <ScopeSidebar />
-          <main className="flex min-w-0 flex-col overflow-auto">{children}</main>
-        </div>
-      ) : (
-        <main className="flex min-w-0 flex-1 flex-col overflow-auto">{children}</main>
-      )}
+      <div className="grid min-h-0 flex-1 grid-cols-[232px_minmax(0,1fr)]">
+        <NavSidebar scoped={scoped} />
+        <main className="flex min-w-0 flex-col overflow-auto">{children}</main>
+      </div>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <NewRunDialog open={newRunOpen} onClose={() => setNewRunOpen(false)} />
     </div>
   );
 }

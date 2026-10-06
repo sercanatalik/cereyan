@@ -262,23 +262,38 @@ test("state badge colours are the 1.3 colours", () => {
   expect(screen.getByText("Skipped").className).toContain("bg-teal-100");
 });
 
-test("top bar carries the nine sections, a list page the scope sidebar, and the theme toggle persists", async () => {
-  mount("/runs");
+test("the sidebar carries the sections in their groups, the scope picker only on list pages, and the theme toggle persists", async () => {
+  const { router } = mount("/runs");
   const nav = await screen.findByRole("navigation", { name: "Sections" });
-  const links = within(nav).getAllByRole("link");
-  expect(links.map((l) => l.textContent)).toEqual([
+  expect(
+    within(nav)
+      .getAllByRole("link")
+      .map((l) => l.textContent),
+  ).toEqual([
     "Dashboard",
     "Runs",
     "Queue",
     "Flows",
+    "Variables",
+    "Rules",
     "Events",
     "Artifacts",
-    "Rules",
-    "Variables",
+    "Workers",
     "Settings",
   ]);
-  expect(within(nav).getByText("Runs")).toHaveAttribute("aria-current", "page");
-  expect(screen.getByRole("complementary", { name: "Scope" })).toBeInTheDocument();
+  for (const label of ["Operate", "Build", "Observe", "System"]) {
+    expect(within(nav).getByText(label)).toBeInTheDocument();
+  }
+  expect(within(nav).getByRole("link", { name: /^Runs/ })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByTestId("scope-picker")).toBeInTheDocument();
+  // No section tabs in the top bar any more.
+  expect(within(screen.getByTestId("top-bar-row")).queryByRole("link", { name: "Runs" })).toBeNull();
+  // Workers is the Queue page's Workers tab, and is the entry marked there.
+  fireEvent.click(within(nav).getByRole("link", { name: "Workers" }));
+  await waitFor(() => expect(router.state.location.search).toEqual({ tab: "workers" }));
+  expect(within(nav).getByRole("link", { name: "Workers" })).toHaveAttribute("aria-current", "page");
+  expect(within(nav).getByRole("link", { name: /^Queue/ })).not.toHaveAttribute("aria-current");
+  expect(screen.queryByTestId("scope-picker")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Toggle theme" }));
   await waitFor(() => expect(localStorage.getItem("cereyan-theme")).toBe("dark"));
   expect(document.documentElement.classList.contains("dark")).toBe(true);
@@ -393,7 +408,11 @@ test("retry line and task rail selection", () => {
   const onSelect = vi.fn();
   render(<TaskRail tasks={TASKS as any} selectedId={undefined} onSelect={onSelect} />);
   expect(screen.getByTestId("retry-line")).toHaveTextContent(/retry 2 of 3/);
-  expect(screen.getByText("1 of 2 done")).toBeInTheDocument();
+  expect(screen.getByText("1 of 2 completed")).toBeInTheDocument();
+  expect(screen.getAllByTestId("task-state").map((e) => e.textContent)).toEqual([
+    "Completed",
+    "Awaiting retry",
+  ]);
   fireEvent.click(screen.getByRole("option", { name: /validate-0/ }));
   expect(onSelect).toHaveBeenCalledWith(101);
 });
@@ -403,7 +422,7 @@ test("run page: tasks rail filters logs, Delete lives in the overflow menu", asy
   await screen.findByTestId("run-header");
   expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
   expect(screen.getByRole("button", { name: "More actions" })).toBeInTheDocument();
-  expect(screen.getByTestId("run-header")).toHaveTextContent("Created by schedule");
+  expect(screen.getByTestId("run-facts")).toHaveTextContent("Triggered byschedule");
   fireEvent.click(await screen.findByRole("option", { name: /validate-0/ }));
   const chip = await screen.findByTestId("log-task-chip");
   expect(chip).toHaveTextContent("validate-0");
@@ -421,7 +440,7 @@ test("flows page bands each group, shows the stale row, and still runs a flow", 
   );
   expect(screen.getByRole("heading", { name: "All flows" })).toBeInTheDocument();
   const churn = screen.getByText("train_churn").closest("tr") as HTMLElement;
-  expect(within(churn).getByTestId("starts-after")).toHaveTextContent("abkey=day");
+  expect(within(churn).getByTestId("starts-after")).toHaveTextContent("after a, b key=day");
   const stale = screen.getByText("nightly_export").closest("tr");
   expect(stale).toHaveAttribute("data-flow-live", "false");
   expect(stale).toHaveTextContent("Not registered by this server");
@@ -453,8 +472,9 @@ test("flows page: a group name used in two projects is a scope under each", asyn
   const nightly = await screen.findByTestId("section-warehouse/nightly");
   expect(within(nightly).getByTestId("section-meta")).toHaveTextContent("1 flow ·");
   expect(screen.getByTestId("section-analytics/nightly")).toBeInTheDocument();
-  // The sidebar lists the project's own flows beside its declared group.
-  expect(screen.getByTestId("scope-group-warehouse/warehouse")).toHaveTextContent("(project)1");
+  // The picker lists the project's own flows beside its declared group.
+  fireEvent.click(screen.getByTestId("scope-trigger"));
+  expect(await screen.findByTestId("scope-group-warehouse/warehouse")).toHaveTextContent("Ungrouped flows1");
   fireEvent.click(screen.getByTestId("scope-group-warehouse/nightly"));
   // Scoped to one group: no bands, the group's summary, and the top bar follows.
   await waitFor(() => expect(screen.getByTestId("group-stats")).toBeInTheDocument());
@@ -466,19 +486,18 @@ test("flows page: a group name used in two projects is a scope under each", asyn
   expect(screen.getByTestId("flow-count")).toHaveTextContent("1 flows");
 });
 
-test("the scope sidebar narrows Runs by group, replacing a linked project, and stays off other pages", async () => {
+test("the scope picker narrows Runs by group, replacing a linked project, and stays off other pages", async () => {
   flowsOverride = [
     flow(1, "load", "warehouse", { group: "nightly" }),
     flow(2, "adhoc", "warehouse"),
     flow(3, "train", "ml"),
   ];
   const { router } = mount("/runs?project=ml");
-  const sidebar = await screen.findByRole("complementary", { name: "Scope" });
-  // The linked project is the one marked, not the stored scope.
-  const ml = await within(sidebar).findByRole("button", { name: /^ml/ });
-  expect(ml).toHaveAttribute("aria-current", "true");
-  expect(within(sidebar).getByRole("button", { name: /All projects/ })).not.toHaveAttribute("aria-current");
-  fireEvent.click(await within(sidebar).findByTestId("scope-group-warehouse/nightly"));
+  // The linked project is the one named, not the stored scope.
+  const trigger = await screen.findByTestId("scope-trigger");
+  expect(trigger).toHaveAccessibleName("Scope: ml");
+  fireEvent.click(trigger);
+  fireEvent.click(await screen.findByTestId("scope-group-warehouse/nightly"));
   await waitFor(() =>
     expect(
       calls.some(
@@ -488,17 +507,43 @@ test("the scope sidebar narrows Runs by group, replacing a linked project, and s
     ).toBe(true),
   );
   expect(router.state.location.search).not.toHaveProperty("project");
+  expect(screen.getByTestId("scope-trigger")).toHaveAccessibleName("Scope: warehouse › nightly");
   await act(async () => {
     await router.navigate({ to: "/rules" });
   });
-  expect(screen.queryByRole("complementary", { name: "Scope" })).toBeNull();
+  expect(screen.queryByTestId("scope-picker")).toBeNull();
+  expect(screen.getByRole("navigation", { name: "Sections" })).toBeInTheDocument();
+});
+
+test("the scope picker filters projects and groups as the user types", async () => {
+  flowsOverride = [
+    flow(1, "load", "warehouse", { group: "nightly" }),
+    flow(2, "adhoc", "warehouse", { group: "adhoc" }),
+    flow(3, "train", "ml"),
+  ];
+  mount("/flows");
+  fireEvent.click(await screen.findByTestId("scope-trigger"));
+  fireEvent.change(await screen.findByPlaceholderText("Find a project or group"), {
+    target: { value: "night" },
+  });
+  await waitFor(() => expect(screen.queryByTestId("scope-project-ml")).toBeNull());
+  expect(screen.getByTestId("scope-group-warehouse/nightly")).toBeInTheDocument();
+  expect(screen.queryByTestId("scope-group-warehouse/adhoc")).toBeNull();
+});
+
+test("New run picks a flow, then opens its run form", async () => {
+  mount("/events");
+  fireEvent.click(await screen.findByRole("button", { name: "New run" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(await within(dialog).findByText("customer_dim"));
+  expect(await screen.findByText(/^Run .*\/customer_dim$/)).toBeInTheDocument();
 });
 
 test("flows page: facets narrow within the scope and count against it", async () => {
   mount("/flows");
   await screen.findByTestId("section-warehouse/warehouse");
   fireEvent.click(screen.getByRole("button", { name: "Tags" }));
-  // No flow has tags; the state facet is the one with options.
+  // No flow has tags, so the Tags facet opens empty and closes on Escape.
   fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
   fireEvent.change(screen.getByLabelText("Search flows"), { target: { value: "sync" } });
   expect(screen.getByTestId("flow-count")).toHaveTextContent("1 of 7 flows");

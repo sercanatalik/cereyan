@@ -2,7 +2,7 @@ import type { RunState, StateType } from "@/api/client";
 import { cn } from "@/lib/utils";
 
 /** How a state type looks: the pill's background and text, and its dot. */
-const TYPE_STYLE: Record<StateType, { pill: string; dot: string }> = {
+export const TYPE_STYLE: Record<StateType, { pill: string; dot: string }> = {
   Scheduled: {
     pill: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
     dot: "bg-amber-400",
@@ -27,7 +27,7 @@ const TYPE_STYLE: Record<StateType, { pill: string; dot: string }> = {
 };
 
 /** Sub-states that read differently from their type; a missing `dot` keeps the type's. */
-const SUB_STATE_STYLE: Record<string, { pill: string; dot?: string }> = {
+export const SUB_STATE_STYLE: Record<string, { pill: string; dot?: string }> = {
   Skipped: { pill: "bg-teal-100 text-teal-900 dark:bg-teal-900/40 dark:text-teal-200", dot: "bg-teal-500" },
   Cached: { pill: "bg-cyan-100 text-cyan-900 dark:bg-cyan-900/40 dark:text-cyan-200", dot: "bg-cyan-500" },
   Late: {

@@ -1,19 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { MoreHorizontal, Play, Search, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { ApiError, api, type Flow, type StateType, unwrap } from "@/api/client";
 import { FilterSelect } from "@/components/filter-select";
 import { upstreamNames } from "@/components/flow-graph";
 import { GroupStateRollup } from "@/components/grouped-rows";
 import { RescheduleDialog } from "@/components/reschedule-dialog";
 import { RunForm } from "@/components/run-form";
-import { Tags } from "@/components/run-table";
+import { RunStrip, RunStripLegend } from "@/components/run-strip";
 import { describeSchedule } from "@/components/schedule-editor";
 import { lastStates } from "@/components/scope-sidebar";
 import { nextSchedule, SkipDialog } from "@/components/skip-dialog";
-import { DOT_COLORS, StateBadge } from "@/components/state-badge";
-import { BAR_ORDER } from "@/components/state-bar";
+import { StateBadge } from "@/components/state-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -28,38 +27,16 @@ import { Modal } from "@/components/ui/modal";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { groupOf, nestByProject } from "@/lib/groups";
 import { useProject } from "@/lib/project";
-import { cn, formatFire, relativeTime } from "@/lib/utils";
+import {
+  flowsAttention,
+  healthLine,
+  matchesQuickFilter,
+  QUICK_FILTERS,
+  type QuickFilter,
+} from "@/lib/summary/flows";
+import { cn, formatDuration, formatFire, relativeTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/flows/")({ component: FlowsPage });
-
-type RecentRun = Flow["recent_runs"][number];
-
-/** Ten bars, newest on the right, coloured by state and sized by duration. */
-export function RunSparkline({ runs }: { runs: RecentRun[] }) {
-  const ordered = runs.slice().reverse();
-  const max = Math.max(1, ...ordered.map((r) => r[3] ?? 0));
-  return (
-    <span className="inline-flex h-5 items-end gap-0.5" data-testid="run-sparkline">
-      {ordered.map(([id, type, name, duration]) => {
-        const h = duration == null ? 8 : Math.max(4, Math.round(Math.sqrt(duration / max) * 20));
-        return (
-          <Link
-            key={id}
-            to="/runs/$runId"
-            params={{ runId: String(id) }}
-            title={`${name} (run ${id})`}
-            className={cn(
-              "block w-1.5 rounded-[1.5px]",
-              DOT_COLORS[type as StateType] ?? "bg-muted-foreground",
-            )}
-            style={{ height: h }}
-            data-state={type}
-          />
-        );
-      })}
-    </span>
-  );
-}
 
 function scheduleSummary(f: Flow): { words: string; next: string } {
   const active = f.schedules.filter((s) => s.active);
@@ -82,8 +59,8 @@ function scheduleSummary(f: Flow): { words: string; next: string } {
   };
 }
 
-type Facets = { state: string; schedule: string; tag: string };
-const NO_FACETS: Facets = { state: "", schedule: "", tag: "" };
+type Facets = { chip: QuickFilter; tag: string };
+const NO_FACETS: Facets = { chip: "all", tag: "" };
 
 /** The soonest fire across these flows' active schedules, if any. */
 function soonestFire(flows: Flow[]): number | null {
@@ -170,14 +147,13 @@ function FlowsPage() {
   const lower = q.trim().toLowerCase();
   const visible = scoped.filter(
     (f) =>
-      (!facets.state || f.recent_runs[0]?.[1] === facets.state) &&
-      (!facets.schedule || (f.schedules.length ? "scheduled" : "unscheduled") === facets.schedule) &&
+      matchesQuickFilter(f, facets.chip) &&
       (!facets.tag || (f.tags ?? []).includes(facets.tag)) &&
       (!lower || `${f.project}/${f.name}`.toLowerCase().includes(lower)),
   );
-  const states = BAR_ORDER.filter((k) => count((f) => f.recent_runs[0]?.[1] === k) > 0);
   const tags = Array.from(new Set(scoped.flatMap((f) => f.tags ?? []))).sort();
-  const filtered = !!(facets.state || facets.schedule || facets.tag || lower);
+  const filtered = !!(facets.chip !== "all" || facets.tag || lower);
+  const attention = flowsAttention(scoped);
 
   // One band per group, only while the scope spans more than one group.
   const keyOf = (f: Flow) => `${f.project}/${groupOf(f)}`;
@@ -200,6 +176,7 @@ function FlowsPage() {
   const subtitle = !flows.data ? null : !project ? (
     <>
       {all.length} flows in {tree.length} project{tree.length === 1 ? "" : "s"}
+      {attention ? ` · ${attention}` : null}
       {served ? (
         <>
           {" "}
@@ -212,6 +189,7 @@ function FlowsPage() {
       {group
         ? `Group in ${project}`
         : `${current?.items.length ?? 0} flows in ${groupCount} group${groupCount === 1 ? "" : "s"}`}
+      {attention ? ` · ${attention}` : null}
       {source ? (
         <>
           {" "}
@@ -253,29 +231,37 @@ function FlowsPage() {
             </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-1.5">
-            <FilterSelect
-              label="Last run"
-              className={FACET}
-              value={facets.state}
-              anyCount={scoped.length}
-              onChange={(state) => setFacets({ ...facets, state })}
-              options={states.map((k) => ({
-                value: k,
-                label: k,
-                count: count((f) => f.recent_runs[0]?.[1] === k),
-              }))}
-            />
-            <FilterSelect
-              label="Schedule"
-              className={FACET}
-              value={facets.schedule}
-              anyCount={scoped.length}
-              onChange={(schedule) => setFacets({ ...facets, schedule })}
-              options={[
-                { value: "scheduled", label: "Scheduled", count: count((f) => f.schedules.length > 0) },
-                { value: "unscheduled", label: "Unscheduled", count: count((f) => f.schedules.length === 0) },
-              ]}
-            />
+            <fieldset
+              className="m-0 flex flex-wrap items-center gap-1.5 border-0 p-0"
+              aria-label="Quick filters"
+            >
+              {QUICK_FILTERS.map((chip) => {
+                const on = facets.chip === chip.value;
+                return (
+                  <button
+                    key={chip.value}
+                    type="button"
+                    aria-pressed={on}
+                    data-testid={`chip-${chip.value}`}
+                    onClick={() => setFacets({ ...facets, chip: chip.value })}
+                    className={cn(
+                      "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors",
+                      on
+                        ? "border-foreground bg-foreground text-background"
+                        : "bg-card text-foreground hover:bg-accent",
+                    )}
+                  >
+                    {chip.label}
+                    <span
+                      className={cn("tabular-nums", on ? "text-background/70" : "text-muted-foreground")}
+                      data-testid="chip-count"
+                    >
+                      {count(chip.match)}
+                    </span>
+                  </button>
+                );
+              })}
+            </fieldset>
             <FilterSelect
               label="Tags"
               className={FACET}
@@ -301,7 +287,8 @@ function FlowsPage() {
                 Clear
               </Button>
             ) : null}
-            <span className="ml-auto text-xs text-muted-foreground" data-testid="flow-count">
+            <RunStripLegend className="ml-auto" />
+            <span className="text-xs text-muted-foreground" data-testid="flow-count">
               {visible.length === scoped.length
                 ? `${scoped.length} flows`
                 : `${visible.length} of ${scoped.length} flows`}
@@ -318,12 +305,9 @@ function FlowsPage() {
               <thead>
                 <tr>
                   <Th>Flow</Th>
-                  <Th className="w-52">Schedule</Th>
-                  <Th className="w-28">Recent runs</Th>
+                  <Th className="w-56">Schedule</Th>
+                  <Th className="w-40">Last 10 runs</Th>
                   <Th className="w-36">Last run</Th>
-                  <Th className="w-20">Health</Th>
-                  <Th className="w-52">Starts after</Th>
-                  <Th className="w-36">Tags</Th>
                   <Th className="w-32" />
                 </tr>
               </thead>
@@ -433,7 +417,7 @@ function FlowsPage() {
   );
 }
 
-const COLUMNS = 8;
+const COLUMNS = 5;
 const FACET = "h-7 rounded-full pr-2 pl-2.5 text-xs";
 
 /** A group's summary strip: its size, soonest fire, last-run states and dependencies. */
@@ -500,28 +484,22 @@ function GroupRows({
         return (
           <Tr key={f.id} className={cn(!f.live && "text-muted-foreground")} data-flow-live={f.live}>
             <Td className="h-14">
-              <span className="flex flex-col gap-px">
+              <span className="flex min-w-0 flex-col gap-px">
                 <Link
                   to="/flows/$flowId"
                   params={{ flowId: String(f.id) }}
                   className={cn("font-medium hover:underline", f.live && "text-foreground")}
+                  data-testid="flow-name"
                 >
                   {f.name}
                 </Link>
-                {f.error ? (
-                  <span className="text-xs text-red-600">{f.error}</span>
-                ) : !f.live ? (
+                {f.error ? <span className="text-xs text-red-600">{f.error}</span> : null}
+                {!f.live ? (
                   <span className="text-xs">
                     Not registered by this server. Last seen {relativeTime(f.last_seen_at)}.
                   </span>
-                ) : f.description ? (
-                  <span
-                    className="max-w-[280px] truncate text-xs text-muted-foreground"
-                    title={f.description}
-                  >
-                    {f.description.split("\n")[0]}
-                  </span>
                 ) : null}
+                <FlowSubLine flow={f} all={all} />
               </span>
             </Td>
             <Td>
@@ -531,59 +509,30 @@ function GroupRows({
               </span>
             </Td>
             <Td>
-              <RunSparkline runs={f.recent_runs} />
+              <RunStrip runs={f.recent_runs} />
             </Td>
             <Td>
               {last ? (
-                <Link to="/runs/$runId" params={{ runId: String(last[0]) }} className="hover:no-underline">
-                  <StateBadge
-                    state={{
-                      type: last[1] as StateType,
-                      name: last[2],
-                      message: null,
-                      details: {},
-                      timestamp: 0,
-                    }}
-                  />
-                </Link>
+                <span className="flex flex-col items-start gap-px">
+                  <Link to="/runs/$runId" params={{ runId: String(last[0]) }} className="hover:no-underline">
+                    <StateBadge
+                      state={{
+                        type: last[1] as StateType,
+                        name: last[2],
+                        message: null,
+                        details: {},
+                        timestamp: 0,
+                      }}
+                    />
+                  </Link>
+                  {/* recent_runs carries no timestamps, so the run's duration stands in for its time. */}
+                  {last[3] != null ? (
+                    <span className="text-xs text-muted-foreground">took {formatDuration(last[3])}</span>
+                  ) : null}
+                </span>
               ) : (
                 <span className="text-muted-foreground">-</span>
               )}
-            </Td>
-            <Td>
-              {f.health ? (
-                <span
-                  className={cn(
-                    "rounded px-1.5 py-0.5 text-[11px] font-medium",
-                    f.health.status === "FAIL"
-                      ? "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300"
-                      : f.health.status === "WARN"
-                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
-                        : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300",
-                  )}
-                  title={f.health.reasons.join("\n") || "Within its freshness and deadline expectations"}
-                  data-testid="flow-health"
-                >
-                  {f.health.status}
-                </span>
-              ) : null}
-            </Td>
-            <Td>
-              <span className="flex items-center gap-1 text-xs" data-testid="starts-after">
-                {upstreamNames(f).map((name) => (
-                  <UpstreamChip
-                    key={name}
-                    name={name}
-                    flow={all.find((u) => u.project === f.project && u.name === name)}
-                  />
-                ))}
-                {f.batch_key ? (
-                  <span className="font-mono text-[11.5px] text-muted-foreground">key={f.batch_key}</span>
-                ) : null}
-              </span>
-            </Td>
-            <Td>
-              <Tags tags={f.tags} />
             </Td>
             <Td className="text-right">
               <span className="inline-flex gap-1.5">
@@ -657,26 +606,72 @@ function GroupRows({
   );
 }
 
-/** An upstream as a chip with its last-run state, linking to it when it is known. */
-function UpstreamChip({ name, flow }: { name: string; flow?: Flow }) {
-  const state = flow?.recent_runs[0]?.[1] as StateType | undefined;
-  const body = (
-    <>
-      <span className={cn("size-1.5 rounded-full", state ? DOT_COLORS[state] : "bg-muted-foreground")} />
-      {name}
-    </>
-  );
-  const chip =
-    "inline-flex h-5 items-center gap-1 rounded-[5px] border bg-card px-1.5 font-medium text-foreground";
-  return flow ? (
-    <Link
-      to="/flows/$flowId"
-      params={{ flowId: String(flow.id) }}
-      className={cn(chip, "hover:bg-accent hover:no-underline")}
-    >
-      {body}
-    </Link>
-  ) : (
-    <span className={chip}>{body}</span>
+/**
+ * The muted line under a flow's name: its description, the flows it runs
+ * after, its tags, and its health check in words, the failing one in red.
+ */
+function FlowSubLine({ flow: f, all }: { flow: Flow; all: Flow[] }) {
+  const upstreams = upstreamNames(f);
+  const health = healthLine(f.health);
+  const parts: React.ReactNode[] = [];
+  if (f.description && f.live)
+    parts.push(
+      <span key="description" className="max-w-[320px] truncate" title={f.description}>
+        {f.description.split("\n")[0]}
+      </span>,
+    );
+  if (upstreams.length)
+    parts.push(
+      <span key="after" data-testid="starts-after">
+        after{" "}
+        {upstreams.map((name, i) => {
+          const up = all.find((u) => u.project === f.project && u.name === name);
+          return (
+            <span key={name}>
+              {i ? ", " : null}
+              {up ? (
+                <Link
+                  to="/flows/$flowId"
+                  params={{ flowId: String(up.id) }}
+                  className="font-medium text-foreground/80 hover:underline"
+                >
+                  {name}
+                </Link>
+              ) : (
+                <span className="font-medium">{name}</span>
+              )}
+            </span>
+          );
+        })}
+        {f.batch_key ? <span className="font-mono text-[11.5px]"> key={f.batch_key}</span> : null}
+      </span>,
+    );
+  if (f.tags?.length)
+    parts.push(
+      <span key="tags" data-testid="flow-tags">
+        {f.tags.join(", ")}
+      </span>,
+    );
+  if (health)
+    parts.push(
+      <span
+        key="health"
+        data-testid="flow-health"
+        data-failing={health.failing}
+        className={cn(health.failing && "font-medium text-red-700 dark:text-red-400")}
+      >
+        {health.text}
+      </span>,
+    );
+  if (!parts.length) return null;
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+      {parts.map((p, i) => (
+        <Fragment key={(p as React.ReactElement).key}>
+          {i ? <span aria-hidden>·</span> : null}
+          {p}
+        </Fragment>
+      ))}
+    </span>
   );
 }

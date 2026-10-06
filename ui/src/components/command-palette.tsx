@@ -11,7 +11,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { NAV } from "@/lib/nav";
+import { NAV_GROUPS } from "@/lib/nav";
 
 function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -70,18 +70,20 @@ export function CommandPalette({
       <CommandInput placeholder="Search runs, flows, artifacts" value={query} onValueChange={setQuery} />
       <CommandList>
         <CommandEmpty>Nothing matches.</CommandEmpty>
-        <CommandGroup heading="Go to">
-          {NAV.map((item) => (
-            <CommandItem
-              key={item.to}
-              value={`go ${item.label}`}
-              onSelect={() => go(() => navigate({ to: item.to }))}
-            >
-              <item.icon className="size-4 text-muted-foreground" />
-              {item.label}
-            </CommandItem>
-          ))}
-        </CommandGroup>
+        {NAV_GROUPS.map((group) => (
+          <CommandGroup key={group.label} heading={`Go to · ${group.label}`}>
+            {group.items.map((item) => (
+              <CommandItem
+                key={item.label}
+                value={`go ${item.label}`}
+                onSelect={() => go(() => navigate({ to: item.to, search: (item.search ?? {}) as any }))}
+              >
+                <item.icon className="size-4 text-muted-foreground" />
+                {item.label}
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ))}
         {matchingFlows.length ? (
           <CommandGroup heading="Flows">
             {matchingFlows.map((f) => (

@@ -12,7 +12,7 @@ The `worker` image starts its own server, with a token and one processor, and a 
 
 | Image | Shows |
 |---|---|
-| `dashboard.png`, `dashboard-dark.png` | The Dashboard in each theme, with a paused and a failed run under Needs attention |
+| `dashboard.png`, `dashboard-dark.png` | The Dashboard in each theme, with a paused and a failed run under Needs attention and the failed run's logs open in the Flows card |
 | `runs.png` | Runs with the `examples` project's section open |
 | `run-detail.png`, `run-detail-dark.png` | An `etl` run's Logs tab in each theme |
 | `run-timeline.png` | The same run's Timeline tab |
@@ -21,7 +21,7 @@ The `worker` image starts its own server, with a token and one processor, and a 
 | `skip-dialog.png`, `reschedule-dialog.png` | The Skip upcoming runs dialog set to three runs, and Reschedule with the time moved to 07:30 |
 | `events.png` | The Events feed with a `run.failed` event open |
 | `artifacts.png`, `rules.png`, `variables.png`, `settings.png` | Those pages with the seeded artifacts, rules, and variables |
-| `queue.png` | The Queue page with four idle processors and three runs for later joining the line |
+| `queue.png` | The Queue page with four idle processors and three runs under Starting later |
 | `worker.png` | A worker's status page, from a second server with a token and one processor so runs spill over to the worker: seven completed runs and one failed, in the light theme |
 
 Every file here must be referenced from a page with alt text that says what the picture shows. When the script changes what a picture shows, update its alt text on the pages that use it.

@@ -4,8 +4,6 @@ import { StateDot } from "@/components/state-badge";
 import { StateBar, type StateCounts } from "@/components/state-bar";
 import { cn, formatDuration } from "@/lib/utils";
 
-const DONE = new Set(["Completed", "Failed", "Crashed", "Cancelled"]);
-
 function useNow(active: boolean) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -25,6 +23,11 @@ export function retryLine(task: TaskRun, nowMs: number): string | null {
   const which =
     d.retries != null ? `retry ${d.attempt ?? "?"} of ${d.retries}` : `retry ${d.attempt ?? ""}`.trim();
   return `${which} · ${left > 0 ? `in ${left}s` : "now"}`;
+}
+
+/** A state name as words: "AwaitingRetry" reads "Awaiting retry". */
+export function stateWords(name: string): string {
+  return name.replace(/(?<=[a-z])([A-Z])/g, (c) => ` ${c.toLowerCase()}`);
 }
 
 export function taskCounts(tasks: TaskRun[]): StateCounts {
@@ -52,14 +55,14 @@ export function TaskRail({
   className?: string;
 }) {
   const now = useNow(tasks.some((t) => t.state.name === "AwaitingRetry" || t.state.type === "Running"));
-  const done = tasks.filter((t) => DONE.has(t.state.type)).length;
+  const completed = tasks.filter((t) => t.state.type === "Completed").length;
   return (
     <aside className={cn("flex flex-col border-r", className)} data-testid="task-rail">
       <div className="flex flex-col gap-2 border-b px-4 pt-3.5 pb-2.5">
         <div className="flex items-center justify-between">
           <span className="font-semibold">Tasks</span>
           <span className="text-xs tabular-nums text-muted-foreground">
-            {done} of {tasks.length} done
+            {completed} of {tasks.length} completed
           </span>
         </div>
         <StateBar counts={taskCounts(tasks)} className="w-full" height={6} />
@@ -90,6 +93,12 @@ export function TaskRail({
                 <StateDot type={t.state.type} title={t.state.name} />
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate font-medium">{t.dynamic_key}</span>
+                  <span
+                    className="text-[11.5px] leading-[15px] text-muted-foreground"
+                    data-testid="task-state"
+                  >
+                    {stateWords(t.state.name)}
+                  </span>
                   {sub ? (
                     <span
                       className="text-[11.5px] leading-[15px] text-muted-foreground"

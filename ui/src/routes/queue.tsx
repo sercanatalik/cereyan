@@ -4,13 +4,14 @@ import { Minus, Pause, Play, Plus } from "lucide-react";
 import { useState } from "react";
 import { ApiError, api, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
+import { QueueSparkline } from "@/components/queue-sparkline";
 import { Page } from "@/components/shell";
 import { Button } from "@/components/ui/button";
-import { CardHead } from "@/components/ui/card";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { UnderlineTabs } from "@/components/ui/underline-tabs";
 import { WorkersTab } from "@/components/workers-tab";
 import { useLiveEvent } from "@/lib/live";
+import { queueSummary } from "@/lib/summary/queue";
 import { cn, formatDuration, formatIn } from "@/lib/utils";
 
 type QueueView = components["schemas"]["QueueView"];
@@ -76,11 +77,49 @@ function Pill({ className, children }: { className: string; children: React.Reac
   );
 }
 
+/** The run a busy processor is executing: its name, flow, and the task running now. */
+function SlotRun({ runId, since }: { runId: number; since: number }) {
+  // The run detail page's keys, so opening the run from here is instant.
+  const run = useQuery({
+    queryKey: ["run", runId],
+    queryFn: async () => unwrap(await api.GET("/api/runs/{id}", { params: { path: { id: runId } } })),
+  });
+  const tasks = useQuery({
+    queryKey: ["run-tasks", runId],
+    queryFn: async () => unwrap(await api.GET("/api/runs/{id}/tasks", { params: { path: { id: runId } } })),
+    refetchInterval: 5000,
+  });
+  const running = (tasks.data ?? []).filter((t) => t.state.type === "Running").map((t) => t.dynamic_key);
+  const r = run.data;
+  return (
+    <div className="flex min-w-0 flex-col">
+      <div className="flex items-baseline justify-between gap-2">
+        <Link
+          to="/runs/$runId"
+          params={{ runId: String(runId) }}
+          className="truncate font-medium hover:underline"
+        >
+          {r ? r.name : `Run #${runId}`}
+        </Link>
+        <span className="font-mono text-xs text-muted-foreground">{formatDuration(since * 1_000_000)}</span>
+      </div>
+      {r ? (
+        <span className="truncate text-xs text-muted-foreground" data-testid="slot-detail">
+          {r.project}/{r.flow_name}
+          {running.length
+            ? ` · task ${running[0]}${running.length > 1 ? ` + ${running.length - 1} more` : ""}`
+            : ""}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function ProcessorTile({ n, engine }: { n: number; engine?: EngineView }) {
   if (!engine) {
     return (
       <div
-        className="flex min-h-28 flex-col justify-between rounded-lg border border-dashed p-3 text-muted-foreground"
+        className="flex min-h-24 flex-col justify-between gap-2 rounded-lg border border-dashed p-3 text-muted-foreground"
         data-testid="processor-tile"
         data-status="available"
       >
@@ -92,7 +131,7 @@ function ProcessorTile({ n, engine }: { n: number; engine?: EngineView }) {
   const s = STATUS[engine.status] ?? STATUS.idle;
   return (
     <div
-      className={cn("flex min-h-28 flex-col justify-between gap-2 rounded-lg border p-3", s.tile)}
+      className={cn("flex min-h-24 flex-col justify-between gap-2 rounded-lg border p-3", s.tile)}
       data-testid="processor-tile"
       data-status={engine.status}
     >
@@ -104,31 +143,23 @@ function ProcessorTile({ n, engine }: { n: number; engine?: EngineView }) {
         </Pill>
       </div>
       {engine.run_id ? (
-        <div className="flex flex-col">
-          <Link
-            to="/runs/$runId"
-            params={{ runId: String(engine.run_id) }}
-            className="font-medium hover:underline"
-          >
-            Run #{engine.run_id}
-          </Link>
-          <span className="font-mono text-xs text-muted-foreground">
-            {formatDuration(engine.since_secs * 1_000_000)}
-          </span>
-        </div>
+        <SlotRun runId={engine.run_id} since={engine.since_secs} />
       ) : (
-        <span className="text-muted-foreground">
-          {engine.status === "starting" ? "Starting…" : "Warm, waiting for work"}
+        <span className="flex min-w-0 flex-col">
+          <span className="text-muted-foreground">
+            {engine.status === "starting" ? "Starting…" : "Ready for a run"}
+          </span>
+          <span className="truncate font-mono text-xs text-muted-foreground" title={engine.module}>
+            Loaded: {engine.module}
+          </span>
         </span>
       )}
-      <span className="truncate border-t border-dashed pt-2 font-mono text-xs text-muted-foreground">
-        {engine.module}
-      </span>
     </div>
   );
 }
 
-function ProcessorsCard({ view }: { view: QueueView }) {
+/** Busy against total, CPU, queue depth, the processor stepper, and a slot per processor. */
+function CapacityCard({ view }: { view: QueueView }) {
   const client = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const settings = useQuery({
@@ -151,7 +182,6 @@ function ProcessorsCard({ view }: { view: QueueView }) {
   });
   const busy = items.filter((e) => e.status === "running").length;
   const draining = items.filter((e) => e.status === "draining").length;
-  const idle = items.length - busy - draining;
   // Live engines fill the first slots; draining ones follow, past the count.
   const live = items.filter((e) => e.status !== "draining");
   const tiles: { n: number; engine?: EngineView }[] = [];
@@ -161,62 +191,58 @@ function ProcessorsCard({ view }: { view: QueueView }) {
   }
   const loadPct = load == null ? null : Math.round(Math.min(1, load) * 100);
   return (
-    <section
-      className="rounded-lg border bg-card"
-      aria-labelledby="processors-h"
-      data-testid="processors-card"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b px-4 py-3">
-        <div className="flex items-baseline gap-3">
-          <h2 id="processors-h" className="font-semibold">
-            Processors
+    <section className="rounded-lg border bg-card" aria-labelledby="capacity-h" data-testid="processors-card">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b px-4 py-3">
+        <div className="flex flex-col gap-1">
+          <h2 id="capacity-h" className="font-semibold">
+            Capacity
           </h2>
-          <span className="text-muted-foreground">
-            {busy} busy · {idle} idle{draining ? ` · ${draining} draining` : ""}
+          <span className="text-muted-foreground" data-testid="capacity-busy">
+            {busy} of {count} {count === 1 ? "processor" : "processors"} busy
+            {draining ? ` · ${draining} draining` : ""}
+            {loadPct != null ? ` · machine CPU at ${loadPct}%` : ""}
           </span>
-        </div>
-        <div className="flex items-center gap-5">
           {loadPct != null ? (
             <div
-              className="flex items-center gap-2 text-muted-foreground"
+              className="h-1.5 w-40 overflow-hidden rounded-full bg-muted"
               title="One-minute load average per CPU"
             >
-              <span>CPU</span>
-              <div className="h-1.5 w-28 overflow-hidden rounded-full bg-muted">
-                <div
-                  className={cn("h-1.5", loadPct > 85 ? "bg-amber-600" : "bg-foreground")}
-                  style={{ width: `${loadPct}%` }}
-                />
-              </div>
-              <span className="font-mono text-foreground">{loadPct}%</span>
+              <div
+                className={cn("h-1.5", loadPct > 85 ? "bg-amber-600" : "bg-foreground")}
+                style={{ width: `${loadPct}%` }}
+              />
             </div>
           ) : null}
-          <div className="flex items-center overflow-hidden rounded-md border">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="rounded-none"
-              aria-label="Remove a processor"
-              disabled={count <= 1 || resize.isPending}
-              onClick={() => resize.mutate(count - 1)}
-            >
-              <Minus className="size-4" />
-            </Button>
-            <div className="min-w-24 border-x px-3 text-center leading-9" data-testid="processor-count">
-              <span className="font-mono text-base font-medium">{count}</span>
-              <span className="text-muted-foreground"> / {cap} CPUs</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="rounded-none"
-              aria-label={count >= cap ? `Add a processor (at the ${cap} CPU cap)` : "Add a processor"}
-              disabled={count >= cap || resize.isPending}
-              onClick={() => resize.mutate(count + 1)}
-            >
-              <Plus className="size-4" />
-            </Button>
+        </div>
+        <QueueSparkline width={180} height={28} />
+      </div>
+      <div className="flex flex-wrap items-center gap-3 px-4 pt-3">
+        <span className="font-medium">Processors</span>
+        <div className="flex items-center overflow-hidden rounded-md border">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-none"
+            aria-label="Remove a processor"
+            disabled={count <= 1 || resize.isPending}
+            onClick={() => resize.mutate(count - 1)}
+          >
+            <Minus className="size-4" />
+          </Button>
+          <div className="min-w-24 border-x px-3 text-center leading-9" data-testid="processor-count">
+            <span className="font-mono text-base font-medium">{count}</span>
+            <span className="text-muted-foreground"> / {cap} CPUs</span>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-none"
+            aria-label={count >= cap ? `Add a processor (at the ${cap} CPU cap)` : "Add a processor"}
+            disabled={count >= cap || resize.isPending}
+            onClick={() => resize.mutate(count + 1)}
+          >
+            <Plus className="size-4" />
+          </Button>
         </div>
       </div>
       {settings.data?.engine_saturation_risk ? (
@@ -233,7 +259,7 @@ function ProcessorsCard({ view }: { view: QueueView }) {
         </div>
       ) : null}
       {error ? <div className="mx-4 mt-3 text-destructive">{error}</div> : null}
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3 p-4">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3 p-4">
         {tiles.map((t) => (
           <ProcessorTile key={t.engine?.id ?? `slot-${t.n}`} n={t.n} engine={t.engine} />
         ))}
@@ -253,7 +279,7 @@ function ProcessorsCard({ view }: { view: QueueView }) {
                 details
               </Link>
             </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
               {slots.map((t) => (
                 <ProcessorTile key={t.engine?.id ?? `${h.host}-${t.n}`} n={t.n} engine={t.engine} />
               ))}
@@ -261,12 +287,6 @@ function ProcessorsCard({ view }: { view: QueueView }) {
           </div>
         );
       })}
-      <p className="px-4 pb-3 text-xs text-muted-foreground">
-        A processor is an engine process: it loads a flow's module when it takes that flow's run. The count is
-        saved in Settings and can't go above this machine's CPU count. Removing a processor never interrupts a
-        run: it finishes its current run, then exits. Processors bound how many runs execute at once; tasks
-        inside a run still run concurrently.
-      </p>
     </section>
   );
 }
@@ -303,6 +323,165 @@ function reasonClass(row: InLine): string {
   return "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200";
 }
 
+/** A titled part of the Up next card, its count beside the title. */
+function SectionHead({ title, count, note }: { title: string; count: number; note?: string }) {
+  return (
+    <h3 className="flex items-baseline gap-2 px-4 pt-3 pb-2 text-sm">
+      <span className="font-semibold">{title}</span>
+      <span className="font-mono text-muted-foreground">{count}</span>
+      {note ? <span className="text-xs font-normal text-muted-foreground">· {note}</span> : null}
+    </h3>
+  );
+}
+
+/** What starts next: runs in line that can take a processor, then runs not yet due. */
+function UpNextCard({ view }: { view: QueueView }) {
+  const later = view.joining.length + view.paused_loops.length;
+  return (
+    <section className="rounded-lg border bg-card" aria-labelledby="up-next-h">
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <h2 id="up-next-h" className="font-semibold">
+          Up next
+        </h2>
+        <span className="text-xs text-muted-foreground">Priority first, then time in line</span>
+      </div>
+      <section aria-label="Ready to start">
+        <SectionHead title="Ready to start" count={view.in_line.length + view.more} />
+        {view.in_line.length === 0 ? (
+          <p className="px-4 pb-4 text-muted-foreground">No run is waiting for a processor.</p>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <Th className="w-10">#</Th>
+                <Th>Run</Th>
+                <Th>Trigger</Th>
+                <Th>Can start?</Th>
+                <Th className="text-right">Priority</Th>
+                <Th className="text-right">In line</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {view.in_line.map((r) => (
+                <Tr key={r.run_id} data-testid="in-line-row">
+                  <Td className="font-mono text-muted-foreground">{r.position}</Td>
+                  <Td>
+                    <div className="flex flex-col">
+                      <Link
+                        to="/runs/$runId"
+                        params={{ runId: String(r.run_id) }}
+                        className="font-medium hover:underline"
+                      >
+                        {r.flow}
+                      </Link>
+                      <span className="font-mono text-xs text-muted-foreground">
+                        #{r.run_id} · {r.module}
+                      </span>
+                    </div>
+                  </Td>
+                  <Td className="text-muted-foreground">{r.trigger}</Td>
+                  <Td>
+                    <Pill className={reasonClass(r)}>{reasonText(r)}</Pill>
+                    {r.overtaken_by > 0 ? (
+                      <div className="text-xs text-muted-foreground">
+                        {r.overtaken_by} {r.overtaken_by === 1 ? "run" : "runs"} went ahead
+                      </div>
+                    ) : null}
+                  </Td>
+                  <Td className="text-right font-mono">{r.priority}</Td>
+                  <Td className="text-right font-mono text-muted-foreground">
+                    {formatDuration(r.waited_us)}
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+        {view.more > 0 ? (
+          <p className="border-t px-4 py-2 text-xs text-muted-foreground">and {view.more} more</p>
+        ) : null}
+      </section>
+      <section className="border-t" aria-label="Starting later">
+        <SectionHead title="Starting later" count={later} note="these hold no processor while they wait" />
+        {later === 0 ? (
+          <p className="px-4 pb-4 text-muted-foreground">Nothing joins the line in the next hour.</p>
+        ) : (
+          <ul>
+            {view.joining.map((j) => (
+              <li
+                key={j.run_id}
+                className="flex items-center justify-between gap-3 border-t px-4 py-2.5"
+                data-testid="joining-row"
+              >
+                <div className="flex min-w-0 flex-col">
+                  <Link
+                    to="/runs/$runId"
+                    params={{ runId: String(j.run_id) }}
+                    className="truncate font-medium hover:underline"
+                  >
+                    {j.flow}
+                  </Link>
+                  <span className="text-xs text-muted-foreground">{j.kind}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono whitespace-nowrap">{formatIn(j.at)}</span>
+                  {j.kind === "continuous" && j.schedule_id != null ? (
+                    <LoopToggle sid={j.schedule_id} flow={j.flow} paused={false} />
+                  ) : null}
+                </div>
+              </li>
+            ))}
+            {view.paused_loops.map((l) => (
+              <li
+                key={`loop-${l.schedule_id}`}
+                className="flex items-center justify-between gap-3 border-t px-4 py-2.5"
+                data-testid="paused-loop-row"
+              >
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium">{l.flow}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {l.reason === "disabled"
+                      ? `continuous · paused after failures${l.until ? `, resumes ${formatIn(l.until)}` : ""}`
+                      : "continuous · paused"}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-muted-foreground">paused</span>
+                  <LoopToggle sid={l.schedule_id} flow={l.flow} paused />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </section>
+  );
+}
+
+/** The line and processors explained, closed until asked for. */
+function QueueExplainer() {
+  return (
+    <details className="group rounded-lg border bg-card px-4 py-3" data-testid="queue-explainer">
+      <summary className="cursor-pointer font-medium marker:text-muted-foreground">
+        How the queue works
+      </summary>
+      <div className="mt-2 flex max-w-3xl flex-col gap-2 text-muted-foreground">
+        <p>
+          Every run waits in one line. A free processor takes the first run that can start: priority first,
+          then time in line. A run that can't start yet, waiting for a resource or a concurrency limit, lets
+          later runs go ahead of it.
+        </p>
+        <p>
+          A processor is an engine process: it loads a flow's module when it takes that flow's run. The count
+          is saved in Settings and can't go above this machine's CPU count. Removing a processor never
+          interrupts a run: it finishes its current run, then exits. Processors bound how many runs execute at
+          once; tasks inside a run still run concurrently.
+        </p>
+      </div>
+    </details>
+  );
+}
+
 function QueuePage() {
   const client = useQueryClient();
   const queue = useQuery({
@@ -314,10 +493,18 @@ function QueuePage() {
   const view = queue.data;
   const { tab } = Route.useSearch();
   const navigate = Route.useNavigate();
+  // Every host's processors count: a run executing on a worker is executing.
+  const executing = (view?.processors.items ?? []).filter((e) => e.run_id != null).length;
   return (
     <Page
       title="Queue"
-      subtitle="Every run waits in one line. A free processor takes the first run that can start: priority first, then time in line."
+      subtitle={
+        view ? (
+          <span data-testid="queue-summary">
+            {queueSummary({ executing, waiting: view.in_line.length + view.more })}
+          </span>
+        ) : null
+      }
     >
       <UnderlineTabs
         items={[
@@ -331,118 +518,9 @@ function QueuePage() {
         <WorkersTab queue={view} />
       ) : view ? (
         <>
-          <ProcessorsCard view={view} />
-          <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
-            <section className="rounded-lg border bg-card xl:col-span-2" aria-label="In line">
-              <CardHead title="In line" aside={`${view.in_line.length + view.more} runs`} />
-              {view.in_line.length === 0 ? (
-                <p className="px-4 py-6 text-muted-foreground">Nothing is waiting. New runs start at once.</p>
-              ) : (
-                <Table>
-                  <thead>
-                    <tr>
-                      <Th className="w-10">#</Th>
-                      <Th>Run</Th>
-                      <Th>Trigger</Th>
-                      <Th>Can start?</Th>
-                      <Th className="text-right">Priority</Th>
-                      <Th className="text-right">In line</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {view.in_line.map((r) => (
-                      <Tr key={r.run_id} data-testid="in-line-row">
-                        <Td className="font-mono text-muted-foreground">{r.position}</Td>
-                        <Td>
-                          <div className="flex flex-col">
-                            <Link
-                              to="/runs/$runId"
-                              params={{ runId: String(r.run_id) }}
-                              className="font-medium hover:underline"
-                            >
-                              {r.flow}
-                            </Link>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              #{r.run_id} · {r.module}
-                            </span>
-                          </div>
-                        </Td>
-                        <Td className="text-muted-foreground">{r.trigger}</Td>
-                        <Td>
-                          <Pill className={reasonClass(r)}>{reasonText(r)}</Pill>
-                          {r.overtaken_by > 0 ? (
-                            <div className="text-xs text-muted-foreground">
-                              {r.overtaken_by} {r.overtaken_by === 1 ? "run" : "runs"} went ahead
-                            </div>
-                          ) : null}
-                        </Td>
-                        <Td className="text-right font-mono">{r.priority}</Td>
-                        <Td className="text-right font-mono text-muted-foreground">
-                          {formatDuration(r.waited_us)}
-                        </Td>
-                      </Tr>
-                    ))}
-                  </tbody>
-                </Table>
-              )}
-              {view.more > 0 ? (
-                <p className="border-t px-4 py-2 text-xs text-muted-foreground">and {view.more} more</p>
-              ) : null}
-            </section>
-            <section className="self-start rounded-lg border bg-card" aria-label="Joining the line">
-              <CardHead title="Joining the line" aside="holds no processor while waiting" />
-              {view.joining.length === 0 && view.paused_loops.length === 0 ? (
-                <p className="px-4 py-6 text-muted-foreground">Nothing joins the line in the next hour.</p>
-              ) : (
-                <ul>
-                  {view.joining.map((j) => (
-                    <li
-                      key={j.run_id}
-                      className="flex items-center justify-between gap-3 border-t px-4 py-2.5 first:border-t-0"
-                      data-testid="joining-row"
-                    >
-                      <div className="flex min-w-0 flex-col">
-                        <Link
-                          to="/runs/$runId"
-                          params={{ runId: String(j.run_id) }}
-                          className="truncate font-medium hover:underline"
-                        >
-                          {j.flow}
-                        </Link>
-                        <span className="text-xs text-muted-foreground">{j.kind}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono whitespace-nowrap">{formatIn(j.at)}</span>
-                        {j.kind === "continuous" && j.schedule_id != null ? (
-                          <LoopToggle sid={j.schedule_id} flow={j.flow} paused={false} />
-                        ) : null}
-                      </div>
-                    </li>
-                  ))}
-                  {view.paused_loops.map((l) => (
-                    <li
-                      key={`loop-${l.schedule_id}`}
-                      className="flex items-center justify-between gap-3 border-t px-4 py-2.5 first:border-t-0"
-                      data-testid="paused-loop-row"
-                    >
-                      <div className="flex min-w-0 flex-col">
-                        <span className="truncate font-medium">{l.flow}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {l.reason === "disabled"
-                            ? `continuous · paused after failures${l.until ? `, resumes ${formatIn(l.until)}` : ""}`
-                            : "continuous · paused"}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-muted-foreground">paused</span>
-                        <LoopToggle sid={l.schedule_id} flow={l.flow} paused />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </div>
+          <CapacityCard view={view} />
+          <UpNextCard view={view} />
+          <QueueExplainer />
         </>
       ) : queue.isError ? (
         <p className="text-destructive">Could not load the queue.</p>

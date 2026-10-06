@@ -5,7 +5,7 @@ One App as a project, with flows in two groups and flows of its own.
 Source: [`examples/projects_and_groups.py`](https://github.com/sercanatalik/cereyan/blob/main/examples/projects_and_groups.py). Run it with `python examples/projects_and_groups.py` (no server needed).
 
 A project is the name of an App; a group is a level inside that project. The UI's
-scope sidebar lists every project with its groups beneath it, and picking one narrows
+scope picker lists every project with its groups beneath it, and picking one narrows
 the Dashboard, Runs, Flows, Events, and Artifacts to it. This file is one project,
 `warehouse`, laid out as the sidebar draws it:
 

@@ -1,4 +1,4 @@
-// The dashboard's queue-depth sparkline draws the history samples and labels the latest value.
+// The queue-depth sparkline, which the Queue page shows and the dashboard does not, draws the history samples and labels the latest value.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";

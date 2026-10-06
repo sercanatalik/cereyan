@@ -161,9 +161,10 @@ test("a bleed page runs edge to edge", () => {
   expect(page.className).not.toContain("frame");
 });
 
-test("the top bar's row sits on the same frame as the page", async () => {
+test("the top bar spans the viewport with the gutter, and the sidebar sits beside every page", async () => {
   mount("/events");
-  expect((await screen.findByTestId("top-bar-row")).className).toContain("frame");
+  expect((await screen.findByTestId("top-bar-row")).className).toContain("px-[var(--gutter)]");
+  expect(screen.getByTestId("nav-sidebar")).toBeInTheDocument();
 });
 
 test("day rows separate today from yesterday and event rows show only the time of day", async () => {
@@ -216,26 +217,36 @@ test("Recently completed lists the eight latest Completed runs, newest first", a
   const card = await screen.findByTestId("recently-completed");
   await waitFor(() => expect(within(card).getAllByRole("row")).toHaveLength(9));
   const names = within(card)
-    .getAllByRole("link")
+    .getAllByTestId("completed-name")
     .map((a) => a.textContent);
   expect(names).toEqual(["done-1", "done-2", "done-3", "done-4", "done-5", "done-6", "done-7", "done-8"]);
   expect(within(card).queryByText("broke")).toBeNull();
+  // State dot, name, flow, finished and duration only: no task bar or parameters.
+  const headers = within(card)
+    .getAllByRole("columnheader")
+    .map((h) => h.textContent);
+  expect(headers).toEqual(["Run", "Flow", "Finished", "Duration"]);
+  expect(within(card).queryByTestId("state-bar")).toBeNull();
+  expect(within(card).queryByText(/day=/)).toBeNull();
 });
 
-test("at 1440px the lists keep two columns and the histogram 24 buckets", async () => {
+test("at 1440px Upcoming, Needs attention and Running now share one row and the histogram has 24 buckets", async () => {
   setViewport(1440);
   mount("/");
   const lists = await screen.findByTestId("dashboard-lists");
-  expect(lists.className).toContain("grid-cols-[minmax(0,7fr)_minmax(0,5fr)]");
+  expect(lists.className).toContain("xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)]");
+  expect([...lists.children].map((c) => c.getAttribute("data-testid"))).toEqual([
+    "upcoming-card",
+    "attention-card",
+    "running-card",
+  ]);
   expect(screen.getByRole("img", { name: "Run activity" })).toHaveAttribute("data-buckets", "24");
-  expect(screen.getByRole("columnheader", { name: "When" })).toBeInTheDocument();
 });
 
-test("from 1680px the three lists share a row and the histogram doubles its buckets", async () => {
+test("from 1680px the histogram doubles its buckets", async () => {
   setViewport(2560);
   mount("/");
   const lists = await screen.findByTestId("dashboard-lists");
-  expect(lists.className).toContain("grid-cols-3");
   expect(within(lists).getByText("Upcoming")).toBeInTheDocument();
   expect(screen.getByRole("img", { name: "Run activity" })).toHaveAttribute("data-buckets", "48");
 });

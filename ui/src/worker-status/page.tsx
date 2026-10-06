@@ -1,9 +1,10 @@
 import { ArrowUpRight, Moon, Sun } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Mark, useTheme } from "@/components/mark";
 import { Button } from "@/components/ui/button";
 import { CardHead } from "@/components/ui/card";
 import { HostCard, Pill, STATE_COLOUR, type WorkerStatus, workerStatus } from "@/components/worker-status";
+import { workerHeadline } from "@/lib/summary/worker";
 import { cn, formatClock, formatDuration, relativeTime } from "@/lib/utils";
 import type { EngineStats, FlowStats, WorkerStatusPayload } from "./types";
 
@@ -86,40 +87,66 @@ function Fact({
   className?: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-col">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={cn("truncate text-sm", className)}>{children}</span>
+    <div
+      className="flex min-w-0 flex-col gap-0.5"
+      data-testid={`fact-${label.toLowerCase().replace(/\s+/g, "-")}`}
+    >
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={cn("truncate text-sm font-medium", className)}>{children}</span>
     </div>
   );
 }
 
+/** A tile's number in its state's colour; the dot uses the shared run state colour. */
+const TILE_TEXT: Record<string, string> = {
+  Completed: "text-emerald-700 dark:text-emerald-400",
+  Failed: "text-red-600 dark:text-red-400",
+  Running: "text-sky-700 dark:text-sky-400",
+};
+
+/**
+ * A count of runs in one state. Above zero, its dot and number take the
+ * state's colour; the tile itself never fills. At zero, or unknown, it is muted.
+ */
 function Tile({
-  label,
-  value,
+  state,
+  count,
   note,
-  alert,
   stale,
   testId,
 }: {
-  label: string;
-  value: React.ReactNode;
+  state: "Completed" | "Failed" | "Running";
+  count: number | null;
   note: React.ReactNode;
-  alert?: boolean;
   stale?: boolean;
   testId?: string;
 }) {
+  const lit = count !== null && count > 0;
   return (
     <div
-      className={cn(
-        "rounded-lg border px-4 py-3",
-        alert ? "border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/40" : "bg-card",
-      )}
+      className="flex min-w-0 flex-col gap-0.5 rounded-lg border bg-card px-4 py-3"
       data-testid={testId}
-      data-alert={alert ? "true" : undefined}
+      data-state={state}
+      data-muted={lit ? undefined : "true"}
     >
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={cn("font-mono text-xl", stale && "opacity-45")}>{value}</div>
-      <div className="text-xs text-muted-foreground">{note}</div>
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span
+          className={cn("size-2 rounded-full", lit ? STATE_COLOUR[state] : "bg-border")}
+          data-testid="tile-dot"
+        />
+        {state}
+      </span>
+      <span
+        className={cn(
+          "font-mono text-2xl font-medium",
+          lit ? TILE_TEXT[state] : "text-muted-foreground",
+          stale && "opacity-45",
+        )}
+        data-testid="tile-count"
+      >
+        {count ?? "-"}
+      </span>
+      <span className="text-xs text-muted-foreground">{note}</span>
     </div>
   );
 }
@@ -132,8 +159,16 @@ type FlowRow = {
   blocked: "older code · takes no run" | "runs on the server only" | null;
 };
 
-/** Every flow the checkout defines, with its counts here; busiest first, then the rest. */
-function flowRows(s: WorkerStatusPayload): FlowRow[] {
+const runsOf = (c: FlowStats | null) =>
+  c ? c.completed + c.failed + c.crashed + c.cancelled + c.running : 0;
+const failuresOf = (c: FlowStats | null) => (c ? c.failed + c.crashed : 0);
+
+/**
+ * Every flow the checkout defines, with its counts here. `shown` holds the
+ * flows run here since start and those that take no run here, failing first,
+ * then by latest run; `notYet` the flows that can run here but have not.
+ */
+export function flowRows(s: WorkerStatusPayload): { shown: FlowRow[]; notYet: FlowRow[] } {
   const counts = new Map((s.stats?.by_flow ?? []).map((c) => [c.flow, c]));
   const rows: FlowRow[] = s.flows.map((f) => ({
     name: f.flow,
@@ -149,16 +184,21 @@ function flowRows(s: WorkerStatusPayload): FlowRow[] {
     if (!rows.some((r) => r.name === c.flow))
       rows.push({ name: c.flow, module: null, counts: c, blocked: null });
   }
-  const total = (r: FlowRow) =>
-    r.counts
-      ? r.counts.completed + r.counts.failed + r.counts.crashed + r.counts.cancelled + r.counts.running
-      : 0;
-  return rows.sort(
-    (a, b) =>
-      Number(a.blocked !== null) - Number(b.blocked !== null) ||
-      total(b) - total(a) ||
-      a.name.localeCompare(b.name),
-  );
+  // A running flow's latest run is now; otherwise its last completed one.
+  const latest = (r: FlowRow) =>
+    r.counts?.running ? s.now : (r.counts?.last_completed_at ?? (runsOf(r.counts) ? 0 : -1));
+  const shown = rows
+    .filter((r) => r.blocked !== null || runsOf(r.counts) > 0)
+    .sort(
+      (a, b) =>
+        Number(failuresOf(b.counts) > 0) - Number(failuresOf(a.counts) > 0) ||
+        latest(b) - latest(a) ||
+        a.name.localeCompare(b.name),
+    );
+  const notYet = rows
+    .filter((r) => r.blocked === null && runsOf(r.counts) === 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { shown, notYet };
 }
 
 function FlowBar({ c }: { c: FlowStats }) {
@@ -187,22 +227,33 @@ function FlowBar({ c }: { c: FlowStats }) {
   );
 }
 
+/** A flow's last run as the counts tell it: running now, or its last completed run. */
+function lastRun(c: FlowStats | null): string {
+  const done = c?.last_completed_at ? `last completed ${relativeTime(c.last_completed_at)}` : null;
+  if (c?.running) return ["running now", done].filter(Boolean).join(" · ");
+  const failed = failuresOf(c);
+  if (failed) return [`${failed} failed since start`, done ?? "no completed run yet"].join(" · ");
+  return done ?? "no completed run yet";
+}
+
 function Flows({ s, stale }: { s: WorkerStatusPayload; stale: boolean }) {
-  const rows = flowRows(s);
-  const runnable = rows.filter((r) => r.blocked === null && r.module).length;
+  const { shown, notYet } = flowRows(s);
+  const runnable = s.flows.filter((f) => !s.drift.includes(f.module) && f.runs_on !== "server").length;
   return (
     <section className="rounded-lg border bg-card" aria-label="Flows">
       <CardHead
-        title="Flows"
-        aside={`runs here since start · ${runnable} of ${s.flows.length} flows can run here`}
+        title="Flows run here"
+        aside={`since this worker started · failing first · ${runnable} of ${s.flows.length} flows can run here`}
       />
-      {rows.length === 0 ? (
+      {s.flows.length === 0 && shown.length === 0 ? (
         <p className="px-4 py-3 text-muted-foreground">This checkout defines no flow.</p>
+      ) : shown.length === 0 ? (
+        <p className="px-4 py-3 text-muted-foreground">No run here since this worker started.</p>
       ) : (
         <ul>
-          {rows.map((r) => {
+          {shown.map((r) => {
             const c = r.counts;
-            const failed = c ? c.failed + c.crashed : 0;
+            const failed = failuresOf(c);
             return (
               <li
                 key={r.name}
@@ -224,15 +275,13 @@ function Flows({ s, stale }: { s: WorkerStatusPayload; stale: boolean }) {
                         {r.blocked}
                       </span>
                     ) : (
-                      <span className="text-xs text-muted-foreground">
-                        {[
-                          c?.running ? "running" : null,
-                          c?.last_completed_at
-                            ? `last ✓ ${relativeTime(c.last_completed_at)}`
-                            : "no completed run yet",
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
+                      <span
+                        className={cn(
+                          "text-xs",
+                          failed ? "text-red-600 dark:text-red-400" : "text-muted-foreground",
+                        )}
+                      >
+                        {lastRun(c)}
                       </span>
                     )}
                   </div>
@@ -249,9 +298,9 @@ function Flows({ s, stale }: { s: WorkerStatusPayload; stale: boolean }) {
                     )}
                   </span>
                 </div>
-                {!r.blocked ? (
+                {!r.blocked && c ? (
                   <div className={cn(stale && "opacity-45")}>
-                    {c ? <FlowBar c={c} /> : <div className="h-2 rounded-full bg-muted" />}
+                    <FlowBar c={c} />
                   </div>
                 ) : null}
               </li>
@@ -259,33 +308,57 @@ function Flows({ s, stale }: { s: WorkerStatusPayload; stale: boolean }) {
           })}
         </ul>
       )}
+      {notYet.length > 0 ? (
+        <details className="group border-t" data-testid="flows-not-run">
+          <summary className="cursor-pointer px-4 py-2.5 text-muted-foreground hover:text-foreground">
+            {notYet.length === 1
+              ? "1 more flow can run here but has not yet"
+              : `${notYet.length} more flows can run here but have not yet`}
+          </summary>
+          <ul className="flex flex-wrap gap-1.5 px-4 pb-3">
+            {notYet.map((r) => (
+              <li key={r.name} className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                {r.name}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </section>
   );
 }
 
-function Now({ s }: { s: WorkerStatusPayload }) {
+/** The flow each processor slot last ran, remembered across polls. */
+type LastRan = Map<number, { flow: string; at: number }>;
+
+function Processors({ s, busy, lastRan }: { s: WorkerStatusPayload; busy: number | null; lastRan: LastRan }) {
   // Which run an engine holds only the server knows; without it, show the
   // engines this machine is running and nothing the server said before.
   const known = s.server_reachable && s.stats !== null;
   const bySlot = new Map<number, EngineStats>();
   if (known) for (const e of s.stats?.engines ?? []) if (!bySlot.has(e.slot)) bySlot.set(e.slot, e);
   return (
-    <section className="rounded-lg border bg-card" aria-label="Now">
+    <section className="rounded-lg border bg-card" aria-label="Processors">
       <CardHead
-        title="Now"
+        title="Processors"
         aside={
           known
-            ? "one engine per processor"
+            ? `${busy ?? 0} of ${s.processors} busy · this machine has ${s.cpus} CPUs`
             : `${s.engines.length} engine(s) running; runs unknown until the server answers`
         }
       />
-      <ul>
+      <ul className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
         {Array.from({ length: s.processors }, (_, i) => i + 1).map((slot) => {
           const e = bySlot.get(slot);
+          const last = lastRan.get(slot);
           return (
             <li
               key={slot}
-              className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 border-t px-4 py-2 first:border-t-0"
+              className={cn(
+                "flex min-w-0 flex-col gap-0.5 rounded-md border px-3 py-2",
+                e?.run_id ? "border-sky-300 dark:border-sky-800" : "border-dashed",
+              )}
+              data-testid="processor-slot"
             >
               <span className="flex items-center gap-2 font-mono text-xs">
                 <span className={cn("size-1.5 rounded-full", e?.run_id ? "bg-sky-500" : "bg-border")} />P
@@ -293,14 +366,16 @@ function Now({ s }: { s: WorkerStatusPayload }) {
                 {e ? ` · ${e.module}` : ""}
               </span>
               {e?.run_id ? (
-                <span>
+                <span className="truncate">
                   Run #{e.run_id}
                   {e.flow ? ` · ${e.flow}` : ""} · {formatDuration(e.since_secs * 1_000_000)}
                 </span>
               ) : (
-                <span className="text-muted-foreground">
+                <span className="truncate text-muted-foreground">
                   {e
-                    ? e.status
+                    ? e.status === "idle"
+                      ? `Idle${last ? ` · last ran ${last.flow} ${relativeTime(last.at)}` : ""}`
+                      : e.status
                     : !known && slot <= s.engines.length
                       ? "engine running · run unknown"
                       : "not started"}
@@ -314,36 +389,51 @@ function Now({ s }: { s: WorkerStatusPayload }) {
   );
 }
 
+const LEVEL_DOT: Record<string, string> = {
+  info: "bg-sky-500",
+  warning: "bg-amber-500",
+  error: "bg-red-500",
+};
+
 function Events({ s }: { s: WorkerStatusPayload }) {
   const events = s.events.slice(-20).reverse();
   return (
-    <section className="rounded-lg border bg-card" aria-label="Events">
-      <CardHead title="Events" aside="this worker's last 20 messages" />
+    <section className="rounded-lg border bg-card" aria-label="Recent activity">
+      <CardHead title="Recent activity" aside="this worker's last 20 messages" />
       {events.length === 0 ? (
         <p className="px-4 py-3 text-muted-foreground">Nothing yet.</p>
       ) : (
-        <ul className="max-h-[470px] overflow-auto py-1.5 font-mono text-xs leading-[18px] max-[1100px]:max-h-[260px]">
+        <ol className="max-h-[470px] overflow-auto py-1.5 max-[1100px]:max-h-[260px]">
           {events.map((e) => (
             <li
               key={`${e.at}-${e.message}`}
-              className={cn(
-                "grid grid-cols-[64px_minmax(0,1fr)] gap-2 px-4 py-0.5",
-                e.level === "warning" && "text-amber-700 dark:text-amber-400",
-                e.level === "error" && "text-red-600 dark:text-red-400",
-              )}
+              className="flex gap-2.5 px-4 py-1.5"
               data-testid="worker-event"
               data-level={e.level}
             >
-              <time className="text-muted-foreground">
-                {new Date(e.at / 1000).toLocaleTimeString(undefined, { hour12: false })}
-              </time>
-              <span>
-                {e.message}
-                {e.count > 1 ? <span className="text-muted-foreground"> ×{e.count}</span> : null}
-              </span>
+              <span
+                className={cn("mt-1.5 size-2 flex-none rounded-full", LEVEL_DOT[e.level] ?? "bg-border")}
+                title={e.level}
+                data-testid="event-dot"
+              />
+              <div className="flex min-w-0 flex-col">
+                <span
+                  className={cn(
+                    "break-words",
+                    e.level === "warning" && "text-amber-700 dark:text-amber-400",
+                    e.level === "error" && "text-red-600 dark:text-red-400",
+                  )}
+                >
+                  {e.message}
+                  {e.count > 1 ? <span className="text-muted-foreground"> ×{e.count}</span> : null}
+                </span>
+                <time className="font-mono text-xs text-muted-foreground">
+                  {new Date(e.at / 1000).toLocaleTimeString(undefined, { hour12: false })}
+                </time>
+              </div>
             </li>
           ))}
-        </ul>
+        </ol>
       )}
     </section>
   );
@@ -366,6 +456,13 @@ export function WorkerPage({ s, fetchError }: { s: WorkerStatusPayload; fetchErr
   // Stale engine rows would claim runs the worker may no longer hold.
   const running = s.server_reachable ? (s.stats ? busy : null) : s.engines.length;
   const git = typeof s.host.meta.git === "string" ? s.host.meta.git : null;
+  const pid = typeof s.host.meta.pid === "number" ? s.host.meta.pid : null;
+  const runnable = s.flows.filter((f) => !s.drift.includes(f.module) && f.runs_on !== "server").length;
+  // The server names an engine's flow only while it runs one: remember it per slot.
+  const lastRan = useRef<LastRan>(new Map()).current;
+  if (s.server_reachable)
+    for (const e of s.stats?.engines ?? [])
+      if (e.run_id && e.flow) lastRan.set(e.slot, { flow: e.flow, at: s.now });
   useEffect(() => {
     document.title = `${s.name} · cereyan worker`;
   }, [s.name]);
@@ -408,44 +505,43 @@ export function WorkerPage({ s, fetchError }: { s: WorkerStatusPayload; fetchErr
       </header>
 
       <main className="frame flex flex-col gap-4 pt-5 pb-8">
-        <section className="flex flex-col gap-3 rounded-lg border bg-card p-4">
-          <div className="flex flex-col gap-0.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-lg font-semibold">{s.name}</h1>
-              <Pill status={status} />
-            </div>
-            <span className="text-muted-foreground">
-              {s.worker_id !== null ? (
-                <>
-                  Registered with <span className="font-mono">{s.server}</span> as worker {s.worker_id}
-                </>
-              ) : (
-                <>
-                  Registering with <span className="font-mono">{s.server}</span>
-                </>
-              )}
-              {" · takes any run whose code matches, after the server's processors are full."}
-            </span>
+        <section className="flex flex-col gap-3 rounded-lg border bg-card p-4" aria-label="Health">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-lg font-semibold">{s.name}</h1>
+            <Pill status={status} />
           </div>
-          <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
-            <Fact label="Processors" className="font-mono">
-              {running ?? "?"} busy / {s.processors} of {s.cpus} CPUs
+          <p className="text-[15px]" data-testid="health-headline">
+            {workerHeadline({ status, busy: running, processors: s.processors, runnable, drift: s.drift })}
+          </p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-3 sm:grid-cols-3 min-[1100px]:grid-cols-6">
+            <Fact label="Server" className="font-mono text-[13px]">
+              {s.server.replace(/^https?:\/\//, "")}
             </Fact>
-            <Fact label="Version" className="font-mono">
-              {s.version}
+            <Fact label="Worker id">{s.worker_id ?? "not registered yet"}</Fact>
+            <Fact label="Version">
+              <span className="font-mono text-[13px]">{s.version}</span>
+              {s.worker_id !== null ? (
+                <span className="text-muted-foreground"> · same major version as the server</span>
+              ) : s.state === "refused" ? (
+                <span className="text-muted-foreground"> · not accepted by the server</span>
+              ) : null}
             </Fact>
             <Fact
               label="Code"
               className={cn(
-                "font-mono",
                 s.drift.length || git?.includes("dirty") ? "text-amber-700 dark:text-amber-400" : "",
+                git && "font-mono text-[13px]",
               )}
             >
-              {git ?? "not a git checkout"}
+              {s.drift.length ? `older code in ${s.drift.join(", ")}` : (git ?? "Not a git checkout")}
             </Fact>
             <Fact label="Last heartbeat">
               {s.last_ok_heartbeat_at ? relativeTime(s.last_ok_heartbeat_at) : "none yet"}
               {stale && s.last_ok_heartbeat_at ? " (failing)" : ""}
+            </Fact>
+            <Fact label="Up">
+              {uptime(s.now - s.started_at)}
+              {pid !== null ? ` · pid ${pid}` : ""}
             </Fact>
           </div>
           {stale ? (
@@ -483,48 +579,41 @@ export function WorkerPage({ s, fetchError }: { s: WorkerStatusPayload; fetchErr
           ) : null}
         </section>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Tile
-            label="Completed"
-            value={s.stats ? counts.completed : "-"}
-            note={`since start${asOf}`}
-            stale={stale}
-            testId="tile-completed"
-          />
-          <Tile
-            label="Failed"
-            value={s.stats ? counts.failed : "-"}
-            note={
-              <>
-                {counts.finished
-                  ? `${((counts.failed / counts.finished) * 100).toFixed(1)} % of finished runs`
-                  : "of finished runs"}
-                {asOf}
-              </>
-            }
-            alert={counts.failed > 0}
-            stale={stale}
-            testId="tile-failed"
-          />
-          <Tile
-            label="Running"
-            value={running ?? s.engines.length}
-            note={`of ${s.processors} processor${s.processors === 1 ? "" : "s"}`}
-            testId="tile-running"
-          />
-          <Tile
-            label="Up"
-            value={uptime(s.now - s.started_at)}
-            note={`since ${formatClock(s.started_at)}${typeof s.host.meta.pid === "number" ? ` · pid ${s.host.meta.pid}` : ""}`}
-            testId="tile-up"
-          />
+        <div className="grid grid-cols-1 items-start gap-4 min-[900px]:grid-cols-[3fr_2fr]">
+          <Processors s={s} busy={running} lastRan={lastRan} />
+          <section className="grid grid-cols-3 gap-3" aria-label="Runs since start">
+            <Tile
+              state="Completed"
+              count={s.stats ? counts.completed : null}
+              note={`since start${asOf}`}
+              stale={stale}
+              testId="tile-completed"
+            />
+            <Tile
+              state="Failed"
+              count={s.stats ? counts.failed : null}
+              note={
+                <>
+                  {counts.finished
+                    ? `${((counts.failed / counts.finished) * 100).toFixed(1)} % of finished runs`
+                    : "of finished runs"}
+                  {asOf}
+                </>
+              }
+              stale={stale}
+              testId="tile-failed"
+            />
+            <Tile
+              state="Running"
+              count={running ?? s.engines.length}
+              note={`of ${s.processors} processor${s.processors === 1 ? "" : "s"}`}
+              testId="tile-running"
+            />
+          </section>
         </div>
 
         <div className="grid grid-cols-1 items-start gap-4 min-[1100px]:grid-cols-[3fr_2fr]">
-          <div className="flex min-w-0 flex-col gap-4">
-            <Flows s={s} stale={stale} />
-            <Now s={s} />
-          </div>
+          <Flows s={s} stale={stale} />
           <Events s={s} />
         </div>
 
