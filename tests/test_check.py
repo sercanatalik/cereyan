@@ -188,3 +188,50 @@ def test_templated_resource_covered_by_a_pattern_total(run_cli, write_module, tm
     assert result.returncode == 0, result.stderr
     warnings = [f for f in json.loads(result.stdout)["findings"] if f["kind"] == "resource"]
     assert [w["message"] for w in warnings] == ["resource 'lonely' is not in [resources] of cereyan.toml"]
+
+
+NESTED = '''
+from cereyan import App
+
+app = App("proj")
+
+@app.flow
+def financing():
+    pass
+'''
+
+
+def _nested(tmp_path):
+    root = tmp_path / "nested"
+    (root / "flows" / "financing").mkdir(parents=True)
+    (root / "flows" / "financing" / "app.py").write_text(NESTED)
+    return root
+
+
+def test_nested_flow_resolves_from_its_root(run_cli, tmp_path):
+    report = report_of(run_cli("check", str(_nested(tmp_path)), "--json"))
+    assert report["ok"] is True, report["findings"]
+    assert not [x for x in report["findings"] if x["kind"] == "source"]
+
+
+def test_a_module_that_does_not_resolve_from_its_source_dir(tmp_path, monkeypatch):
+    import sys
+
+    from cereyan import flows as flows_module
+    from cereyan.check import check_directory, render
+
+    # The pre-fix behaviour: the file's own folder as the import root.
+    monkeypatch.setattr(flows_module, "_import_root", lambda file, module: os.path.dirname(file))
+    root = _nested(tmp_path)
+    try:
+        report = check_directory(str(root))
+    finally:
+        sys.path.remove(str(root))
+        for name in [m for m in sys.modules if m == "flows" or m.startswith("flows.")]:
+            del sys.modules[name]
+    source = [x for x in report["findings"] if x["kind"] == "source"]
+    assert report["ok"] is False and len(source) == 1, report["findings"]
+    assert source[0]["level"] == "error" and source[0]["flow"] == "proj/financing"
+    assert "flows.financing.app is not found from" in source[0]["message"]
+    assert str(root / "flows" / "financing") in source[0]["message"]
+    assert "error: module flows.financing.app" in render(report)

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: flows in sub-folders failed on the server's engines.** A flow in `flows/financing/app.py` under the served directory passed `cereyan check` and ran on workers, but every run on the server ended Failed with `ModuleNotFoundError: No module named 'flows'`: the flow recorded its own folder as its source directory instead of the directory its dotted module imports from. It now records the import root, so the server's engines and workers import it alike, editing it recycles its engine, and the MCP `get_flow_source` tool finds it. Stored flows pick up the new directory the next time they register. The same goes for the other ways in: `cereyan run flows/financing/app.py:etl` imports the file by its path from the current directory, so its own imports by that path work; a flow in a module started with `python -m flows.financing.oneoff` records that name, so its runs no longer depend on the server's working directory; and `get_flow_source` reads a flow defined in a package's `__init__.py`. [Flows in sub-folders](https://sercanatalik.github.io/cereyan/concepts/flows-and-parameters/#flows-in-sub-folders)
+- **`cereyan check` reports a `source` error** for a flow whose module, imported from its source directory alone, does not load its own file.
+
 ## 3.2.0 (2026-10-05)
 
 - **Artifacts are paged.** The Artifacts page, a key's history, and a run's or task run's Artifacts tab show a page at a time, newest first, with Previous and Next, in place of a list that grew with every Load more. `GET /api/artifacts` takes `task_run_id` beside `run_id`, so a task run's artifacts page like the rest. [Artifacts](https://sercanatalik.github.io/cereyan/guides/artifacts/)

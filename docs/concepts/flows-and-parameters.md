@@ -53,6 +53,10 @@ Runs get a random `adjective-animal` name unless the flow sets `run_name`: a `st
 
 The full option list with types and defaults is in the [Python API reference](../reference/python-api.md#cereyan.flow).
 
+## Flows in sub-folders
+
+`cereyan serve dir/` imports every module under `dir/` by its dotted path from `dir/`, so `dir/flows/financing/app.py` is module `flows.financing.app`. Folders need no `__init__.py`; with or without it, the flow's source directory is `dir/`, and that directory goes first on `sys.path` on the server's engines and on workers alike. Import neighbouring files by their path from `dir/` (`from flows.financing import rates`): a bare `import rates` does not resolve. Run such files from `dir/`: `cereyan run flows/financing/app.py:etl` imports the file as `flows.financing.app`, the same as `cereyan run flows.financing.app:etl`, and a nested script that hands runs to a server starts as `python -m flows.financing.oneoff`. `cereyan check` reports a `source` error for a flow whose module does not load its own file from its source directory.
+
 ## The flow object
 
 `@flow` returns a `Flow`, not the function. It is still callable, and it exposes what was derived: `parameters`, `schema`, `project`, `name`, `tags`, and `options`. Use it in tests to call the flow directly or to read its schema.

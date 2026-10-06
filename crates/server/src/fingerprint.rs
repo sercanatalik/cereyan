@@ -8,9 +8,9 @@ use std::time::SystemTime;
 
 use sha2::{Digest, Sha256};
 
-/// The file a dotted module name resolves to. A flow records the directory of
-/// its module's own file, so `a.b` is `source_dir/b.py` there; a root-relative
-/// `source_dir/a/b.py` and the package forms are tried too.
+/// The file a dotted module name resolves to. A flow records its import root,
+/// so `a.b` is `source_dir/a/b.py` (or the package form). The `source_dir/b.py`
+/// forms serve workers older than 3.2.1, which recorded the module's own folder.
 pub fn module_file(source_dir: &Path, module: &str) -> PathBuf {
     let rel = module.replace('.', "/");
     let last = module.rsplit('.').next().unwrap_or(module);

@@ -85,6 +85,52 @@ def _resource_declared(name: str, totals: dict) -> bool:
     return any("*" in key and (fnmatchcase(wild, key) or fnmatchcase(key, wild)) for key in totals)
 
 
+# Runs in a fresh interpreter: where each module resolves from one source_dir.
+# find_spec imports parent packages but not the module, so flow code does not run.
+_RESOLVE = """
+import importlib.util, json, sys
+source_dir, modules = json.loads(sys.stdin.read())
+sys.path.insert(0, source_dir)
+out, sys.stdout = sys.stdout, sys.stderr
+found = {}
+for m in modules:
+    try:
+        spec = importlib.util.find_spec(m)
+        found[m] = [spec.origin if spec else None, None]
+    except BaseException as exc:
+        found[m] = [None, f"{type(exc).__name__}: {exc}"]
+out.write(json.dumps(found))
+"""
+
+
+def _resolve_sources(flows: list) -> dict[tuple[str, str], tuple[str | None, str | None]]:
+    """``(source_dir, module) -> (file, error)`` as an engine would import it:
+    a new interpreter with only ``source_dir`` added to ``sys.path``."""
+    import subprocess
+    import sys
+
+    by_dir: dict[str, set[str]] = {}
+    for f in flows:
+        if os.path.isfile(f.source_file):
+            by_dir.setdefault(f.source_dir, set()).add(f.module)
+    resolved: dict[tuple[str, str], tuple[str | None, str | None]] = {}
+    for source_dir, modules in by_dir.items():
+        # -P: no script directory or cwd on sys.path, so only source_dir decides.
+        proc = subprocess.run([sys.executable, "-P", "-c", _RESOLVE], input=json.dumps([source_dir, sorted(modules)]),
+                              capture_output=True, text=True, timeout=120)
+        try:
+            found = json.loads(proc.stdout)
+        except ValueError:
+            found = {m: [None, _last_line(proc.stderr) if proc.stderr else "could not resolve"] for m in modules}
+        for module, (origin, error) in found.items():
+            resolved[(source_dir, module)] = (origin, error)
+    return resolved
+
+
+def _same_file(a: str, b: str) -> bool:
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
 def check_directory(directory: str, now: datetime | str | None = None) -> dict[str, Any]:
     """Import ``directory`` as ``cereyan serve`` would and report on it.
 
@@ -116,11 +162,19 @@ def check_directory(directory: str, now: datetime | str | None = None) -> dict[s
     routes = [r for app in registered for r in app.routes]
     rules = [r for app in registered for r in app.rules]
     totals = resource_totals(directory)
+    sources = _resolve_sources(flows)
 
     flow_reports: list[dict[str, Any]] = []
     for f in flows:
         label = f"{f.project}/{f.name}"
         own: list[dict[str, Any]] = []
+        if (f.source_dir, f.module) in sources:
+            origin, error = sources[(f.source_dir, f.module)]
+            if origin is None or not _same_file(origin, f.source_file):
+                found = f"resolves to {origin}" if origin else "is not found"
+                own.append(_finding("error", "source",
+                                    f"module {f.module} {found} from {f.source_dir}, not {f.source_file}",
+                                    flow=label, detail=error))
         if f.after:
             names = f.after.get("flows") or [f.after["flow"]]
             unknown = [n for n in names if not any(o.project == f.project and o.name == n for o in flows)]

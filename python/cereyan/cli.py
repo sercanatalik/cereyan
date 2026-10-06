@@ -185,6 +185,19 @@ def _import(module_ref: str):
         path = os.path.abspath(module_ref)
         if not os.path.isfile(path):
             raise CereyanError(f"file {module_ref!r} does not exist")
+        dotted = _dotted_name(path, os.getcwd())
+        if dotted is not None:
+            # As serve discovers it: by its path from here, so imports by that path work.
+            if os.getcwd() not in sys.path:
+                sys.path.insert(0, os.getcwd())
+            try:
+                module = importlib.import_module(dotted)
+            except ImportError as exc:
+                raise CereyanError(f"cannot import {module_ref!r} as {dotted}: {exc}") from exc
+            loaded = os.path.abspath(getattr(module, "__file__", "") or "")
+            if os.path.normcase(loaded) != os.path.normcase(path):
+                raise CereyanError(f"{dotted} is {loaded}, not {path}: another module of that name was imported first")
+            return module
         directory = os.path.dirname(path)
         if directory not in sys.path:
             sys.path.insert(0, directory)
@@ -202,6 +215,23 @@ def _import(module_ref: str):
         return importlib.import_module(module_ref)
     except ImportError as exc:
         raise CereyanError(f"cannot import {module_ref!r}: {exc}") from exc
+
+
+def _dotted_name(path: str, base: str) -> str | None:
+    """``path``'s module name relative to ``base``, or None when it has none:
+    outside ``base``, or a folder or stem that is not an identifier."""
+    try:
+        rel = os.path.relpath(path, base)
+    except ValueError:  # Windows: another drive
+        return None
+    if rel.startswith(os.pardir + os.sep) or os.path.isabs(rel):
+        return None
+    parts = os.path.splitext(rel)[0].split(os.sep)
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    if not parts or not all(p.isidentifier() for p in parts):
+        return None
+    return ".".join(parts)
 
 
 def parse_params(items: list[str]) -> dict[str, str]:

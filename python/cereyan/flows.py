@@ -14,6 +14,27 @@ from .exceptions import CereyanError
 from .tasks import _async_message, _is_async_function
 
 
+def _import_root(file: str, module: str) -> str:
+    """The ``sys.path`` entry ``module`` imports ``file`` from: its directory with
+    one trailing folder removed per package segment. Counting rather than looking
+    for ``__init__.py`` keeps namespace packages working. Falls back to the file's
+    own directory when the path does not spell the module's name."""
+    leaf = os.path.dirname(file)
+    parts = module.split(".")
+    if os.path.basename(file) == "__init__.py":
+        packages = parts
+    elif os.path.splitext(os.path.basename(file))[0] == parts[-1]:
+        packages = parts[:-1]
+    else:
+        return leaf
+    directory = leaf
+    for part in reversed(packages):
+        if os.path.basename(directory) != part:
+            return leaf
+        directory = os.path.dirname(directory)
+    return directory
+
+
 def _parse_after(after, batch_key):
     """``after=`` forms: a name, ``(name, {param: template})``, or a list of names
     with ``batch_key`` naming the parameter that identifies a batch."""
@@ -241,12 +262,18 @@ class Flow:
         module = sys.modules.get(fn.__module__)
         file = getattr(module, "__file__", None) or inspect.getsourcefile(fn)
         self.source_file = os.path.abspath(file) if file else os.path.join(os.getcwd(), "<unknown>")
-        self.source_dir = os.path.dirname(self.source_file)
-        if fn.__module__ == "__main__" and file:
+        main_spec = getattr(module, "__spec__", None) if fn.__module__ == "__main__" else None
+        if main_spec is not None and main_spec.name not in (None, "__main__"):
+            # `python -m pkg.mod`: engines import it under the name Python ran it as.
+            self.module = main_spec.name
+        elif fn.__module__ == "__main__" and file:
             # A script run directly: engines import it by file stem.
             self.module = os.path.splitext(os.path.basename(file))[0]
         else:
             self.module = fn.__module__
+        # Where engines and workers put `module` on sys.path: the import root,
+        # not the file's own folder, so `flows.financing.app` resolves.
+        self.source_dir = _import_root(self.source_file, self.module)
         try:
             line = inspect.getsourcelines(fn)[1]
         except (OSError, TypeError):

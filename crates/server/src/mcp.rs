@@ -1371,11 +1371,8 @@ fn processors(state: &AppState) -> Value {
 fn flow_source(flow: &cereyan_core::Flow) -> Result<Value, ToolError> {
     let base = std::fs::canonicalize(&flow.source_dir)
         .map_err(|e| ToolError::Failed(format!("source directory {}: {e}", flow.source_dir)))?;
-    let mut path = base.clone();
-    for part in flow.module.split('.') {
-        path.push(part);
-    }
-    path.set_extension("py");
+    // The file an engine import loads: `a/b.py`, then the package's `a/b/__init__.py`.
+    let path = crate::fingerprint::module_file(&base, &flow.module);
     let path = std::fs::canonicalize(&path)
         .map_err(|e| ToolError::Failed(format!("{}: {e}", path.display())))?;
     if !path.starts_with(&base) {

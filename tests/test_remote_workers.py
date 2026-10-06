@@ -434,3 +434,48 @@ def test_a_failed_heartbeat_sends_changed_fingerprints_again(monkeypatch, tmp_pa
     w.heartbeat()
     assert sent[0]["flows"] == new
     assert w.flows == new
+
+
+NESTED = '''
+import os
+import time
+from cereyan import App
+
+app = App("remote")
+
+@app.flow
+def financing(gate: str, seconds: float = 60.0):
+    end = time.time() + seconds
+    while not os.path.exists(gate) and time.time() < end:
+        time.sleep(0.05)
+    return os.environ.get("CEREYAN_WORKER")
+'''
+
+
+def test_a_nested_flow_runs_alike_on_the_server_and_a_worker(srv, workers, tmp_path, project):
+    # Sub-folders of the checkout import from its root on both paths.
+    # The server discovers at startup, so restart it with the nested flow in place.
+    (project / "flows" / "financing").mkdir(parents=True)
+    (project / "flows" / "financing" / "app.py").write_text(NESTED)
+    srv.stop()
+    server = ServerProcess(srv.home, str(project), max_engines=1, extra=["--token", TOKEN])
+    server.client = Client(server.info["url"], token=TOKEN)
+    try:
+        w = WorkerProcess(tmp_path, server.info["url"], source=project,
+                          extra_files={"flows/financing/app.py": NESTED})
+        try:
+            view = wait_for(lambda: online(server, "w1"), what="w1 online")
+            assert view["drift"] == []
+            gate = str(tmp_path / "gate")
+            first = server.client.run("financing", gate=gate)
+            server.wait_run(first["id"], until=lambda r: r["state"]["type"] == "Running")
+            second = server.client.run("financing", gate=gate)
+            server.wait_run(second["id"], until=lambda r: r["state"]["type"] == "Running", timeout=40)
+            open(gate, "w").close()
+            done = [server.wait_run(first["id"]), server.wait_run(second["id"])]
+            assert [d["state"]["type"] for d in done] == ["Completed", "Completed"], server.read_log() + w.read_log()
+            assert {d["host"] for d in done} == {"server", "w1"}
+        finally:
+            w.stop()
+    finally:
+        server.stop()
