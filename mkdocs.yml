@@ -54,7 +54,7 @@ theme:
 # pyproject.toml, Cargo.toml, Cargo.lock, uv.lock, ui/package.json and
 # python/cereyan/__init__.py.
 extra:
-  version_display: "3.2.0"
+  version_display: "3.3.0"
 
 extra_css:
   - stylesheets/brand.css
