@@ -1,6 +1,7 @@
-"""Overlap soak: fifteen scheduled flows whose runs outlast their interval,
+"""Overlap soak: up to fifteen scheduled flows whose runs outlast their interval,
 run for an hour against a real server, then checked against the invariants
-in the overlap-soak spec. Usage:
+in the overlap-soak spec. The server caps its engines at the CPU count, so
+flows are taken in PRIORITY order while their caps fit that budget. Usage:
 
     uv run python benches/soak_overlap.py [--minutes 60] [--seed 1] [--quick] [--keep] [--url URL]
 
@@ -85,6 +86,26 @@ MANIFEST: tuple[FlowSpec, ...] = (
     FlowSpec("cancel_10m_12m_cap2", "cancel_new", 600, 720, 2, control=True),
 )
 JITTER_FLOW = "enqueue_1m_jitter"
+MAX_ENGINES = 24
+# Which flows to keep when the engines cannot hold every cap at once: each policy and a
+# control first, so a four-CPU runner still covers enqueue, skip, and cancel_new.
+PRIORITY = (
+    "enqueue_1m_90s",
+    "skip_1m_90s",
+    "cancel_1m_90s",
+    "skip_1m_30s",
+    "cancel_5m_4m",
+    "enqueue_1m_jitter",
+    "cancel_1m_165s",
+    "enqueue_5m_6m_cap2",
+    "skip_5m_8m_cap2",
+    "cancel_10m_12m_cap2",
+    "enqueue_5m_7m",
+    "skip_5m_7m",
+    "cancel_5m_7m",
+    "enqueue_10m_12m",
+    "skip_10m_15m",
+)
 
 
 def build_manifest(seed: int, quick: bool) -> list[FlowSpec]:
@@ -100,6 +121,19 @@ def build_manifest(seed: int, quick: bool) -> list[FlowSpec]:
         spec = replace(spec, offset=round(rng.uniform(2.0, spec.interval - 2.0), 1))
         specs.append(spec)
     return specs
+
+
+def fit_engines(specs: list[FlowSpec], engines: int) -> list[FlowSpec]:
+    """The flows whose caps fit in ``engines``, in PRIORITY order, so no run waits for an engine
+    and the per-flow model holds. The result keeps manifest order."""
+    keep: set[str] = set()
+    left = engines
+    for name in PRIORITY:
+        spec = next(s for s in specs if s.name == name)
+        if spec.cap <= left:
+            keep.add(name)
+            left -= spec.cap
+    return [s for s in specs if s.name in keep]
 
 
 # -- model -------------------------------------------------------------------
@@ -223,8 +257,8 @@ for _spec in SPECS:
     )
 '''
 
-TOML = """[server]
-max_engines = 24
+TOML = f"""[server]
+max_engines = {MAX_ENGINES}
 """
 
 
@@ -460,7 +494,17 @@ def main() -> int:
     minutes = QUICK_MINUTES if args.quick and args.minutes == 60.0 else args.minutes
     window = minutes * 60
     specs = build_manifest(args.seed, args.quick)
+    engines = min(MAX_ENGINES, os.cpu_count() or 1)
+    if args.url:
+        engines = api(args.url.rstrip("/"), "/api/settings")["max_engines"]
+    kept = fit_engines(specs, engines)
+    dropped = [s.name for s in specs if s not in kept]
+    if not args.url:
+        specs = kept  # a running server already serves every flow, so only warn there
     print_manifest(specs, minutes, args.seed, args.quick)
+    if dropped:
+        verb = "expect engine waits from" if args.url else "leaving out"
+        print(f"{engines} engines hold the caps of {len(kept)} flows; {verb}: {', '.join(dropped)}")
 
     home = srv = None
     if args.url:
