@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.3.1 (2026-10-07)
+
+- **The overlap soak fits the engines the server allows.** Since 3.0 the server caps `max_engines` at the CPU count, so on a four-CPU runner the soak's fifteen flows queued for engines and failed every check. `benches/soak_overlap.py` now keeps flows in priority order (one per policy and a control first) while their `max_concurrent` caps fit the engine budget, and prints the ones it leaves out.
+
 ## 3.3.0 (2026-10-06)
 
 - **The UI has a sidebar.** The sections move from the top bar to a sidebar on every page, grouped as Operate (Dashboard, Runs, Queue), Build (Flows, Variables, Rules), Observe (Events, Artifacts, Workers) and System (Settings). The project and group tree becomes a scope picker at the top of the sidebar that you can type into. The top bar keeps search, the live indicator and the theme toggle, and adds **New run**. Every URL and ⌘K work as before. [Tour of the UI](https://sercanatalik.github.io/cereyan/get-started/tour/)
