@@ -2,11 +2,21 @@
 // stale counts when the server is unreachable, the tiles, the flows list with
 // its never-run disclosure, older code, event dots, and relative links.
 import { render, screen, within } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { WorkerPage } from "./page";
 import type { FlowStats, WorkerStatusPayload } from "./types";
 
 const NOW = Date.now() * 1000;
+
+// Relative times ("2 s ago") are measured from NOW; hold the clock there so a slow
+// runner does not read "3 s ago". Only Date is faked, so timers still run.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW / 1000);
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 const MIN = 60_000_000;
 
 function payload(over: Partial<WorkerStatusPayload> = {}): WorkerStatusPayload {
