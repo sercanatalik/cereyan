@@ -336,7 +336,7 @@ Also served on POST, which is what the engine client speaks.
 
 | Status | Body |
 |---|---|
-| 200 | With index: {answer: {prompt, input}} or {answer: null}. Without: the pending question, every answer given, and {input} for the first |
+| 200 | With index: {answer: {prompt, input}} or {answer: null}. Without: the pending question, every answer given, and {input} for the first. Answers inherited from the crashed runs a rerun continues carry their run_id |
 | 404 | no body |
 
 ### `GET /api/runs/{id}/logs`

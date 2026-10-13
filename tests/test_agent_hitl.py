@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import time
 
 import pytest
 
@@ -132,6 +133,81 @@ def timeout_values():
     none = receive("a", timeout=0.5, default=None)
     number = receive("b", timeout=0.5, default=42)
     note(f"defaults:{none!r}:{number!r}")
+
+def crash_once(tag):
+    marker = TRACE + "." + tag
+    if not os.path.exists(marker):
+        open(marker, "w").close()
+        # Let the engine's batched task updates reach the server first.
+        time.sleep(0.5)
+        os._exit(7)
+
+@task
+def release(decision):
+    note(f"release:{decision}")
+    return decision
+
+@app.flow(crash_retries=1)
+def approve_then_crash():
+    decision = wait_for_input("Approve the load?")
+    released = release(decision)
+    crash_once("approve")
+    note(f"answer:{decision}")
+    return released
+
+@app.flow(crash_retries=1)
+def two_then_crash():
+    a = wait_for_input("First?")
+    note(f"first:{a}")
+    crash_once("two")
+    b = wait_for_input("Second?")
+    note(f"second:{b}")
+    return [a, b]
+
+@app.flow(crash_retries=1)
+def prompt_changes_after_crash():
+    prompt = "Publish to production?" if os.path.exists(TRACE + ".prompt") else "Approve the load?"
+    answer = wait_for_input(prompt)
+    crash_once("prompt")
+    return answer
+
+@app.flow(crash_retries=1)
+def queued_then_crash():
+    if not os.path.exists(TRACE + ".queued"):
+        note("waiting")
+        while not os.path.exists(TRACE + ".go"):
+            time.sleep(0.02)
+        crash_once("queued")
+    value = receive("go")
+    note(f"queued:{value}")
+    return value
+
+@app.flow(crash_retries=1)
+def crash_then_receive():
+    crash_once("first")
+    value = receive("go")
+    note(f"late:{value}")
+    return value
+
+@app.flow(crash_retries=1)
+def always_crashes():
+    os._exit(7)
+
+@app.flow
+def answer_then_fail():
+    answer = wait_for_input("Approve?")
+    note(f"approved:{answer}")
+    if not os.path.exists(TRACE + ".failed"):
+        open(TRACE + ".failed", "w").close()
+        raise RuntimeError("failed after the approval")
+    return answer
+
+@app.flow(crash_retries=1)
+def receive_then_crash():
+    value = receive("go", timeout=5, default="defaulted")
+    note(f"got:{value}")
+    crash_once("receive")
+    return value
 '''
 
 
@@ -146,7 +222,7 @@ def hitl(isolated_home, tmp_path):
     (d / "cereyan.toml").write_text("[resources]\ndb = 1\n")
     trace = tmp_path / "trace.txt"
     trace.write_text("")
-    srv = ServerProcess(str(isolated_home), str(d), env={"HITL_TRACE": str(trace)}, extra=["--max-engines", "1"])
+    srv = ServerProcess(str(isolated_home), str(d), env={"HITL_TRACE": str(trace), "CEREYAN_FAST_CRASH_RERUN": "1"}, extra=["--max-engines", "1"])
     srv.trace = trace
     try:
         yield srv
@@ -440,3 +516,149 @@ def test_receive_timeout_defaults_keep_their_type(hitl):
     final = hitl.wait_run(run["id"])
     assert final["state"]["type"] == "Completed"
     assert lines(hitl)[-1] == "defaults:None:42"
+
+
+def crash_rerun_of(srv, run_id):
+    deadline = time.time() + 40
+    while time.time() < deadline:
+        for r in srv.client._request("GET", "/api/runs", params={"limit": 50})["items"]:
+            if r["created_by"] == f"crash:{run_id}":
+                return r
+        time.sleep(0.1)
+    raise AssertionError(f"no crash rerun of {run_id}\n{srv.read_log()}")
+
+
+def settled(srv, run_id):
+    return srv.wait_run(run_id, timeout=40, until=lambda r: r["state"]["type"] in ("Completed", "Failed", "Cancelled", "Crashed", "Paused"))
+
+
+def test_a_crash_rerun_keeps_the_answer(hitl):
+    run = start(hitl, "approve_then_crash")
+    paused(hitl, run["id"])
+    hitl.client.resume(run["id"], "yes")
+    assert hitl.wait_run(run["id"], timeout=40)["state"]["type"] == "Crashed"
+    rerun = crash_rerun_of(hitl, run["id"])
+    final = settled(hitl, rerun["id"])
+    assert final["state"]["type"] == "Completed", final["state"]
+    # release ran once, before the crash; the rerun replayed it and its
+    # wait_for_input returned the answer the crashed run held.
+    assert lines(hitl) == ["release:yes", "answer:yes"]
+
+
+def test_a_crash_rerun_keeps_a_consumed_message(hitl):
+    run = start(hitl, "receive_then_crash")
+    paused(hitl, run["id"])
+    hitl.client.send_message(run["id"], "go", {"x": 1})
+    assert hitl.wait_run(run["id"], timeout=40)["state"]["type"] == "Crashed"
+    rerun = crash_rerun_of(hitl, run["id"])
+    final = settled(hitl, rerun["id"])
+    assert final["state"]["type"] == "Completed", final["state"]
+    assert lines(hitl) == ["got:{'x': 1}", "got:{'x': 1}"]
+
+
+def answers(srv, run_id):
+    return srv.client._request("GET", f"/api/runs/{run_id}/input")["answers"]
+
+
+def test_a_crash_rerun_asks_only_unanswered_questions(hitl):
+    run = start(hitl, "two_then_crash")
+    paused(hitl, run["id"])
+    hitl.client.resume(run["id"], "A")
+    assert hitl.wait_run(run["id"], timeout=40)["state"]["type"] == "Crashed"
+    # The crashed run keeps its answer for the rerun.
+    assert answers(hitl, run["id"])["0"]["input"] == "A"
+    rerun = crash_rerun_of(hitl, run["id"])
+    second = settled(hitl, rerun["id"])
+    assert second["state"]["type"] == "Paused" and second["state"]["details"]["index"] == 1
+    assert second["state"]["message"] == "Second?"
+    # The rerun shows the answer it inherits, marked with the run holding it.
+    inherited = answers(hitl, rerun["id"])
+    assert inherited["0"]["input"] == "A" and inherited["0"]["run_id"] == run["id"]
+    assert hitl.client._request("GET", f"/api/runs/{rerun['id']}/input", params={"index": 0})["answer"]["input"] == "A"
+    hitl.client.resume(rerun["id"], "B")
+    assert hitl.wait_run(rerun["id"])["state"]["type"] == "Completed"
+    # The crashed pass, the rerun's first pass and its resumed pass each pass
+    # the first question, answered "A" every time.
+    assert lines(hitl) == ["first:A", "first:A", "first:A", "second:B"]
+    # The chain has ended: no run of it keeps an answer.
+    assert answers(hitl, run["id"]) == {}
+    assert answers(hitl, rerun["id"]) == {}
+
+
+def test_a_changed_prompt_asks_again_through_the_chain(hitl):
+    run = start(hitl, "prompt_changes_after_crash")
+    paused(hitl, run["id"])
+    hitl.client.resume(run["id"], "yes")
+    assert hitl.wait_run(run["id"], timeout=40)["state"]["type"] == "Crashed"
+    rerun = crash_rerun_of(hitl, run["id"])
+    again = settled(hitl, rerun["id"])
+    assert again["state"]["type"] == "Paused"
+    assert again["state"]["message"] == "Publish to production?"
+    assert again["state"]["details"]["index"] == 0
+    hitl.client.resume(rerun["id"], "no")
+    final = hitl.wait_run(rerun["id"])
+    assert final["state"]["type"] == "Completed"
+
+
+def test_a_message_queued_for_the_crashed_run_reaches_the_rerun(hitl):
+    run = start(hitl, "queued_then_crash")
+    deadline = time.time() + 30
+    while "waiting" not in lines(hitl):
+        assert time.time() < deadline, "the flow never started"
+        time.sleep(0.02)
+    queued = hitl.client.send_message(run["id"], "go", {"x": 3})
+    assert queued["id"] == run["id"]
+    (hitl.trace.parent / (hitl.trace.name + ".go")).write_text("")
+    assert hitl.wait_run(run["id"], timeout=40)["state"]["type"] == "Crashed"
+    rerun = crash_rerun_of(hitl, run["id"])
+    final = settled(hitl, rerun["id"])
+    assert final["state"]["type"] == "Completed", final["state"]
+    assert lines(hitl)[-1] == "queued:{'x': 3}"
+
+
+def test_a_message_sent_after_the_crash_reaches_the_chain(hitl):
+    run = start(hitl, "crash_then_receive")
+    assert hitl.wait_run(run["id"], timeout=40)["state"]["type"] == "Crashed"
+    # Whether the rerun exists yet or not, the message is not refused.
+    sent = hitl.client.send_message(run["id"], "go", {"x": 4})
+    rerun = crash_rerun_of(hitl, run["id"])
+    assert sent["id"] in (run["id"], rerun["id"])
+    final = settled(hitl, rerun["id"])
+    assert final["state"]["type"] == "Completed", final["state"]
+    assert lines(hitl) == ["late:{'x': 4}"]
+
+
+def test_a_message_to_an_old_run_wakes_the_waiting_rerun(hitl):
+    run = start(hitl, "crash_then_receive")
+    assert hitl.wait_run(run["id"], timeout=40)["state"]["type"] == "Crashed"
+    rerun = crash_rerun_of(hitl, run["id"])
+    waiting = settled(hitl, rerun["id"])
+    assert waiting["state"]["type"] == "Paused" and waiting["state"]["details"]["topic"] == "go"
+    sent = hitl.client.send_message(run["id"], "go", {"x": 5})
+    assert sent["id"] == rerun["id"]
+    assert hitl.wait_run(rerun["id"])["state"]["type"] == "Completed"
+    assert lines(hitl) == ["late:{'x': 5}"]
+
+
+def test_a_message_to_an_ended_chain_is_refused(hitl):
+    run = start(hitl, "always_crashes")
+    assert hitl.wait_run(run["id"], timeout=40)["state"]["type"] == "Crashed"
+    rerun = crash_rerun_of(hitl, run["id"])
+    last = hitl.wait_run(rerun["id"], timeout=40)
+    assert last["state"]["type"] == "Failed" and last["state"]["message"] == "crash limit reached"
+    with pytest.raises(ApiError) as err:
+        hitl.client.send_message(run["id"], "go", 1)
+    assert err.value.status == 409
+
+
+def test_a_retry_from_failure_asks_again(hitl):
+    run = start(hitl, "answer_then_fail")
+    paused(hitl, run["id"])
+    hitl.client.resume(run["id"], "yes")
+    assert hitl.wait_run(run["id"])["state"]["type"] == "Failed"
+    retry = hitl.client.retry(run["id"])["run"]
+    again = paused(hitl, retry["id"])
+    assert again["state"]["details"]["index"] == 0
+    hitl.client.resume(retry["id"], "still yes")
+    assert hitl.wait_run(retry["id"])["state"]["type"] == "Completed"
+    assert lines(hitl) == ["approved:yes", "approved:still yes"]

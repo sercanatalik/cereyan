@@ -1247,6 +1247,25 @@ pub(crate) fn stored_answers(state: &AppState, id: i64) -> ApiResult<Map<String,
     Ok(answers)
 }
 
+/// The answers a run's questions receive: its own, then those of each crashed
+/// run it continues, nearest first. An inherited answer carries the `run_id`
+/// of the run that holds it.
+pub(crate) fn chain_answers(state: &AppState, id: i64) -> ApiResult<Map<String, Value>> {
+    let mut answers = stored_answers(state, id)?;
+    for ancestor in state.store.crash_chain(id)?.into_iter().skip(1) {
+        for (index, mut answer) in stored_answers(state, ancestor)? {
+            if answers.contains_key(&index) {
+                continue;
+            }
+            if let Some(obj) = answer.as_object_mut() {
+                obj.insert("run_id".into(), serde_json::json!(ancestor));
+            }
+            answers.insert(index, answer);
+        }
+    }
+    Ok(answers)
+}
+
 pub(crate) fn answers_value(answers: &Map<String, Value>) -> String {
     serde_json::json!({"v": 2, "answers": answers}).to_string()
 }
@@ -1258,7 +1277,7 @@ pub struct InputQuery {
     pub index: Option<i64>,
 }
 
-#[utoipa::path(get, path = "/api/runs/{id}/input", params(("id" = i64, Path), InputQuery), responses((status = 200, description = "With index: {answer: {prompt, input}} or {answer: null}. Without: the pending question, every answer given, and {input} for the first"), (status = 404)))]
+#[utoipa::path(get, path = "/api/runs/{id}/input", params(("id" = i64, Path), InputQuery), responses((status = 200, description = "With index: {answer: {prompt, input}} or {answer: null}. Without: the pending question, every answer given, and {input} for the first. Answers inherited from the crashed runs a rerun continues carry their run_id"), (status = 404)))]
 pub async fn run_input(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
@@ -1268,7 +1287,7 @@ pub async fn run_input(
         .store
         .get_run(id)?
         .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
-    let answers = stored_answers(&state, id)?;
+    let answers = chain_answers(&state, id)?;
     if let Some(index) = q.index {
         let answer = answers
             .get(&index.to_string())
@@ -1344,7 +1363,9 @@ pub struct MessageBody {
 ///
 /// If the run is Paused waiting for this topic, the message is stored as the
 /// answer and the run is resumed. Otherwise the message is queued for the next
-/// `receive(topic)` call.
+/// `receive(topic)` call. A message to a crashed run goes to the newest run of
+/// its crash chain, which the response returns; once the chain has ended the
+/// response is 409.
 #[utoipa::path(post, path = "/api/runs/{id}/messages/{topic}", params(("id" = i64, Path), ("topic" = String, Path)), request_body = MessageBody, responses((status = 200, body = Run), (status = 404), (status = 409)))]
 pub async fn send_message(
     State(state): State<Arc<AppState>>,

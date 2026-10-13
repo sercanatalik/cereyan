@@ -1609,6 +1609,194 @@ fn result_refs(cps: &[cereyan_store::Checkpoint]) -> Vec<(String, String)> {
 }
 
 #[test]
+fn a_run_alone_is_its_own_crash_chain() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+    let f = flow(&store, "p", "etl");
+    let (run, _) = run_of(&store, f, "alone");
+    assert_eq!(store.crash_chain(run).unwrap(), vec![run]);
+    assert_eq!(store.crash_chain_head(run).unwrap(), run);
+}
+
+#[test]
+fn a_crash_chain_lists_nearest_first_and_finds_its_head() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+    let f = flow(&store, "p", "etl");
+    let (first, _) = run_of(&store, f, "first");
+    let (second, _) = crash_retry_of(&store, f, "second", first);
+    let (third, _) = crash_retry_of(&store, f, "third", second);
+    // A retry from failure is a new decision, not part of the crash chain.
+    let (retried, _) = store
+        .create_run_full(CreateRun {
+            flow_id: f,
+            name: "retried".into(),
+            created_by: format!("retry:{third}"),
+            parent_run_id: Some(third),
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(
+        store.crash_chain(third).unwrap(),
+        vec![third, second, first]
+    );
+    assert_eq!(store.crash_chain(second).unwrap(), vec![second, first]);
+    assert_eq!(store.crash_chain(retried).unwrap(), vec![retried]);
+    // From anywhere in the chain, the head is the newest crash rerun.
+    assert_eq!(store.crash_chain_head(first).unwrap(), third);
+    assert_eq!(store.crash_chain_head(second).unwrap(), third);
+    assert_eq!(store.crash_chain_head(third).unwrap(), third);
+}
+
+fn answers_of(store: &Store, run_id: i64, answers: serde_json::Value) {
+    let value = serde_json::json!({"v": 2, "answers": answers}).to_string();
+    store
+        .kv_set(&format!("run.input:{run_id}"), &value)
+        .unwrap();
+}
+
+fn claimed_input(store: &Store, run_id: i64, topic: &str, index: i64) -> Option<serde_json::Value> {
+    store
+        .run_message_claim(run_id, topic, index)
+        .unwrap()
+        .map(|raw| serde_json::from_str::<serde_json::Value>(&raw).unwrap()["input"].clone())
+}
+
+#[test]
+fn a_crash_rerun_claims_the_answer_its_chain_holds() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+    let f = flow(&store, "p", "etl");
+    let (first, _) = run_of(&store, f, "first");
+    let (second, _) = crash_retry_of(&store, f, "second", first);
+    let (third, _) = crash_retry_of(&store, f, "third", second);
+    answers_of(
+        &store,
+        first,
+        serde_json::json!({
+            "0": {"topic": "input", "prompt": "Approve?", "input": "old"},
+            "1": {"topic": "input", "prompt": "Publish?", "input": "from-first"},
+        }),
+    );
+    answers_of(
+        &store,
+        second,
+        serde_json::json!({
+            "0": {"topic": "input", "prompt": "Approve?", "input": "yes"},
+        }),
+    );
+    // The nearest run of the chain wins, and a further one fills the gaps.
+    assert_eq!(
+        claimed_input(&store, third, "input", 0),
+        Some(serde_json::json!("yes"))
+    );
+    assert_eq!(
+        claimed_input(&store, third, "input", 1),
+        Some(serde_json::json!("from-first"))
+    );
+    assert_eq!(claimed_input(&store, third, "input", 2), None);
+    // The run's own answer wins over every ancestor's.
+    answers_of(
+        &store,
+        third,
+        serde_json::json!({
+            "0": {"topic": "input", "prompt": "Approve?", "input": "mine"},
+        }),
+    );
+    assert_eq!(
+        claimed_input(&store, third, "input", 0),
+        Some(serde_json::json!("mine"))
+    );
+    // A retry from failure inherits nothing.
+    let (retried, _) = store
+        .create_run_full(CreateRun {
+            flow_id: f,
+            name: "retried".into(),
+            created_by: format!("retry:{second}"),
+            parent_run_id: Some(second),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(claimed_input(&store, retried, "input", 0), None);
+}
+
+#[test]
+fn a_crash_rerun_claims_messages_queued_for_its_chain_oldest_first() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+    let f = flow(&store, "p", "etl");
+    let (crashed, _) = run_of(&store, f, "crashed");
+    store.run_message_insert(crashed, "go", "1").unwrap();
+    let (rerun, _) = crash_retry_of(&store, f, "rerun", crashed);
+    store.run_message_insert(rerun, "go", "2").unwrap();
+
+    assert_eq!(
+        claimed_input(&store, rerun, "go", 0),
+        Some(serde_json::json!(1))
+    );
+    assert_eq!(
+        claimed_input(&store, rerun, "go", 1),
+        Some(serde_json::json!(2))
+    );
+    // Consumed where it lay; the binding is the claiming run's.
+    assert!(store.run_message_list(crashed).unwrap().is_empty());
+    let own: serde_json::Value = serde_json::from_str(
+        &store
+            .kv_get(&format!("run.input:{rerun}"))
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(own["answers"]["0"]["input"], serde_json::json!(1));
+    assert_eq!(own["answers"]["1"]["input"], serde_json::json!(2));
+    assert!(store
+        .kv_get(&format!("run.input:{crashed}"))
+        .unwrap()
+        .is_none());
+    // Replaying the claims returns the same bindings.
+    assert_eq!(
+        claimed_input(&store, rerun, "go", 0),
+        Some(serde_json::json!(1))
+    );
+    // A queued-only claim passes over the stored answers.
+    assert_eq!(
+        store.run_message_claim_queued(rerun, "go", 0).unwrap(),
+        None
+    );
+    store.run_message_insert(crashed, "go", "3").unwrap();
+    let raw = store
+        .run_message_claim_queued(rerun, "go", 0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&raw).unwrap()["input"],
+        serde_json::json!(3)
+    );
+}
+
+#[test]
+fn a_run_alone_claims_as_before() {
+    let dir = TempDir::new().unwrap();
+    let store = open(&dir);
+    let f = flow(&store, "p", "etl");
+    let (run, _) = run_of(&store, f, "alone");
+    let (other, _) = run_of(&store, f, "other");
+    store.run_message_insert(other, "go", "\"theirs\"").unwrap();
+    assert_eq!(claimed_input(&store, run, "go", 0), None);
+    store.run_message_insert(run, "go", "\"mine\"").unwrap();
+    assert_eq!(
+        claimed_input(&store, run, "go", 0),
+        Some(serde_json::json!("mine"))
+    );
+    assert_eq!(
+        claimed_input(&store, run, "go", 0),
+        Some(serde_json::json!("mine"))
+    );
+    assert_eq!(store.run_message_list(other).unwrap().len(), 1);
+}
+
+#[test]
 fn checkpoints_come_from_completed_task_runs() {
     let dir = TempDir::new().unwrap();
     let store = open(&dir);

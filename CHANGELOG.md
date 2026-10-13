@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: a crash rerun asked its questions again.** A run that was answered and then crashed lost its answers, so its rerun replayed the work the answer had approved and paused to ask the same question; a different answer the second time contradicted what had already run. Messages the crashed run had received were lost too, and a message sent before its rerun started answered 409. A crash rerun now uses the answers and messages of every run of its crash chain and asks only what none of them answered. A message to a crashed run reaches the rerun that continues it. `GET /api/runs/{id}/input` lists inherited answers with the `run_id` that holds them. A retry from failure still asks again. [If the engine crashes](https://sercanatalik.github.io/cereyan/guides/human-approval/#if-the-engine-crashes)
+- **Fix: a paused run could be woken with an answer it had turned down.** When a run paused because the stored answer at that position was for a different prompt, the server handed it that same answer straight back. Only a queued message now wakes a paused run.
+
 ## 3.3.1 (2026-10-07)
 
 - **The overlap soak fits the engines the server allows.** Since 3.0 the server caps `max_engines` at the CPU count, so on a four-CPU runner the soak's fifteen flows queued for engines and failed every check. `benches/soak_overlap.py` now keeps flows in priority order (one per policy and a control first) while their `max_concurrent` caps fit the engine budget, and prints the ones it leaves out.

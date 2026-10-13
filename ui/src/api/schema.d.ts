@@ -756,7 +756,9 @@ export interface paths {
          * Send a message to a run on `topic`.
          * @description If the run is Paused waiting for this topic, the message is stored as the
          *     answer and the run is resumed. Otherwise the message is queued for the next
-         *     `receive(topic)` call.
+         *     `receive(topic)` call. A message to a crashed run goes to the newest run of
+         *     its crash chain, which the response returns; once the chain has ended the
+         *     response is 409.
          */
         post: operations["send_message"];
         delete?: never;
@@ -4839,7 +4841,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description With index: {answer: {prompt, input}} or {answer: null}. Without: the pending question, every answer given, and {input} for the first */
+            /** @description With index: {answer: {prompt, input}} or {answer: null}. Without: the pending question, every answer given, and {input} for the first. Answers inherited from the crashed runs a rerun continues carry their run_id */
             200: {
                 headers: {
                     [name: string]: unknown;

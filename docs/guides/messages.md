@@ -35,7 +35,9 @@ done = served.wait_run(run["id"])
 assert done["state"]["type"] == "Completed"
 ```
 
-`POST /api/runs/{id}/messages/{topic}` with `{"payload": ...}`, `Client.send_message`, and the MCP `send_message` tool do the same. The payload is any JSON. A run that is Paused on exactly that topic resumes at once; otherwise the message is queued and handed over when the run next reaches `receive` for that topic, so sending before the flow gets there is safe. Sending to a run that has ended answers 409. On the run page the band shows the topic, and **Resume** sends what you type as the message.
+`POST /api/runs/{id}/messages/{topic}` with `{"payload": ...}`, `Client.send_message`, and the MCP `send_message` tool do the same. The payload is any JSON. A run that is Paused on exactly that topic resumes at once; otherwise the message is queued and handed over when the run next reaches `receive` for that topic, so sending before the flow gets there is safe. Sending to a run that has ended answers 409.
+
+A crashed run is continued by its rerun, so a message sent to it goes to the newest run of its crash chain, and the response is that run. If the rerun is waiting on the topic it resumes; if it has not started yet the message is queued for it. Only once the chain has ended does the send answer 409. The rerun's `receive` also returns the messages the crashed run had already received, and claims those queued for it before the crash. On the run page the band shows the topic, and **Resume** sends what you type as the message.
 
 ## Time out
 

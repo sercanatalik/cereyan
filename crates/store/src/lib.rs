@@ -431,6 +431,25 @@ impl Store {
             run_id,
             topic: topic.into(),
             index,
+            queued_only: false,
+            reply,
+        })
+    }
+
+    /// Claim the oldest queued message for a run's chain and topic, ignoring
+    /// any answer already stored at `index`. A run paused at `index` has
+    /// already turned that answer down, so only a message may wake it.
+    pub fn run_message_claim_queued(
+        &self,
+        run_id: i64,
+        topic: &str,
+        index: i64,
+    ) -> Result<Option<String>> {
+        self.write(|reply| WriteCommand::RunMessageClaim {
+            run_id,
+            topic: topic.into(),
+            index,
+            queued_only: true,
             reply,
         })
     }

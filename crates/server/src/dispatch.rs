@@ -345,11 +345,7 @@ pub fn crash_run(state: &Arc<AppState>, run_id: i64, message: &str) {
         return;
     };
     let options = FlowOptions::from_map(&flow.options);
-    let limit = options.crash_retries.unwrap_or(
-        state
-            .crash_retries_default
-            .load(std::sync::atomic::Ordering::Relaxed),
-    );
+    let limit = crash_limit(state, &flow);
     if run.attempt < limit {
         let s = State::new(StateType::Crashed).with_message(message);
         if let Ok(TransitionResult::Accepted(_)) = state.transition_run(run_id, s, false) {
@@ -378,6 +374,18 @@ pub fn crash_run(state: &Arc<AppState>, run_id: i64, message: &str) {
     }
 }
 
+/// How many crash reruns a run of `flow` gets: the flow's own `crash_retries`,
+/// or the server default.
+pub fn crash_limit(state: &AppState, flow: &Flow) -> i64 {
+    FlowOptions::from_map(&flow.options)
+        .crash_retries
+        .unwrap_or(
+            state
+                .crash_retries_default
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+}
+
 /// How far back startup looks for crash chains a restart interrupted.
 const CRASH_CHAIN_LOOKBACK_MICROS: i64 = 24 * 3_600 * 1_000_000;
 
@@ -391,9 +399,6 @@ pub fn rearm_crash_chains(state: &Arc<AppState>) {
     let Ok(ids) = state.store.crashed_without_rerun(since) else {
         return;
     };
-    let default_limit = state
-        .crash_retries_default
-        .load(std::sync::atomic::Ordering::Relaxed);
     for run_id in ids {
         let Ok(Some(run)) = state.store.get_run(run_id) else {
             continue;
@@ -401,10 +406,7 @@ pub fn rearm_crash_chains(state: &Arc<AppState>) {
         let Ok(Some(flow)) = state.store.get_flow(run.flow_id) else {
             continue;
         };
-        let limit = FlowOptions::from_map(&flow.options)
-            .crash_retries
-            .unwrap_or(default_limit);
-        if run.attempt < limit {
+        if run.attempt < crash_limit(state, &flow) {
             state
                 .timer
                 .push(now_micros() + 200_000, TimerEvent::CrashRerun(run_id));

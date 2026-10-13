@@ -490,7 +490,7 @@ pub fn tool_list() -> Vec<Value> {
             json!({"run_id": {"type": "integer"}, "input": {"description": "The answer, any JSON"}}), &["run_id", "input"]),
         read_tool("list_waiting_runs", "Runs that are Paused waiting for input or a message, with their prompt, topic, and the flow they belong to. Read-only.",
             json!({"flow": flow_prop, "project": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}}), &[]),
-        write_tool("send_message", "Send a message to a Paused run on a topic. Resumes the run immediately if it is waiting for this topic, or queues the message for the next receive() call.",
+        write_tool("send_message", "Send a message to a Paused run on a topic. Resumes the run immediately if it is waiting for this topic, or queues the message for the next receive() call. A message to a crashed run reaches the rerun that continues it.",
             json!({"run_id": {"type": "integer"}, "topic": {"type": "string"}, "payload": {"description": "The message payload, any JSON"}}), &["run_id", "topic", "payload"]),
         write_tool("backfill", "Create one run per value of a date or datetime parameter between start and end. Defaults to a dry run that only reports how many runs would be created; pass dry_run false to create them. Can create thousands of runs.",
             json!({"flow": flow_prop, "parameter": {"type": "string"}, "start": {"type": "string", "description": "YYYY-MM-DD or RFC 3339; not needed with values"}, "end": {"type": "string"}, "interval": {"type": "string", "description": "Seconds or a duration such as 1d or 12h (default 1d)"}, "concurrency": {"type": "integer", "default": 1}, "extra_parameters": {"type": "object"}, "reverse": {"type": "boolean"},

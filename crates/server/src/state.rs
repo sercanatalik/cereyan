@@ -581,10 +581,17 @@ impl AppState {
                 r.engine_id = None;
             });
         }
-        if run.state.is_terminal() {
-            // The answers belong to this run's questions and nothing asks them
-            // again once it has ended.
-            let _ = self.store.kv_delete(&run_input_key(run_id));
+        if run.state.is_terminal() && run.state.state_type != StateType::Crashed {
+            // The answers belong to this execution's questions and nothing asks
+            // them again once it has ended. A crashed run keeps them for the
+            // rerun that continues it, so the end of the chain clears them all.
+            let chain = self
+                .store
+                .crash_chain(run_id)
+                .unwrap_or_else(|_| vec![run_id]);
+            for id in chain {
+                let _ = self.store.kv_delete(&run_input_key(id));
+            }
         }
         self.publish_run(&run);
         crate::events::emit_run_event(self, &run);

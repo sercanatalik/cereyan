@@ -160,6 +160,8 @@ def fragile() -> None:
 
 A crash is not a failure of your code, so it does not consume `retries`. The rerun starts with the crashed run's [checkpoints](../concepts/runs-and-states.md#checkpoints): every task that completed before the crash is `Replayed` from its stored result, and execution resumes at the first task that did not finish. That is at-least-once, since a task that completed in the moments before the crash may run again, so still write outputs through [targets](../concepts/targets-caching-results.md) when a repeat would be harmful. In-process retries replay too when the flow declares `checkpoint=True`.
 
+The rerun also carries the rest of what the crashed run knew: values its tasks stored with `task_state`, the answers given to its [questions](human-approval.md#if-the-engine-crashes), and the [messages](messages.md) it received or had queued. A question answered before the crash is not asked again.
+
 ## See what happened
 
 The run page's Details tab shows every state with its message; the failing exception's type, message, and traceback are in the state details and the log. The MCP `explain_failure` tool and the `diagnose_run` prompt collect the same for an agent.

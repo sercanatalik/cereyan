@@ -72,21 +72,39 @@ pub fn deliver_message(
     payload: Value,
 ) -> ApiResult<Delivered> {
     let _guard = answer_lock();
+    if state.store.get_run(run_id)?.is_none() {
+        return Err(ApiError::NotFound("run not found".into()));
+    }
+    // A crashed run is continued by its rerun: the message goes to the newest
+    // run of the chain, which may already be waiting for it.
+    let head = state.store.crash_chain_head(run_id)?;
     let run = state
         .store
-        .get_run(run_id)?
+        .get_run(head)?
         .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
     let waiting = run.state.details.get("topic").and_then(|v| v.as_str());
     if run.state.state_type == StateType::Paused && waiting == Some(topic) {
         return Ok(Delivered::Woke(wake_locked(state, run, payload)?));
     }
-    if run.state.state_type.is_terminal() {
+    if run.state.state_type.is_terminal() && !chain_continues(state, &run)? {
         return Err(ApiError::Conflict(json!({"error": "run is terminal"})));
     }
     state
         .store
-        .run_message_insert(run_id, topic, &payload.to_string())?;
+        .run_message_insert(run.id, topic, &payload.to_string())?;
     Ok(Delivered::Queued(Box::new(run)))
+}
+
+/// A Crashed run below its flow's crash limit gets a rerun, which claims what
+/// is queued for it through the chain.
+fn chain_continues(state: &Arc<AppState>, run: &Run) -> ApiResult<bool> {
+    if run.state.state_type != StateType::Crashed {
+        return Ok(false);
+    }
+    let Some(flow) = state.store.get_flow(run.flow_id)? else {
+        return Ok(false);
+    };
+    Ok(run.attempt < crate::dispatch::crash_limit(state, &flow))
 }
 
 /// Store `input` as the answer to the question `run` is paused on and schedule
@@ -142,7 +160,9 @@ pub fn deliver_queued(state: &Arc<AppState>, run: &Run) {
     // The Paused transition that got us here has not returned to its caller
     // yet; waking from inside it would hand that caller a run that has already
     // moved on. The claim happens under the answer lock, after the run is
-    // re-read, so a message is consumed only by the pause it answers.
+    // re-read, so a message is consumed only by the pause it answers. Stored
+    // answers are skipped: the engine paused because it turned the one at this
+    // index down, such as an inherited answer to a different prompt.
     let state = state.clone();
     let observed = run.clone();
     std::thread::spawn(move || {
@@ -154,7 +174,10 @@ pub fn deliver_queued(state: &Arc<AppState>, run: &Run) {
                 .get("index")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
-            let text = state.store.run_message_claim(run.id, topic, index).ok()??;
+            let text = state
+                .store
+                .run_message_claim_queued(run.id, topic, index)
+                .ok()??;
             let answer: Value = serde_json::from_str(&text).unwrap_or(Value::String(text));
             Some(answer.get("input").cloned().unwrap_or(Value::Null))
         });

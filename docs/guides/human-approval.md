@@ -72,6 +72,12 @@ An answer is used only while the prompt at that position still matches the one i
 
 `wait_for_input` belongs in the flow body. Pausing works by raising out of the body, so a call from a task submitted with `submit` or `map` raises `CereyanError` instead of pausing the run.
 
+## If the engine crashes
+
+A run that crashes after it was answered keeps its answers, and its [crash rerun](retries-timeouts-crashes.md#survive-a-crash) uses them: it replays the tasks that ran before the crash and asks only the questions no run of its chain has answered. `GET /api/runs/{id}/input` on the rerun lists the answers it inherits, each with the `run_id` of the run that holds it. A changed prompt still asks again. The answers are dropped once the chain ends.
+
+A [retry from failure](retries-timeouts-crashes.md#retry-a-finished-run-from-where-it-failed) is a new decision and asks every question again, even though it replays the tasks the first answer led to. Keep the work that depends on an answer after the question, and safe to repeat, if a failed run might be retried.
+
 ## Offline
 
 Without a server, `wait_for_input` reads the answer from the terminal (as JSON when a schema is given) and raises `CereyanError` when there is no interactive terminal, so scripts under cron fail fast instead of hanging.

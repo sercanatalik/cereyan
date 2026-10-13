@@ -1008,7 +1008,7 @@
         "destructiveHint": false,
         "readOnlyHint": false
       },
-      "description": "Send a message to a Paused run on a topic. Resumes the run immediately if it is waiting for this topic, or queues the message for the next receive() call.",
+      "description": "Send a message to a Paused run on a topic. Resumes the run immediately if it is waiting for this topic, or queues the message for the next receive() call. A message to a crashed run reaches the rerun that continues it.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

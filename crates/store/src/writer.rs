@@ -407,6 +407,8 @@ pub enum WriteCommand {
         run_id: i64,
         topic: String,
         index: i64,
+        /// Skip the stored answers and claim only a queued message.
+        queued_only: bool,
         reply: Reply<Option<String>>,
     },
     /// List pending messages for a run.
@@ -993,43 +995,66 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
             run_id,
             topic,
             index,
+            queued_only,
             reply,
         } => ack(
             reply,
             (|| {
-                // 1. Check whether the answer is already stored in kv.
+                // A crash rerun continues the runs it reruns, so their answers
+                // and queued messages are its own. Walk the chain once.
+                let chain = crate::read::crash_chain(conn, run_id)?;
+                let chain_ids = crate::read::chain_json(&chain);
                 let answers_key = format!("run.input:{}", run_id);
-                let existing: Option<String> = conn
-                    .query_row(
-                        "SELECT value FROM kv WHERE key = ?1",
-                        params![answers_key],
-                        |r| r.get(0),
-                    )
-                    .optional()?;
-                if let Some(ref raw) = existing {
-                    if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
-                        if let Some(answers) = value.get("answers").and_then(|a| a.as_object()) {
-                            if let Some(answer) = answers.get(&index.to_string()) {
-                                // Answer exists at this index. Return the full
-                                // answer dict (topic, prompt, input) so the
-                                // engine can check the prompt for wait_for_input.
-                                let answer_topic = answer
-                                    .get("topic")
-                                    .and_then(|t| t.as_str())
-                                    .unwrap_or("input");
-                                if answer_topic == topic {
-                                    return Ok(Some(answer.to_string()));
-                                }
-                            }
-                        }
+                let mut stored: HashMap<String, String> = HashMap::new();
+                {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT key, value FROM kv WHERE key IN
+                           (SELECT 'run.input:' || value FROM json_each(?1))",
+                    )?;
+                    for row in stmt.query_map(params![chain_ids], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })? {
+                        let (k, v) = row?;
+                        stored.insert(k, v);
                     }
                 }
-                // 2. Claim the oldest pending message for this topic.
+                let existing: Option<String> = stored.get(&answers_key).cloned();
+                // 1. An answer already stored at this index, by this run first and
+                //    then by each run it continues, nearest first.
+                for id in chain.iter().filter(|_| !queued_only) {
+                    let Some(raw) = stored.get(&format!("run.input:{id}")) else {
+                        continue;
+                    };
+                    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+                        continue;
+                    };
+                    let Some(answer) = value
+                        .get("answers")
+                        .and_then(|a| a.as_object())
+                        .and_then(|a| a.get(&index.to_string()))
+                    else {
+                        continue;
+                    };
+                    // Return the full answer dict (topic, prompt, input) so the
+                    // engine can check the prompt for wait_for_input.
+                    let answer_topic = answer
+                        .get("topic")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("input");
+                    if answer_topic == topic {
+                        return Ok(Some(answer.to_string()));
+                    }
+                }
+                // 2. Claim the oldest pending message for this topic queued for
+                //    any run of the chain. `ordinal` is global, so a message left
+                //    for the crashed run goes before one sent to its rerun.
                 let mut stmt = conn.prepare_cached(
-                    "SELECT ordinal, payload FROM run_message WHERE run_id = ?1 AND topic = ?2 AND consumed_at IS NULL ORDER BY ordinal LIMIT 1",
+                    "SELECT ordinal, payload FROM run_message
+                     WHERE run_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?1))
+                       AND topic = ?2 AND consumed_at IS NULL ORDER BY ordinal LIMIT 1",
                 )?;
                 let row = stmt
-                    .query_row(params![run_id, topic], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                    .query_row(params![chain_ids, topic], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
                     .optional()?;
                 if let Some((ordinal, payload)) = row {
                     let now = now_micros();

@@ -253,11 +253,43 @@ fn chain_seeds(
     Ok(found)
 }
 
+/// A run and the crashed runs it continues through `crash:` links, nearest
+/// first. Checkpoints, answers and queued messages all follow this chain.
+pub(crate) fn crash_chain(conn: &Connection, run_id: i64) -> Result<Vec<i64>> {
+    let mut walk = conn.prepare_cached(
+        "WITH RECURSIVE chain(id, depth) AS (
+            SELECT ?1, 0
+            UNION ALL
+            SELECT r.parent_run_id, chain.depth + 1 FROM run r JOIN chain ON r.id = chain.id
+            WHERE r.parent_run_id IS NOT NULL AND r.created_by LIKE 'crash:%'
+              AND chain.depth < 50
+         ) SELECT id FROM chain ORDER BY depth",
+    )?;
+    let ids = walk
+        .query_map(rusqlite::params![run_id], |r| r.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids)
+}
+
+/// The newest run continuing `run_id` through `crash:` links, or `run_id`
+/// itself when nothing reruns it.
+pub(crate) fn crash_chain_head(conn: &Connection, run_id: i64) -> Result<i64> {
+    let mut walk = conn.prepare_cached(
+        "WITH RECURSIVE chain(id, depth) AS (
+            SELECT ?1, 0
+            UNION ALL
+            SELECT c.id, chain.depth + 1 FROM run c JOIN chain ON c.parent_run_id = chain.id
+            WHERE c.created_by LIKE 'crash:%' AND chain.depth < 50
+         ) SELECT id FROM chain ORDER BY depth DESC, id DESC LIMIT 1",
+    )?;
+    Ok(walk.query_row(rusqlite::params![run_id], |r| r.get::<_, i64>(0))?)
+}
+
 /// A run-id list as a JSON array, for binding into a fixed `json_each` query.
 ///
 /// Lets a statement take a variable-length set as one parameter, so the SQL text
 /// stays constant and the prepared statement stays cacheable.
-fn chain_json(ids: &[i64]) -> String {
+pub(crate) fn chain_json(ids: &[i64]) -> String {
     let mut out = String::with_capacity(ids.len() * 4 + 2);
     out.push('[');
     for (i, id) in ids.iter().enumerate() {
@@ -1173,20 +1205,7 @@ impl Store {
         self.with_reader(|conn| {
             // Walk the crash chain once; both follow-up queries use this list
             // rather than evaluating the recursive CTE again.
-            let mut chain: Vec<i64> = Vec::new();
-            {
-                let mut walk = conn.prepare_cached(
-                    "WITH RECURSIVE chain(id) AS (
-                        SELECT ?1
-                        UNION ALL
-                        SELECT r.parent_run_id FROM run r JOIN chain ON r.id = chain.id
-                        WHERE r.parent_run_id IS NOT NULL AND r.created_by LIKE 'crash:%'
-                     ) SELECT id FROM chain",
-                )?;
-                for id in walk.query_map(rusqlite::params![run_id], |r| r.get::<_, i64>(0))? {
-                    chain.push(id?);
-                }
-            }
+            let chain = crash_chain(conn, run_id)?;
             if chain.is_empty() {
                 return Ok(Vec::new());
             }
@@ -1894,6 +1913,16 @@ impl Store {
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })
+    }
+
+    /// The run and the crashed runs it continues, nearest first.
+    pub fn crash_chain(&self, run_id: i64) -> Result<Vec<i64>> {
+        self.with_reader(|conn| crash_chain(conn, run_id))
+    }
+
+    /// The newest run of `run_id`'s crash chain: the run that continues it now.
+    pub fn crash_chain_head(&self, run_id: i64) -> Result<i64> {
+        self.with_reader(|conn| crash_chain_head(conn, run_id))
     }
 
     /// One task state value, from the run or the crash and retry parents it
