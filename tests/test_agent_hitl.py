@@ -202,6 +202,33 @@ def answer_then_fail():
         raise RuntimeError("failed after the approval")
     return answer
 
+@task
+def asks_inline():
+    return wait_for_input("From a direct task call?")
+
+@app.flow
+def asks_from_a_direct_task():
+    return asks_inline()
+
+@app.flow
+def wait_inside_unit(which: str = "input"):
+    import asyncio
+    from cereyan import sleep, wait_for_event, wait_for_target, LocalTarget
+    from cereyan.engine.runner import run_async_unit
+
+    calls = {
+        "input": lambda: wait_for_input("From a tool?"),
+        "receive": lambda: receive("go"),
+        "sleep": lambda: sleep(600),
+        "event": lambda: wait_for_event("never.happens", within=600),
+        "target": lambda: wait_for_target(LocalTarget(TRACE + ".never"), poke=600),
+    }
+
+    async def body():
+        return calls[which]()
+
+    return asyncio.run(run_async_unit("tool", "test:tool", body, input_hash=None))
+
 @app.flow(crash_retries=1)
 def receive_then_crash():
     value = receive("go", timeout=5, default="defaulted")
@@ -662,3 +689,21 @@ def test_a_retry_from_failure_asks_again(hitl):
     hitl.client.resume(retry["id"], "still yes")
     assert hitl.wait_run(retry["id"])["state"]["type"] == "Completed"
     assert lines(hitl) == ["approved:yes", "approved:still yes"]
+
+
+@pytest.mark.parametrize("which", ["input", "receive", "sleep", "event", "target"])
+def test_a_wait_inside_an_async_unit_is_refused(hitl, which):
+    run = start(hitl, "wait_inside_unit", which=which)
+    done = hitl.wait_run(run["id"])
+    assert done["state"]["type"] == "Failed", done["state"]
+    assert "belongs in the flow body" in (done["state"]["message"] or "")
+
+
+def test_a_directly_called_task_can_still_ask(hitl):
+    # A direct call runs on the flow thread, and pausing from it was always allowed;
+    # only async units are refused.
+    run = start(hitl, "asks_from_a_direct_task")
+    p = paused(hitl, run["id"])
+    assert p["state"]["message"] == "From a direct task call?"
+    hitl.client.resume(run["id"], "yes")
+    assert hitl.wait_run(run["id"])["state"]["type"] == "Completed"

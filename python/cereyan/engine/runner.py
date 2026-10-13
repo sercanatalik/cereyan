@@ -4,6 +4,7 @@ and by engine children (reporter backend)."""
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import os
@@ -430,6 +431,12 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
         run_logging.uninstall(handler)
         context.reset_run(token)
         backend.flush()
+        # A context snapshot can outlive the run: an event loop first created in
+        # the body (`asyncio.get_event_loop()`, as Pydantic AI's `run_sync` does)
+        # keeps one in its self-pipe handle for the life of the thread. Let it pin
+        # a finished run, not the store and its lock.
+        ctx.backend = None
+        ctx.runner = None
 
 
 def run_flow(flow, args: tuple, kwargs: dict) -> Any:
@@ -759,6 +766,100 @@ def _run_task_attempts(run: context.RunContext, task, args: tuple, kwargs: dict,
                 raise
     finally:
         _release_resources(run, lease)
+        context.reset_task_run(token)
+
+
+@dataclass
+class _Unit:
+    """What the task-run helpers read from a task, for a unit that has no `@task`."""
+
+    name: str
+    key: str
+    serializer: str
+
+
+async def run_async_unit(
+    name: str,
+    key: str,
+    body,
+    *,
+    input_hash: str | None,
+    serializer: str = "json",
+    retries: int = 0,
+    retry_delay: Any = None,
+    timeout: float | None = None,
+) -> Any:
+    """Run ``body()``, a coroutine factory, as one task run on the caller's event loop.
+
+    The async counterpart of `_run_task_attempts` for integrations whose work is
+    already a coroutine on a running loop, such as a Pydantic AI agent's model
+    requests and tool calls. It records the same task run, replays the same
+    checkpoints and retries by the same rules, but awaits the body where it is
+    instead of handing it to the run's runner. Not public API: there is no
+    `async def` task yet.
+
+    The task run and its dynamic key are taken before the first ``await``, so
+    units started together with `asyncio.gather` are numbered in the order they
+    were called, whatever order they finish in, and a replay finds them again.
+    """
+    run = context.current_run()
+    if run is None or run.backend is None:
+        raise CereyanError(f"unit {name!r} needs a run in progress")
+    unit = _Unit(name=name, key=key, serializer=serializer)
+    external_id, dynamic_key = _create_task_run(run, unit, [])
+    backend = run.backend
+    logger = run_logging.get_run_logger()
+    token = context.set_task_run(context.TaskRunContext(id=external_id, name=name, task_key=key, dynamic_key=dynamic_key, unit=True))
+    try:
+        checkpointing = run.flow.checkpoint is not False
+        input_hash = input_hash if checkpointing else None
+        if run.replaying:
+            replayed = _replay_checkpoint(run, unit, dynamic_key, input_hash, logger)
+            if replayed is not None:
+                backend.transition_task_run(external_id, "Completed", "Replayed", replayed[1], None)
+                return replayed[0]
+        backend.transition_task_run(external_id, "Running")
+        logger.info("task %s started", dynamic_key)
+        attempt = 0
+        while True:
+            deadline = None
+            try:
+                if timeout:
+                    async with asyncio.timeout(timeout) as deadline:
+                        result = await body()
+                else:
+                    result = await body()
+            except BaseException as exc:
+                if isinstance(exc, (RunPaused, Snooze)):
+                    backend.transition_task_run(external_id, "Cancelled", None, "snoozed" if isinstance(exc, Snooze) else "paused", None)
+                    raise
+                cancelled = isinstance(exc, asyncio.CancelledError) or (
+                    isinstance(exc, (KeyboardInterrupt, TaskCancelled)) and backend.cancel_requested()
+                )
+                if cancelled:
+                    backend.transition_task_run(external_id, "Cancelled", None, "cancelled", None)
+                    raise
+                timed_out = deadline is not None and deadline.expired()
+                if should_retry(exc, attempt, retries=retries, retry_on=None, timed_out=timed_out, logger=logger):
+                    delay = retry_delay_for(retry_delay, attempt)
+                    attempt += 1
+                    backend.transition_task_run(
+                        external_id, "Scheduled", "AwaitingRetry", _error_message(exc), {"attempt": attempt, "delay": delay, "retries": retries, **_failure_details(exc)}
+                    )
+                    logger.warning("task %s failed (%s); retry %d/%d in %.1fs", dynamic_key, _error_message(exc), attempt, retries, delay)
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    backend.transition_task_run(external_id, "Running", "Retrying")
+                    continue
+                message = f"task exceeded its {timeout:g}s timeout" if timed_out else _error_message(exc)
+                backend.transition_task_run(external_id, "Failed", "TimedOut" if timed_out else None, message, _failure_details(exc))
+                logger.error("task %s failed: %s", dynamic_key, message)
+                raise
+            checkpoint = _write_checkpoint(run, unit, dynamic_key, external_id, input_hash, result, logger) if checkpointing else None
+            backend.transition_task_run(external_id, "Completed", None, None, {"checkpoint": checkpoint} if checkpoint else None)
+            logger.info("task %s completed", dynamic_key)
+            return result
+    finally:
         context.reset_task_run(token)
 
 

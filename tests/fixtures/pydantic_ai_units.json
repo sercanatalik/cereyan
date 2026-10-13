@@ -1,0 +1,66 @@
+[
+  {
+    "dynamic_key": "analyst__model.request-0",
+    "payload": {
+      "kind": "response",
+      "model_name": "function:counted:",
+      "parts": [
+        {
+          "args": {
+            "q": "orders"
+          },
+          "part_kind": "tool-call",
+          "tool_call_id": "call-1",
+          "tool_name": "lookup"
+        }
+      ],
+      "state": "complete"
+    }
+  },
+  {
+    "dynamic_key": "analyst__function_toolset__<agent>.call_tool:lookup-0",
+    "payload": {
+      "kind": "model_retry",
+      "message": "be specific: give a year"
+    }
+  },
+  {
+    "dynamic_key": "analyst__model.request-1",
+    "payload": {
+      "kind": "response",
+      "model_name": "function:counted:",
+      "parts": [
+        {
+          "args": {
+            "q": "orders-2026"
+          },
+          "part_kind": "tool-call",
+          "tool_call_id": "call-2",
+          "tool_name": "lookup"
+        }
+      ],
+      "state": "complete"
+    }
+  },
+  {
+    "dynamic_key": "analyst__function_toolset__<agent>.call_tool:lookup-1",
+    "payload": {
+      "kind": "tool_return",
+      "result": "rows for orders-2026"
+    }
+  },
+  {
+    "dynamic_key": "analyst__model.request-2",
+    "payload": {
+      "kind": "response",
+      "model_name": "function:counted:",
+      "parts": [
+        {
+          "content": "answer from rows for orders-2026",
+          "part_kind": "text"
+        }
+      ],
+      "state": "complete"
+    }
+  }
+]

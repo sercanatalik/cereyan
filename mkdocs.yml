@@ -190,6 +190,7 @@ nav:
           - Secure the server: guides/secure-the-server.md
           - Sign in with your identity provider: guides/sign-in-with-your-identity-provider.md
           - Use cereyan with an AI agent: guides/agents.md
+          - Make a Pydantic AI agent durable: guides/durable-pydantic-ai-agent.md
           - Test a pipeline: guides/test-a-pipeline.md
           - Run the server as a service: guides/run-as-a-service.md
           - Run across machines: guides/run-across-machines.md

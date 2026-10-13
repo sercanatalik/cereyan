@@ -147,6 +147,14 @@ assert report().endswith("/record-0")   # "report#1: <run name>/record-0"
 
 ::: cereyan.task_state.items
 
+## Pydantic AI
+
+Needs `pip install "cereyan[pydantic-ai]"`. See [Make a Pydantic AI agent durable](../guides/durable-pydantic-ai-agent.md).
+
+::: cereyan.pydantic_ai.CereyanDurability
+    options:
+      members: false
+
 ## Unique runs
 
 ::: cereyan.Unique

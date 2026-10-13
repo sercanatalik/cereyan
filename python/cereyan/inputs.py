@@ -48,10 +48,11 @@ def receive(topic: str, *, prompt: str | None = None, schema: dict | None = None
         raise CereyanError(
             f"receive({topic!r}) needs a running server; offline only 'input' is supported"
         )
-    if threading.get_ident() != run.body_thread:
+    if threading.get_ident() != run.body_thread or context.in_async_unit():
         raise CereyanError(
             f"receive({topic!r}) belongs in the flow body: pausing works by raising out of it, "
-            "and from a task on another thread that ends the task instead of the run"
+            "and from a task on another thread, or an agent's tool or model call, that ends "
+            "the task instead of the run"
         )
     index = run.next_input_index()
     # First try an atomic claim: checks stored answers and pending messages.

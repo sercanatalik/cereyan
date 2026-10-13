@@ -102,6 +102,9 @@ class TaskRunContext:
     task_key: str
     dynamic_key: str
     row_id: int | None = None
+    # An async unit (`run_async_unit`) awaits on the flow thread, so the thread
+    # check alone would let a wait inside it pause the run from a task run.
+    unit: bool = False
 
     @property
     def external_id(self) -> str:
@@ -128,6 +131,12 @@ def set_run(ctx: RunContext | None) -> contextvars.Token:
 
 def reset_run(token: contextvars.Token) -> None:
     _run.reset(token)
+
+
+def in_async_unit() -> bool:
+    """Whether the code running now is inside an async unit's body."""
+    task = _task_run.get()
+    return task is not None and task.unit
 
 
 def set_task_run(ctx: TaskRunContext | None) -> contextvars.Token:

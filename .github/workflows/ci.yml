@@ -68,8 +68,45 @@ jobs:
         run: uv run pytest -q -m "not performance" --timeout 300 -rf
       - name: Documentation tests
         run: |
-          uv sync --group docs
+          uv sync --group docs --extra pydantic-ai
           uv run --group docs pytest --markdown-docs --markdown-docs-syntax superfences --ignore=docs/examples --ignore-glob='*/conftest.py' docs tests/docs -q
+
+  pydantic-ai:
+    # The optional `cereyan[pydantic-ai]` extra, at the lowest supported release and the
+    # newest one below the next major. The golden recording in tests/fixtures must match
+    # on both: a release that changes unit names or payloads fails here, not in a user's
+    # crash rerun.
+    name: Pydantic AI (${{ matrix.pydantic-ai }})
+    needs: ui
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pydantic-ai: ["2.36.0", "latest"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Build extension with the extra
+        run: |
+          uv sync --extra pydantic-ai
+          uv run maturin develop --uv
+      - name: Pin the Pydantic AI release
+        run: |
+          if [ "${{ matrix.pydantic-ai }}" = "latest" ]; then
+            uv pip install --upgrade "pydantic-ai-slim<3"
+          else
+            uv pip install "pydantic-ai-slim==${{ matrix.pydantic-ai }}"
+          fi
+      - name: Pydantic AI tests
+        run: uv run --no-sync pytest -q tests/test_pydantic_ai.py tests/test_async_units.py --timeout 300 -rf
 
   docs:
     name: Docs
@@ -89,7 +126,7 @@ jobs:
       - uses: extractions/setup-just@v3
       - name: Build extension
         run: |
-          uv sync --group docs
+          uv sync --group docs --extra pydantic-ai
           uv run maturin develop --uv
       - name: Generators, docstring check, strict build, block summary
         run: just docs

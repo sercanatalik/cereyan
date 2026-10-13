@@ -33,10 +33,11 @@ def _served_run():
     run = context.current_run()
     if run is None or run.backend is None or run.backend.offline:
         return None
-    if threading.get_ident() != run.body_thread:
+    if threading.get_ident() != run.body_thread or context.in_async_unit():
         raise CereyanError(
             "a durable wait belongs in the flow body: pausing works by raising out of it, "
-            "and from a task on another thread that ends the task instead of the run"
+            "and from a task on another thread, or an agent's tool or model call, that ends "
+            "the task instead of the run"
         )
     return run
 

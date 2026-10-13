@@ -43,6 +43,10 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+# Durable Pydantic AI agents (`cereyan.pydantic_ai`). Nothing else imports it.
+pydantic-ai = ["pydantic-ai-slim>=2.36,<3"]
+
 [project.urls]
 Homepage = "https://sercanatalik.github.io/cereyan/"
 Documentation = "https://sercanatalik.github.io/cereyan/"
