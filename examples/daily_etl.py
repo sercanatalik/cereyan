@@ -59,11 +59,27 @@ def build(day: date) -> str:
     return target.path
 
 
+# ## Which day
+#
+# A run without a `day` does yesterday. The date is worked out in a task, not as the
+# parameter's default: a default is evaluated once when the module is imported, and
+# the server copies the value it registered into every scheduled run, so a server
+# left running would load the same day each morning. A task's result is also
+# checkpointed, so a run that resumes or is rerun after a crash past midnight keeps
+# the day it started with.
+
+
+@task
+def yesterday() -> date:
+    return date.today() - timedelta(days=1)
+
+
 # ## The flow
 #
-# Fires at 06:30 Istanbul time every day when served, never overlaps itself, and
-# defaults to yesterday so a manual run does the most recent complete day. It is
-# listed in the `nightly` group of its project.
+# Fires at 06:30 Istanbul time every day when served, never overlaps itself, and is
+# listed in the `nightly` group of its project. A scheduled run is named after its
+# fire time; a backfill or a manual run is named after its `day`, or `daily-latest`
+# without one.
 
 
 @flow(
@@ -72,9 +88,10 @@ def build(day: date) -> str:
     max_concurrent=1,
     on_overlap="skip",
     bulk_complete=already_built,
-    run_name="daily-{day}",
+    run_name=lambda day: f"daily-{day or 'latest'}",
 )
-def daily_etl(day: date = date.today() - timedelta(days=1)) -> str:
+def daily_etl(day: date | None = None) -> str:
+    day = day or yesterday()
     build(day)
     return output_for(day).path
 

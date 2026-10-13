@@ -79,7 +79,12 @@ Every Python block under `docs/` is executed by `just docs-test`. Blocks under `
 | ```` ```{.python continuation} ```` | Continues the previous block in the same namespace |
 | ```` ```{.python notest} ```` | Not executed; the line immediately above must be `<!-- notest: reason -->` |
 
-`scripts/docs_blocks.py` counts the blocks, fails on a `notest` block without a reason, and fails when this page is missing or out of step with the generated pages above.
+`scripts/docs_blocks.py` counts the blocks, fails on a `notest` block without a reason, and fails when this page is missing or out of step with the generated pages above. It also fails on a parameter default computed at import in a tested block or in `examples/*.py`.
+
+Write examples that stay correct on a server that runs for days:
+
+- **No computed defaults.** A default such as `day: date = date.today()` is evaluated once, when the module is imported, and the server copies the value it registered into every scheduled run. Default to `None` and work the value out in a task, whose checkpoint keeps it stable across passes and crash reruns. A constructor called by name with only literal arguments, such as `date(2026, 9, 6)`, is a constant and fine.
+- **The body runs again.** A run's body is executed from the top on every pass: a retry, a resume after `wait_for_input` or `receive`, and a wake from a durable wait. Tasks that completed are replayed from their checkpoints, but body code between them, `emit_event` included, runs again. Put side effects in tasks, or say on the page that they repeat.
 
 ## Moved pages
 

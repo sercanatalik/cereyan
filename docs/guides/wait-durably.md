@@ -1,6 +1,6 @@
 # How to wait without holding an engine
 
-A flow often has to wait: an hour for a rate limit to reset, for a file another system writes, for an event another flow emits. A plain `time.sleep` or a polling loop holds the engine and the flow's resources for the whole wait, and a crash in the middle loses it. The durable waits end the attempt instead, free the engine, and bring the run back when there is something to do; the new attempt replays the tasks that already completed from their [checkpoints](../concepts/runs-and-states.md#checkpoints) and continues after the wait.
+A flow often has to wait: an hour for a rate limit to reset, for a file another system writes, for an event another flow emits. A plain `time.sleep` or a polling loop holds the engine and the flow's resources for the whole wait, and a crash in the middle loses it. The durable waits end the attempt instead, free the engine, and bring the run back when there is something to do; the new attempt runs the body from the top, replays the tasks that already completed from their [checkpoints](../concepts/runs-and-states.md#checkpoints), and continues after the wait. Body code that is not in a task runs again on every attempt, before the wait as well as after it, so keep side effects inside tasks.
 
 ## Sleep
 

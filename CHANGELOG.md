@@ -2,8 +2,16 @@
 
 ## Unreleased
 
+
 - **Fix: a crash rerun asked its questions again.** A run that was answered and then crashed lost its answers, so its rerun replayed the work the answer had approved and paused to ask the same question; a different answer the second time contradicted what had already run. Messages the crashed run had received were lost too, and a message sent before its rerun started answered 409. A crash rerun now uses the answers and messages of every run of its crash chain and asks only what none of them answered. A message to a crashed run reaches the rerun that continues it. `GET /api/runs/{id}/input` lists inherited answers with the `run_id` that holds them. A retry from failure still asks again. [If the engine crashes](https://sercanatalik.github.io/cereyan/guides/human-approval/#if-the-engine-crashes)
 - **Fix: a paused run could be woken with an answer it had turned down.** When a run paused because the stored answer at that position was for a different prompt, the server handed it that same answer straight back. Only a queued message now wakes a paused run.
+- **Documentation: don't default a parameter to `date.today()`.** The schedule guide and the Daily ETL example showed `day: date = date.today()`. A default is evaluated once, when the module is imported, and the server copies the value it registered into every scheduled run, so a server left running loaded the same day every morning. If you copied that pattern, default to `None` and work the day out in a task, whose checkpoint keeps it stable across resumes and crash reruns. `scripts/docs_blocks.py` now refuses computed defaults in examples and docs. [Schedule a flow](https://sercanatalik.github.io/cereyan/guides/schedule-a-flow/)
+- **Documentation corrections.**
+  - Within a run, `update_progress` replaces the value under its key; a key's history is kept across runs.
+  - Backfill's `force` recomputes days whose outputs exist; [Make reruns idempotent](https://sercanatalik.github.io/cereyan/guides/idempotent-reruns/) no longer says there is no force flag.
+  - Checkpoints, not `cache=INPUTS`, are what replay completed tasks on a later pass.
+  - Body code before a durable wait runs again on every pass.
+  - `emit_event` in a flow body is recorded again on every pass, so emit from a task to record it once.
 
 ## 3.3.1 (2026-10-07)
 

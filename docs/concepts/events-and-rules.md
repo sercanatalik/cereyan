@@ -25,6 +25,8 @@ assert events.run.failed == "run.failed"
 
 An **event** is a recorded fact: a name such as `run.failed`, a resource it is about, related resources, a payload, and a sequence number. The engine records one for every meaningful change (run and task-run transitions, schedule changes, rule firings, flow registration, resource exhaustion, expectations), and `emit_event` records custom ones. The [events catalogue](../reference/events.md) lists them all.
 
+`emit_event` records an event each time it is called. In the flow body that means once per pass: a run that retries, resumes after a pause, or wakes from a [durable wait](../guides/wait-durably.md) records the event again. A rule's default `once="per_run"` keeps it from firing twice within one run, but a [crash rerun](../guides/retries-timeouts-crashes.md#survive-a-crash) is a new run, and the events list and anything reading it see every copy. Call it from a task to record it once: a task replayed from its checkpoint does not run, so neither does its `emit_event`.
+
 A **rule** is `when` plus `do`: a match clause over events and an ordered list of actions, with guards. Rules are how cereyan reacts: run a cleanup flow when an ETL completes, page someone when a nightly flow fails, cancel a run that was started by mistake.
 
 ## Matching

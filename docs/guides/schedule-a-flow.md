@@ -6,10 +6,15 @@ Add `schedule=` to the flow and serve it. The server creates runs at each fire t
 
 ```python
 from datetime import date, timedelta
-from cereyan import flow, Cron, Interval
+from cereyan import flow, task, Cron, Interval
+
+@task
+def today() -> date:
+    return date.today()
 
 @flow(schedule=Cron("30 6 * * *", timezone="Europe/Istanbul"))
-def morning_load(day: date = date.today()) -> str:
+def morning_load(day: date | None = None) -> str:
+    day = day or today()
     return str(day)
 
 @flow(schedule=Interval(timedelta(minutes=15)), max_concurrent=1, on_overlap="skip")
@@ -19,6 +24,8 @@ def poll_queue() -> None:
 assert morning_load.schedules[0]["kind"] == "cron"
 assert poll_queue.schedules[0]["interval"] == 900
 ```
+
+A scheduled run gets the flow's parameter defaults, and a default is evaluated once, when the module is imported. The server copies the value it registered into every run, so `day: date = date.today()` would load the same day each morning for as long as the server stays up. Leave the parameter empty and work the date out in a task instead. The task's result is checkpointed, so a run that resumes or is rerun after a crash past midnight keeps the day it started with. That day is the date when the run first reached the task, which is not always the fire time: a run held back by `on_overlap` or a [global pause](../concepts/schedules.md#pausing-everything) can start a day late, so pass `day` explicitly where that matters, as a [backfill](backfill.md) does.
 
 Then:
 

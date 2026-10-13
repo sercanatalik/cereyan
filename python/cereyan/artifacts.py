@@ -86,7 +86,8 @@ def create_progress(percent: float, key: str | None = None, label: str | None = 
 def update_progress(key: str, percent: float, label: str | None = None) -> str:
     """Record a new value for the progress artifact with ``key``.
 
-    Each update is a new artifact row under the same key, so the history is kept.
+    The update replaces the value stored under ``key`` for this run and task run;
+    the history of a key is kept across runs, one value per run.
 
     Args:
         key: The key given when the progress artifact was created.

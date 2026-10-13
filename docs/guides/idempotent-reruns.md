@@ -94,6 +94,6 @@ Targets skip tasks, not runs. To avoid scheduling runs for work already done, gi
 
 ## Rerun on purpose
 
-To recompute, delete the target (`LocalTarget.remove()`) and run again; there is no force flag, because the file is the truth.
+To recompute one day, delete the target (`LocalTarget.remove()`) and run again: the file is the truth. To recompute a range whose outputs exist, for example after the flow's logic changed, backfill it with [`force`](backfill.md), which ignores targets, cache hits and checkpoints and overwrites what the runs produce.
 
 Related: [Targets, caching and results](../concepts/targets-caching-results.md), [Cache task results](cache-results.md).

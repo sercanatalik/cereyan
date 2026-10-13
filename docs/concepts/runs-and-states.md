@@ -56,7 +56,7 @@ Inside the run, `cereyan.runtime.run`, `cereyan.runtime.task_run`, and `cereyan.
 
 ## Attempts
 
-A run's body can execute more than once, and each execution is a **pass**. The first is pass 0; a retry and a resume after a pause are the next. Every pass numbers its task runs from zero, so the same call keeps its dynamic key in each one — `fetch-0` in pass 0 is the same call as `fetch-0` in pass 1 — and the task runs of a later pass are recorded alongside the earlier ones rather than replacing them. `failure_count` grows with retries. Tasks marked `cache=INPUTS` return their stored result on a replay instead of executing again.
+A run's body can execute more than once, and each execution is a **pass**. The first is pass 0; a retry and a resume after a pause are the next. Every pass numbers its task runs from zero, so the same call keeps its dynamic key in each one — `fetch-0` in pass 0 is the same call as `fetch-0` in pass 1 — and the task runs of a later pass are recorded alongside the earlier ones rather than replacing them. `failure_count` grows with retries. A pass after a pause, and a retry of a flow with `checkpoint=True`, replays the tasks an earlier pass completed from their [checkpoints](#checkpoints), recorded as `Replayed`, instead of executing them again; `cache=INPUTS` goes further and reuses a result across runs, recorded as `Cached`. Flow-body code between tasks is not checkpointed and runs on every pass.
 
 A **crash rerun** is not a pass: the supervisor creates a new run linked to the crashed one through `parent_run_id`, with `created_by` of `crash:<id>` and `attempt` one higher, so a crash chain is a chain of runs rather than one run executed twice.
 

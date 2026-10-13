@@ -43,7 +43,7 @@ def big_load() -> None:
 big_load()
 ```
 
-Each update is a new artifact under the key, so the run page shows the latest value and the Artifacts page keeps the history.
+Within a run, each update replaces the value stored under the key, so the run page shows the bar moving and keeps only its latest value. A key keeps one value per run: the Artifacts page shows the history of a key across runs, not the steps within one.
 
 ## Embed an image
 
