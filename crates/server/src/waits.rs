@@ -190,6 +190,78 @@ pub fn deliver_queued(state: &Arc<AppState>, run: &Run) {
     });
 }
 
+/// A run just paused in `wait_for_event`: the event it waits for may already be
+/// recorded. `on_event` only wakes runs that are paused when an event arrives,
+/// and a run registers as a waiter only once its Paused transition lands, so an
+/// event in between would otherwise be missed.
+///
+/// An event answers the wait when it matches the name and `match`, and either a
+/// run of the waiter's crash chain recorded it at any time, or it was recorded
+/// since the current pass started (`previous` is the state the run left for
+/// Paused, stamped by the server's clock). The offline wait counts the same
+/// events. The oldest wins, and an event that already answers another wait of
+/// the chain is not handed out twice.
+pub fn deliver_recorded_event(state: &Arc<AppState>, run: &Run, previous: Option<&State>) {
+    if run.state.state_type != StateType::Paused || run.state.name != "AwaitingEvent" {
+        return;
+    }
+    let Some(pattern) = run
+        .state
+        .details
+        .get("event")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+    else {
+        return;
+    };
+    let since = previous.map(|p| p.timestamp).unwrap_or(run.state.timestamp);
+    let state = state.clone();
+    let observed = run.clone();
+    std::thread::spawn(move || {
+        let Some(event) = recorded_event(&state, &observed, &pattern, since) else {
+            return;
+        };
+        let answer = json!({"event": serde_json::to_value(&event).unwrap_or(Value::Null)});
+        if let Err(e) = wake_paused(&state, &observed, |_| Some(answer)) {
+            eprintln!(
+                "cereyan: could not deliver an already recorded event to run {}: {e:?}",
+                observed.id
+            );
+        }
+    });
+}
+
+/// The oldest recorded event that answers `run`'s wait, if any.
+fn recorded_event(state: &AppState, run: &Run, pattern: &str, since: i64) -> Option<Event> {
+    let chain = state.store.crash_chain(run.id).ok()?;
+    let root = *chain.last()?;
+    let from = state.store.get_run(root).ok()??.created_at;
+    let wanted = run
+        .state
+        .details
+        .get("match")
+        .and_then(|m| m.as_object())
+        .cloned()
+        .unwrap_or_default();
+    // Events that already answer a wait of this chain: one event, one answer.
+    let answered: std::collections::HashSet<i64> = crate::api::runs::chain_answers(state, run.id)
+        .ok()?
+        .values()
+        .filter_map(|a| a.pointer("/input/event/id").and_then(|v| v.as_i64()))
+        .collect();
+    let events = state
+        .store
+        .events_between(&[pattern.to_string()], from, now_micros(), 1_000)
+        .ok()?;
+    events.into_iter().find(|e| {
+        let own = e.run_id.is_some_and(|id| chain.contains(&id));
+        (own || e.occurred >= since)
+            && cereyan_rules::name_matches(pattern, &e.name)
+            && payload_matches(&wanted, &e.payload)
+            && !answered.contains(&e.id)
+    })
+}
+
 /// After a restart: every paused run with a wake time gets its timer back.
 pub fn rearm_all(state: &Arc<AppState>) {
     for active in state.index.active_runs() {

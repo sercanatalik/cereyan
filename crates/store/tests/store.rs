@@ -1029,6 +1029,11 @@ fn workers_register_claim_runs_and_are_forgotten() {
         (run.host.as_deref(), run.processor, run.lease),
         (Some("server"), Some(1), 2)
     );
+    // Declaring the run crashed takes a lease of its own, so the engine that held
+    // lease 2 is stale from now on; the next hand-off follows on from it.
+    assert_eq!(store.bump_lease(run_id).unwrap(), 3);
+    assert_eq!(store.run_lease(run_id).unwrap(), Some(3));
+    assert_eq!(store.claim_run(run_id, "server", Some(1), None).unwrap(), 4);
     assert_eq!(run.source_hash.as_deref(), Some("abc"));
 
     assert!(store.delete_worker(w.id).unwrap());

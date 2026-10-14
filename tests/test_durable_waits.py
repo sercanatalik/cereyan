@@ -51,6 +51,45 @@ def announce(day: str = "2026-09-20"):
     emit_event("orders.ready", {"day": day, "rows": 3})
 
 @app.flow
+def self_announce(day: str = "2026-09-21"):
+    # The run emits the event and only then waits for it: offline that returns at
+    # once, and served it must too.
+    emit_event("orders.ready", {"day": day, "rows": 1})
+    ev = wait_for_event("orders.ready", match={"day": day}, within=20)
+    note(f"self:{ev['payload']['day']}")
+    return ev["payload"]["day"]
+
+@task
+def kick_announce(day: str):
+    # Another run records the event while this one is still on its way to the wait.
+    from cereyan import client
+    other = client.run("announce", day=day)
+    while client.get_run(other["id"])["state"]["type"] not in ("Completed", "Failed", "Crashed", "Cancelled"):
+        time.sleep(0.05)
+    return other["id"]
+
+@app.flow
+def early_listener(day: str = "2026-09-22", within: float = 20.0):
+    kick_announce(day)
+    try:
+        ev = wait_for_event("orders.ready", match={"day": day}, within=within)
+    except WaitTimeout:
+        note("early:timeout")
+        return "timed out"
+    note(f"early:{ev['payload']['day']}")
+    return ev["payload"]["day"]
+
+@app.flow
+def waits_twice(day: str = "2026-09-23", within: float = 4.0):
+    first = wait_for_event("orders.ready", match={"day": day}, within=within)
+    note(f"first:{first['id']}")
+    try:
+        second = wait_for_event("orders.ready", match={"day": day}, within=within)
+        note(f"second:{second['id']}")
+    except WaitTimeout:
+        note("second:timeout")
+
+@app.flow
 def watcher(poke: float = 1.0, timeout: float | None = None):
     prepare()
     t = wait_for_target(LocalTarget(TARGET), poke=poke, timeout=timeout)
@@ -201,3 +240,40 @@ def test_offline_waits_block_and_snooze_reruns(store, tmp_path):
     from cereyan import states
 
     assert states.Sleeping.state_type == "Paused" and states.AwaitingEvent.state_type == "Paused"
+
+
+def test_the_runs_own_event_answers_its_wait(srv):
+    run = srv.client.run("self_announce", day="2026-09-21")
+    done = srv.wait_run(run["id"], timeout=30)
+    assert done["state"]["type"] == "Completed", done["state"]
+    assert lines(srv)[-1] == "self:2026-09-21"
+
+
+def test_an_event_recorded_just_before_the_pause_answers_the_wait(srv):
+    run = srv.client.run("early_listener", day="2026-09-22", within=20)
+    done = srv.wait_run(run["id"], timeout=40)
+    assert done["state"]["type"] == "Completed", done["state"]
+    assert lines(srv)[-1] == "early:2026-09-22"
+
+
+def test_an_older_event_from_another_run_is_not_taken(srv):
+    c = srv.client
+    before = c.run("announce", day="2026-09-24")
+    assert srv.wait_run(before["id"])["state"]["type"] == "Completed"
+    run = c.run("listener", day="2026-09-24", within=2)
+    done = srv.wait_run(run["id"], timeout=30)
+    # Recorded before this run's pass started: the wait times out instead.
+    assert done["state"]["type"] == "Completed" and lines(srv)[-1] == "timeout"
+
+
+def test_one_event_answers_one_wait(srv):
+    c = srv.client
+    run = c.run("waits_twice", day="2026-09-23", within=4)
+    srv.wait_run(run["id"], timeout=15, until=lambda r: r["state"]["name"] == "AwaitingEvent")
+    sent = c.run("announce", day="2026-09-23")
+    srv.wait_run(sent["id"])
+    done = srv.wait_run(run["id"], timeout=30)
+    assert done["state"]["type"] == "Completed", done["state"]
+    first = [ln for ln in lines(srv) if ln.startswith("first:")]
+    assert len(set(first)) == 1
+    assert lines(srv)[-1] == "second:timeout"

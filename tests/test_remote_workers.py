@@ -13,7 +13,7 @@ import time
 import pytest
 
 from cereyan.client import ApiError, Client
-from server_helpers import ServerProcess, own_group, stop_server
+from server_helpers import ServerProcess, kill_engines_of, own_group, stop_server
 
 TOKEN = "remote-workers-token"
 
@@ -335,6 +335,81 @@ def test_a_stale_lease_is_refused(srv):
         urllib.request.urlopen(req)
     assert err.value.code == 409
     assert json.loads(err.value.read())["stale_lease"] is True
+
+
+def test_a_crashed_runs_old_engine_is_stale(srv, tmp_path):
+    """A run declared crashed takes nothing more from the engine that was running it.
+
+    The crash rerun is a new run, so without a new lease the crashed run would keep
+    the one its old engine holds, and a worker cut off from the network could keep
+    adding task runs and checkpoints to it while the rerun repeats the work.
+    """
+    import urllib.request
+    import uuid
+
+    run = srv.client.run("gated", gate=str(tmp_path / "never"))
+    running = srv.wait_run(run["id"], until=lambda r: r["state"]["type"] == "Running" and r["lease"] >= 1)
+    lease = running["lease"]
+    kill_engines_of(srv.client)
+    crashed = srv.wait_run(run["id"], until=lambda r: r["state"]["type"] == "Crashed", timeout=60)
+    assert crashed["state"]["type"] == "Crashed"
+    before = srv.client._request("GET", f"/api/runs/{run['id']}/tasks")
+
+    def post(path, body):
+        req = urllib.request.Request(
+            srv.info["url"] + path,
+            data=json.dumps(body).encode(),
+            method="POST",
+            headers={"content-type": "application/json", "authorization": f"Bearer {TOKEN}", "x-cereyan-lease": str(lease)},
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return resp.status, json.loads(resp.read() or b"{}")
+        except urllib.error.HTTPError as err:
+            return err.code, json.loads(err.read() or b"{}")
+
+    status, body = post("/api/engine/heartbeat", {"engine_id": "old", "run_id": run["id"]})
+    heartbeat = (status, body)
+    ext = str(uuid.uuid4())
+    now = int(time.time() * 1_000_000)
+    report = {
+        "engine_id": "old",
+        "run_id": run["id"],
+        "events": [
+            {"kind": "task_run_created", "seq": 10_001, "external_id": ext, "name": "late", "task_key": "late",
+             "dynamic_key": "late-0", "parents": [], "pass": 0},
+            {"kind": "task_run_transition", "seq": 10_002, "external_id": ext,
+             "state": {"type": "Completed", "name": "Completed", "message": None, "details": {}, "timestamp": now}},
+        ],
+    }
+    status, body = post("/api/engine/report", report)
+    after = srv.client._request("GET", f"/api/runs/{run['id']}/tasks")
+    assert heartbeat[0] == 409 and heartbeat[1].get("stale_lease") is True, heartbeat
+    assert (status, body.get("stale_lease")) == (409, True), (status, body)
+    assert after == before
+
+
+def test_a_finished_run_still_takes_reports_with_its_lease(srv, tmp_path):
+    # An engine flushes its batched task updates after the run's last transition;
+    # only a crash makes its lease stale.
+    import urllib.request
+    import uuid
+
+    run = srv.client.run("gated", gate=str(tmp_path / "never"), seconds=0.2)
+    done = srv.wait_run(run["id"])
+    assert done["state"]["type"] == "Completed"
+    ext = str(uuid.uuid4())
+    report = {"engine_id": "late", "run_id": run["id"], "events": [
+        {"kind": "task_run_created", "seq": 20_001, "external_id": ext, "name": "flushed", "task_key": "flushed",
+         "dynamic_key": "flushed-0", "parents": [], "pass": 0}]}
+    req = urllib.request.Request(
+        srv.info["url"] + "/api/engine/report",
+        data=json.dumps(report).encode(),
+        method="POST",
+        headers={"content-type": "application/json", "authorization": f"Bearer {TOKEN}", "x-cereyan-lease": str(done["lease"])},
+    )
+    with urllib.request.urlopen(req) as resp:
+        assert resp.status == 200 and json.loads(resp.read())["applied"] == 1
 
 
 def test_results_upload_in_chunks_and_read_back_whole(srv):

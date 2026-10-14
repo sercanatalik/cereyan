@@ -249,6 +249,7 @@ pub fn after_transition(state: &Arc<AppState>, run: &Run, previous: Option<&Stat
         StateType::Paused => {
             crate::waits::arm(state, run);
             crate::waits::deliver_queued(state, run);
+            crate::waits::deliver_recorded_event(state, run, previous);
         }
         _ => {}
     }
@@ -346,6 +347,11 @@ pub fn crash_run(state: &Arc<AppState>, run_id: i64, message: &str) {
     };
     let options = FlowOptions::from_map(&flow.options);
     let limit = crash_limit(state, &flow);
+    // The engine is presumed gone, but a worker cut off from the network may
+    // still be running. A new lease makes its reports and heartbeats stale, so
+    // nothing it does from now on lands in this run or in the checkpoints its
+    // crash rerun replays; on the stale answer the engine stops the run.
+    let _ = state.store.bump_lease(run_id);
     if run.attempt < limit {
         let s = State::new(StateType::Crashed).with_message(message);
         if let Ok(TransitionResult::Accepted(_)) = state.transition_run(run_id, s, false) {

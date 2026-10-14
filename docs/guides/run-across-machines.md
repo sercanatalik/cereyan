@@ -88,7 +88,7 @@ Start the server with `--base-path /cereyan` and the worker with `--host https:/
 
 ## What happens after a network split
 
-Every hand-off of a run to an engine carries a lease. When a worker loses the network, its run is crashed and rerun on another host; if the first engine reconnects, the server refuses its reports as stale and the engine stops. The rerun's results are the ones recorded. A task that already wrote outside the store before the split may have written twice; targets keep such writes idempotent.
+Every hand-off of a run to an engine carries a lease, and declaring a run crashed takes a new one. When a worker loses the network, its run is crashed and rerun on another host. If the first engine reconnects, the server refuses its heartbeats and reports as stale, and the engine drops what it had buffered and stops the run. Nothing it did after the crash is added to the crashed run or to the checkpoints the rerun replays, and the rerun's results are the ones recorded. A task that already wrote outside the store before the split may have written twice; targets keep such writes idempotent.
 
 ## Run a worker as a service
 

@@ -34,7 +34,7 @@ def after_orders(day: str) -> str:
     return event["payload"]["day"]
 ```
 
-The run pauses as `AwaitingEvent` until an event named `orders.ready` (or matching `orders.*`) whose payload carries the `match` keys is recorded, by a flow's `emit_event`, a custom route, or `POST /api/events`; the event comes back from the call. `within` bounds the wait and raises `WaitTimeout` on replay. Offline the local store is polled for `within` seconds, which is required there.
+The run pauses as `AwaitingEvent` until an event named `orders.ready` (or matching `orders.*`) whose payload carries the `match` keys is recorded, by a flow's `emit_event`, a custom route, or `POST /api/events`; the event comes back from the call. An event recorded before the run paused counts too, when the run itself (or a crashed run its rerun continues) recorded it, or when it was recorded after the run's current attempt started; the offline wait counts the same ones. When several match, the oldest answers, and one event answers one wait: a second `wait_for_event` for the same name waits for another event. `within` bounds the wait and raises `WaitTimeout` on replay. Offline the local store is polled for `within` seconds, which is required there.
 
 ## Wait for a target
 

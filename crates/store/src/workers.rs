@@ -260,6 +260,20 @@ impl Store {
         .map(|v| v.as_i64().unwrap_or_default())
     }
 
+    /// Take the next lease without handing the run to an engine: the engine that
+    /// held it is presumed gone, and whatever it sends from now on is stale.
+    pub fn bump_lease(&self, run_id: i64) -> Result<i64> {
+        self.exec(move |conn| {
+            let lease: i64 = conn.query_row(
+                "UPDATE run SET lease = lease + 1 WHERE id = ?1 RETURNING lease",
+                params![run_id],
+                |r| r.get(0),
+            )?;
+            Ok(json!(lease))
+        })
+        .map(|v| v.as_i64().unwrap_or_default())
+    }
+
     /// The lease a run currently holds.
     pub fn run_lease(&self, run_id: i64) -> Result<Option<i64>> {
         self.with_reader(|conn| {
