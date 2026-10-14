@@ -26,7 +26,19 @@ def _store(kind: str, data: Any, key: str | None) -> str:
     if len(text.encode("utf-8")) > MAX_BYTES:
         raise CereyanError(f"artifact exceeds 1 MB ({len(text)} bytes)")
     backend, task_ext = _backend()
-    return backend.artifact(kind, text, key, task_ext)
+    run = context.current_run()
+    # From the flow body, an artifact an earlier pass of this run already
+    # recorded is not recorded again; the call returns its id.
+    perform, mark, ref = run.effect("artifact", key if key is not None else f"~{kind}",
+                                    {"kind": kind, "key": key, "data": json.loads(text)})
+    if not perform:
+        from .events import _log_skip
+
+        _log_skip(f"artifact {key or kind}")
+        return ref or ""
+    artifact_id = backend.artifact(kind, text, key, task_ext, mark)
+    run.remember_effect(mark, artifact_id)
+    return artifact_id
 
 
 def create_markdown(text: str, key: str | None = None) -> str:

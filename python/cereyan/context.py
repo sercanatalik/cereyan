@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextvars
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -34,12 +36,21 @@ class RunContext:
     replaying: bool = False
     #: A forced (restated) run: targets, cache hits and checkpoints are ignored.
     force: bool = False
+    #: The effect journal, by slot: the flow-body effects (events, artifacts,
+    #: published state, attributes) an earlier pass, or a crashed run of the
+    #: chain, already performed, as ``{"hash", "ref"}``. A call whose slot and
+    #: hash match is skipped. See `effect`.
+    effects: dict[str, dict] = field(default_factory=dict)
+    #: Whether flow-body effects are journaled and skipped at all: off for
+    #: ``checkpoint=False`` flows and forced runs, which repeat everything.
+    journal: bool = True
     #: The thread executing the flow body, captured where the context is made.
     #: `wait_for_input` pauses by raising out of the body, which only works on
     #: this thread; from a task on a worker thread it would surface as a task
     #: failure instead.
     body_thread: int = field(default_factory=__import__("threading").get_ident)
     _counters: dict[str, int] = field(default_factory=dict)
+    _effect_counters: dict[str, int] = field(default_factory=dict)
     _input_index: int = 0
     _lock: Any = field(default_factory=__import__("threading").Lock)
 
@@ -79,12 +90,44 @@ class RunContext:
         with self._lock:
             self.pass_ += 1
             self._counters.clear()
+            self._effect_counters.clear()
             self._input_index = 0
             return self.pass_
 
     def stop_replaying(self) -> None:
         with self._lock:
             self.replaying = False
+
+    def effect(self, kind: str, name: str, content: Any) -> tuple[bool, dict | None, str | None]:
+        """Decide whether a flow-body effect is performed: ``(perform, mark, ref)``.
+
+        The call takes the slot ``<kind>:<name>-<n>``, numbered per kind and name
+        in call order and restarted every pass, as a task's dynamic key is, and
+        hashes its content. A slot already journaled with the same hash happened
+        before: the caller skips it and returns ``ref``. Otherwise the caller
+        performs it and sends ``mark`` along, so the store journals it in the same
+        write. Inside a task run nothing is journaled: a replayed task does not run
+        its body, and a task that runs again does its effects again.
+        """
+        if current_task_run() is not None or not self.journal:
+            return True, None, None
+        with self._lock:
+            counter = f"{kind}:{name}"
+            n = self._effect_counters.get(counter, 0)
+            self._effect_counters[counter] = n + 1
+            slot = f"{counter}-{n}"
+            text = json.dumps(content, sort_keys=True, separators=(",", ":"), default=str)
+            digest = hashlib.sha256(text.encode()).hexdigest()
+            known = self.effects.get(slot)
+        if known is not None and known.get("hash") == digest:
+            return False, None, known.get("ref")
+        return True, {"slot": slot, "hash": digest, "pass": self.pass_}, None
+
+    def remember_effect(self, mark: dict | None, ref: str | None = None) -> None:
+        """Journal a performed effect in memory, for the later passes of this process."""
+        if mark is not None:
+            with self._lock:
+                self.effects[mark["slot"]] = {"hash": mark["hash"], "ref": ref}
 
     def record_checkpoint(self, dynamic_key: str, task_key: str, input_hash: str, result_ref: str) -> None:
         """Remember a checkpoint this attempt wrote, so an in-process retry can replay it."""

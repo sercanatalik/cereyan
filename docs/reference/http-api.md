@@ -296,6 +296,9 @@ Also served on POST, which is what the engine client speaks.
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
 | `id` | path | integer (int64) | yes |  |
+| `slot` | query | string or null | no | The effect's slot, `attributes:<names>-<n>`. |
+| `hash` | query | string or null | no | A hash of the patch. |
+| `pass` | query | integer (int64) | no | The pass that set them. |
 
 **Request body** (application/json): object
 
@@ -1439,6 +1442,30 @@ A flow that runs after the skipped one, directly or further down its chain.
 | `left` | integer or null (int64) | no |  |
 | `right` | integer or null (int64) | no |  |
 
+### `EffectMark`
+
+An engine effect a flow body performed: its slot (`<kind>:<name>-<n>`), a
+hash of its content, and the pass that performed it. Recorded in the same
+write as the effect, so a later pass or a crash rerun can skip it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes |  |
+| `pass` | integer (int64) | no |  |
+| `slot` | string | yes |  |
+
+### `EffectRow`
+
+One entry of a run's effect journal: a flow-body effect, by slot and hash.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `hash` | string | yes |  |
+| `pass` | integer (int64) | yes |  |
+| `ref` | string or null | no |  |
+| `run_id` | integer (int64) | yes |  |
+| `slot` | string | yes |  |
+
 ### `EmitEventBody`
 
 | Field | Type | Required | Description |
@@ -2350,6 +2377,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `delete` | boolean | no | Remove the entry instead of setting it. |
+| `effect` | null or [`EffectMark`](#effectmark) | no |  |
 | `key` | string | yes |  |
 | `scope` | string | no |  |
 | `value` |  | no |  |
@@ -2574,6 +2602,7 @@ Work handed to an engine.
 |---|---|---|---|
 | `cancel_requested` | boolean | yes |  |
 | `checkpoints` | [`Checkpoint`](#checkpoint)[] | no | Checkpoints a new attempt may replay: the run's earlier passes and, for a crash rerun, the chain of crashed runs before it. |
+| `effects` | [`EffectRow`](#effectrow)[] | no | The effect journal of the same attempts: the flow-body effects (events, artifacts, published state, attributes) that already happened, so the engine skips them instead of performing them again. |
 | `external_id` | string | yes |  |
 | `flow` | string | yes |  |
 | `force` | boolean | no | A forced (restated) run: the engine ignores targets, caches and checkpoints. |

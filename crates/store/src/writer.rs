@@ -123,6 +123,20 @@ pub struct UpsertArtifact {
     pub key: Option<String>,
     pub data: String,
     pub external_id: Option<Id>,
+    /// The journal entry of a flow-body artifact, written with it.
+    pub effect: Option<EffectMark>,
+}
+
+/// An engine effect a flow body performed: its slot (`<kind>:<name>-<n>`), a
+/// hash of its content, and the pass that performed it. Recorded in the same
+/// write as the effect, so a later pass or a crash rerun can skip it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EffectMark {
+    pub slot: String,
+    pub hash: String,
+    #[serde(default)]
+    pub pass: i64,
 }
 
 /// Input for arming an expectation.
@@ -240,6 +254,9 @@ pub enum ReportEvent {
         payload: Value,
         #[serde(default)]
         task_run_external_id: Option<Id>,
+        /// The journal entry of a flow-body emit; absent from older engines.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effect: Option<EffectMark>,
     },
     Artifact {
         seq: i64,
@@ -250,6 +267,8 @@ pub enum ReportEvent {
         #[serde(default)]
         key: Option<String>,
         data: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effect: Option<EffectMark>,
     },
 }
 
@@ -331,6 +350,7 @@ pub enum WriteCommand {
     MergeRunAttributes {
         run_id: i64,
         patch: String,
+        effect: Option<EffectMark>,
         reply: Reply<bool>,
     },
     UpsertSchedule(ScheduleWrite, Reply<i64>),
@@ -386,6 +406,7 @@ pub enum WriteCommand {
         scope: String,
         key: String,
         value: String,
+        effect: Option<EffectMark>,
         reply: Reply<bool>,
     },
     TaskStateDelete {
@@ -425,7 +446,8 @@ pub enum WriteCommand {
         key: String,
         reply: Reply<bool>,
     },
-    AppendEvent(NewEvent, Reply<(Event, Id)>),
+    /// An event, and the journal entry of the flow-body emit that made it.
+    AppendEvent(NewEvent, Option<EffectMark>, Reply<(Event, Id)>),
     /// Many events in one transaction (task-run events from a report).
     AppendEvents(Vec<NewEvent>, Reply<Vec<(Event, Id)>>),
     UpsertRule(RuleWrite, Reply<i64>),
@@ -823,6 +845,7 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
         WriteCommand::MergeRunAttributes {
             run_id,
             patch,
+            effect,
             reply,
         } => ack(
             reply,
@@ -830,8 +853,13 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
                 "UPDATE run SET attributes = json_patch(attributes, ?1) WHERE id = ?2",
                 params![patch, run_id],
             )
-            .map(|n| n > 0)
-            .map_err(Into::into),
+            .map_err(StoreError::from)
+            .and_then(|n| {
+                if let (true, Some(mark)) = (n > 0, &effect) {
+                    record_effect(conn, run_id, mark, None)?;
+                }
+                Ok(n > 0)
+            }),
         ),
         WriteCommand::SetRunPriority {
             run_id,
@@ -943,6 +971,7 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
             scope,
             key,
             value,
+            effect,
             reply,
         } => ack(reply, {
             let exists: Result<bool> = conn
@@ -958,8 +987,13 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
                          ON CONFLICT (run_id, scope, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
                         params![run_id, scope, key, value, now_micros()],
                     )
-                    .map(|_| true)
-                    .map_err(StoreError::from),
+                    .map_err(StoreError::from)
+                    .and_then(|_| {
+                        if let Some(mark) = &effect {
+                            record_effect(conn, run_id, mark, None)?;
+                        }
+                        Ok(true)
+                    }),
                 Err(e) => Err(e),
             }
         }),
@@ -1127,7 +1161,15 @@ fn execute(conn: &Connection, cmd: WriteCommand) -> Ack {
             .map(|_| ())
             .map_err(Into::into),
         ),
-        WriteCommand::AppendEvent(e, reply) => ack(reply, append_event(conn, &e)),
+        WriteCommand::AppendEvent(e, effect, reply) => ack(
+            reply,
+            append_event(conn, &e).and_then(|out| {
+                if let (Some(mark), Some(run_id)) = (&effect, e.run_id) {
+                    record_effect(conn, run_id, mark, None)?;
+                }
+                Ok(out)
+            }),
+        ),
         WriteCommand::AppendEvents(events, reply) => ack(
             reply,
             events.iter().map(|e| append_event(conn, e)).collect::<Result<Vec<_>>>(),
@@ -1816,6 +1858,7 @@ fn apply_report(conn: &Connection, run_id: i64, events: Vec<ReportEvent>) -> Res
                     name,
                     payload,
                     task_run_external_id,
+                    effect,
                     ..
                 } => {
                     let (resource, run_row) = run_resource(conn, run_id)?;
@@ -1838,6 +1881,9 @@ fn apply_report(conn: &Connection, run_id: i64, events: Vec<ReportEvent>) -> Res
                             related,
                         },
                     )?;
+                    if let Some(mark) = effect {
+                        record_effect(conn, run_id, mark, None)?;
+                    }
                     out.event_ids.push(eid.id);
                 }
                 ReportEvent::Artifact {
@@ -1846,6 +1892,7 @@ fn apply_report(conn: &Connection, run_id: i64, events: Vec<ReportEvent>) -> Res
                     artifact_kind,
                     key,
                     data,
+                    effect,
                     ..
                 } => {
                     let task_run_id = match task_run_external_id {
@@ -1868,6 +1915,7 @@ fn apply_report(conn: &Connection, run_id: i64, events: Vec<ReportEvent>) -> Res
                             key: key.clone(),
                             data: data.to_string(),
                             external_id: Some(*external_id),
+                            effect: effect.clone(),
                         },
                     )?;
                     out.artifact_ids.push(aid);
@@ -1928,8 +1976,8 @@ const TERMINAL: &str = "'Completed', 'Failed', 'Cancelled', 'Crashed'";
 /// time, else its creation time. A backfill is live while it is not cancelled
 /// and still has a non-terminal run. `keep_per_flow` counts terminal runs, so
 /// a flow always keeps that much finished history whatever is running. The schema cascades from `run` to task
-/// runs, states, logs, events, and artifacts; the `run.input` answer is a kv
-/// row and goes explicitly.
+/// runs, states, logs, events, artifacts and the effect journal; the `run.input`
+/// answer and the `run.effects` seed are kv rows and go explicitly.
 fn delete_expired_runs(
     conn: &Connection,
     before: i64,
@@ -1965,6 +2013,7 @@ fn delete_expired_runs(
     let ids = id_list(&rows.iter().map(|r| r.0).collect::<Vec<_>>());
     conn.execute_batch(&format!(
         "DELETE FROM kv WHERE key IN (SELECT 'run.input:' || id FROM run WHERE id IN ({ids}));
+         DELETE FROM kv WHERE key IN (SELECT 'run.effects:' || id FROM run WHERE id IN ({ids}));
          DELETE FROM run WHERE id IN ({ids});"
     ))?;
     Ok(rows)
@@ -2046,6 +2095,10 @@ fn delete_flows(conn: &Connection, flow_ids: &[i64]) -> Result<DeletedCounts> {
         [],
     )?;
     conn.execute(
+        &format!("DELETE FROM kv WHERE key IN (SELECT 'run.effects:' || id FROM run WHERE flow_id IN ({ids}))"),
+        [],
+    )?;
+    conn.execute(
         &format!("DELETE FROM expectation WHERE flow_id IN ({ids}) OR run_id IN ({runs})"),
         [],
     )?;
@@ -2077,6 +2130,7 @@ fn reset(conn: &Connection, scope: ResetScope, live_flows: &[i64]) -> Result<Del
          DELETE FROM run;
          DELETE FROM backfill;
          DELETE FROM kv WHERE key LIKE 'run.input:%';
+         DELETE FROM kv WHERE key LIKE 'run.effects:%';
          UPDATE rule SET fire_count = 0, last_fired = NULL;",
     )?;
     if scope == ResetScope::Everything {
@@ -2436,7 +2490,37 @@ fn upsert_rule(conn: &Connection, rw: &RuleWrite) -> Result<i64> {
     Ok(conn.last_insert_rowid())
 }
 
+/// Journal a flow-body effect, replacing what an earlier pass wrote to its slot.
+fn record_effect(
+    conn: &Connection,
+    run_id: i64,
+    mark: &EffectMark,
+    r#ref: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO effect (run_id, pass, slot, hash, ref, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT (run_id, slot) DO UPDATE SET pass = excluded.pass, hash = excluded.hash,
+             ref = excluded.ref, created_at = excluded.created_at",
+        params![run_id, mark.pass, mark.slot, mark.hash, r#ref, now_micros()],
+    )?;
+    Ok(())
+}
+
 fn upsert_artifact(conn: &Connection, a: &UpsertArtifact) -> Result<i64> {
+    let id = upsert_artifact_row(conn, a)?;
+    if let Some(mark) = &a.effect {
+        // The ref is what the call returned: the external id an engine chose,
+        // or the row id offline.
+        let r#ref = match a.external_id {
+            Some(ext) => ext.to_string(),
+            None => id.to_string(),
+        };
+        record_effect(conn, a.run_id, mark, Some(&r#ref))?;
+    }
+    Ok(id)
+}
+
+fn upsert_artifact_row(conn: &Connection, a: &UpsertArtifact) -> Result<i64> {
     let now = now_micros();
     if let Some(key) = &a.key {
         let existing: Option<i64> = conn

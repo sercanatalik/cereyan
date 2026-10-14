@@ -429,6 +429,7 @@ pub async fn create_artifact(
             key: body.key,
             data,
             external_id: None,
+            effect: None,
         })
     })
     .await

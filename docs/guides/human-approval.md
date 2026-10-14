@@ -48,7 +48,7 @@ assert done["state"]["type"] == "Completed"
 
 ## What happens on resume
 
-The answer is stored, `run.resumed` is recorded, and a new attempt of the same run is scheduled. It reruns the flow from the top: tasks completed before the pause return their checkpoints as `Replayed` task runs (and tasks with `cache=INPUTS` their cached results as `Cached` ones), `wait_for_input` returns the answer instead of pausing, and the rest of the flow executes. Any code between the top of the flow and the question that is not in a cached task runs again, so keep side effects inside tasks.
+The answer is stored, `run.resumed` is recorded, and a new attempt of the same run is scheduled. It reruns the flow from the top: tasks completed before the pause return their checkpoints as `Replayed` task runs (and tasks with `cache=INPUTS` their cached results as `Cached` ones), `wait_for_input` returns the answer instead of pausing, and the rest of the flow executes. Any code between the top of the flow and the question that is not in a task runs again. Events, artifacts, published state and attributes it already recorded are [not recorded again](../concepts/runs-and-states.md#engine-effects), but effects outside cereyan are repeated, so keep those inside tasks.
 
 ## While it waits
 

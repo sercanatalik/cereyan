@@ -43,7 +43,13 @@ def emit_event(name: str, payload: dict | None = None, resource: dict | None = N
     run = context.current_run()
     if run is not None and run.backend is not None:
         task = context.current_task_run()
-        run.backend.emit_event(name, body, task.id if task is not None else None, resource)
+        # From the flow body, an emit an earlier pass already made is not made again.
+        perform, mark, _ = run.effect("event", name, {"name": name, "payload": json.loads(body), "resource": resource})
+        if not perform:
+            _log_skip(f"event {name}")
+            return
+        run.backend.emit_event(name, body, task.id if task is not None else None, resource, mark)
+        run.remember_effect(mark)
         return
     from . import client as client_module, engine
 
@@ -60,6 +66,12 @@ def emit_event(name: str, payload: dict | None = None, resource: dict | None = N
     from .rules import evaluate_offline
 
     evaluate_offline(store, name)
+
+
+def _log_skip(what: str) -> None:
+    import logging
+
+    logging.getLogger("cereyan.effects").debug("%s already happened in an earlier pass; skipped", what)
 
 
 class EventName(str):

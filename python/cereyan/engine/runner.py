@@ -312,6 +312,18 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
         except Exception:  # noqa: BLE001 - a missing map only costs a replay
             ctx.checkpoints = {}
         ctx.replaying = bool(ctx.checkpoints)
+        try:
+            # Artifacts are each run's own records: a crash rerun shows its own,
+            # so only this run's artifact slots are skipped.
+            ctx.effects = {
+                e["slot"]: {"hash": e["hash"], "ref": e.get("ref")}
+                for e in backend.effects()
+                if not (e["slot"].startswith("artifact:") and e.get("run_id") != run.id)
+            }
+        except Exception:  # noqa: BLE001 - a missing journal only costs a repeat
+            ctx.effects = {}
+    else:
+        ctx.journal = False
     token = context.set_run(ctx)
     handler = run_logging.install(backend, run.id)
     logger = run_logging.get_run_logger()
@@ -396,6 +408,10 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
                     # Replaying a retry is opt-in: a retry usually exists because
                     # something upstream changed, so the default runs it all again.
                     ctx.replaying = flow.checkpoint is True and bool(ctx.checkpoints)
+                    if flow.checkpoint is not True:
+                        # Effects repeat where tasks do: a retry that executes
+                        # everything again performs its effects again too.
+                        ctx.effects.clear()
                     try:
                         backend.transition_run("Scheduled", "AwaitingRetry", _error_message(exc), {"attempt": attempt, "delay": delay, "retries": flow.retries, **_failure_details(exc)})
                     except RunRejected:

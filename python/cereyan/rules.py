@@ -266,7 +266,8 @@ def _fire_offline(store: _core.Store, row: dict, event: dict, run: dict | None) 
     if run and not row.get("allow_self") and run.get("created_by") == f"rule:{row['id']}":
         return
     guard = _guards.setdefault(row["id"], {"fired": set(), "recent": [], "last": None})
-    if row.get("once", "per_run") == "per_run" and run and run["id"] in guard["fired"]:
+    guard_run = _chain_root(store, run) if run else None
+    if row.get("once", "per_run") == "per_run" and run and guard_run in guard["fired"]:
         return
     if row.get("cooldown_seconds", 0) and guard["last"] and now - guard["last"] < row["cooldown_seconds"]:
         return
@@ -276,7 +277,7 @@ def _fire_offline(store: _core.Store, row: dict, event: dict, run: dict | None) 
     guard["recent"].append(now)
     guard["last"] = now
     if run:
-        guard["fired"].add(run["id"])
+        guard["fired"].add(guard_run)
     outcomes = []
     context = json.dumps({"event": event, "run": run, "flow": None, "state": run.get("state") if run else None,
                           "payload": event.get("payload", {}), "parameters": (run or {}).get("parameters", {})})
@@ -288,6 +289,22 @@ def _fire_offline(store: _core.Store, row: dict, event: dict, run: dict | None) 
         except Exception as exc:  # noqa: BLE001
             outcomes.append({"kind": action["kind"], "status": "failed", "error": f"{type(exc).__name__}: {exc}"})
     store.record_firing(row["id"], event["id"], run["id"] if run else None, json.dumps(outcomes))
+
+
+def _chain_root(store: _core.Store, run: dict) -> int:
+    """The first run of the crash chain `run` continues: ``once="per_run"``
+    counts a crash chain as one run."""
+    root, current = run["id"], run
+    for _ in range(50):
+        parent = current.get("parent_run_id")
+        if not parent or not str(current.get("created_by") or "").startswith("crash:"):
+            break
+        root = parent
+        raw = store.get_run(parent)
+        if not raw:
+            break
+        current = json.loads(raw)
+    return root
 
 
 _guards: dict[int, dict] = {}

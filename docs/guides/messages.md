@@ -69,7 +69,7 @@ def load(day: str) -> str:
 
 Each `receive` call in a flow pauses in turn, and a flow can receive, resume, and receive again. Calls are numbered in the order the body reaches them, and a message belongs to the call it answered, so a second `receive` waits for its own message rather than taking the first one. A message is used only while the topic at that position still matches the one it was sent for; edit the flow so that a different topic sits there and the run waits again.
 
-`receive` belongs in the flow body. Pausing works by raising out of the body, so a call from a task submitted with `submit` or `map` raises `CereyanError` instead of pausing the run. Code between the top of the flow and the call that is not in a task runs again on resume, so keep side effects inside tasks.
+`receive` belongs in the flow body. Pausing works by raising out of the body, so a call from a task submitted with `submit` or `map` raises `CereyanError` instead of pausing the run. Code between the top of the flow and the call that is not in a task runs again on resume. Cereyan's own effects there (events, artifacts, published state, attributes) are [not repeated](../concepts/runs-and-states.md#engine-effects), but effects outside cereyan are, so keep those inside tasks.
 
 ## Find the runs that wait
 

@@ -301,7 +301,16 @@ pub fn expectation_due(state: &Arc<AppState>, id: i64) {
         .map(|r| r.flow_id)
         .or(exp.flow_id)
         .and_then(|f| state.store.get_flow(f).ok().flatten());
-    lapse(state, &rule, RunContext { run, flow }, Some(&exp));
+    lapse(
+        state,
+        &rule,
+        RunContext {
+            run,
+            flow,
+            chain_root: None,
+        },
+        Some(&exp),
+    );
 }
 
 /// A clock-armed rule's tick: fire when the window held no expected event.
@@ -377,7 +386,16 @@ pub fn clock_tick(state: &Arc<AppState>, rule_id: i64) {
         .flows
         .first()
         .and_then(|name| find_flow(state, name, unless.project.as_deref()).ok());
-    lapse(state, &rule, RunContext { run: None, flow }, None);
+    lapse(
+        state,
+        &rule,
+        RunContext {
+            run: None,
+            flow,
+            chain_root: None,
+        },
+        None,
+    );
 }
 
 /// Record an `expectation.lapsed` event and fire the rule against it.
@@ -404,7 +422,7 @@ fn lapse(state: &Arc<AppState>, rule: &RuleRow, ctx: RunContext, exp: Option<&Ex
             payload: Default::default(),
         };
         match cereyan_rules::check_guards(rule, &probe, &ctx, g, now) {
-            GuardDecision::Fire => g.record(ctx.run.as_ref().map(|r| r.id), now),
+            GuardDecision::Fire => g.record(ctx.guard_run(), now),
             GuardDecision::Skip(_) => return,
         }
     }
@@ -483,7 +501,17 @@ fn context_for(state: &AppState, event: &Event) -> RunContext {
         .map(|r| r.flow_id)
         .or(event.flow_id)
         .and_then(|id| state.store.get_flow(id).ok().flatten());
-    RunContext { run, flow }
+    // Only a crash rerun has a chain to walk, so most events pay nothing.
+    let chain_root = run
+        .as_ref()
+        .filter(|r| r.created_by.starts_with("crash:"))
+        .and_then(|r| state.store.crash_chain(r.id).ok())
+        .and_then(|chain| chain.last().copied());
+    RunContext {
+        run,
+        flow,
+        chain_root,
+    }
 }
 
 /// Evaluate every candidate rule against a freshly recorded event.
@@ -520,7 +548,7 @@ pub fn on_event(state: &Arc<AppState>, event: Event) {
             let g = guards.entry(rule.id).or_default();
             match cereyan_rules::check_guards(rule, &event, &ctx, g, now) {
                 GuardDecision::Fire => {
-                    g.record(ctx.run.as_ref().map(|r| r.id), now);
+                    g.record(ctx.guard_run(), now);
                     to_fire.push(rule.as_ref().clone());
                 }
                 GuardDecision::Skip(_) => {}
@@ -996,6 +1024,7 @@ fn test_proactive_rule(state: &Arc<AppState>, rule: &RuleRow) -> Result<Value, S
     let mut ctx = RunContext {
         run: None,
         flow: None,
+        chain_root: None,
     };
     let mut armed_at = now;
     if rule.spec.at.is_none() {

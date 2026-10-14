@@ -17,12 +17,13 @@ pub use home::resolve_home;
 pub use manage::{ProjectCounts, ProjectRow, TableCounts, BACKUP_DIR};
 pub use migrations::latest_version as latest_schema_version;
 pub use read::{
-    checkpoint_seed_key, ArtifactFilter, ArtifactsPage, Checkpoint, EventFilter, EventsPage,
-    FlowLabel, LatestRunMark, QueueRun, RecentRun, RunEventContext, ScheduleRunMark, TaskStateRow,
-    TimelineRunRow,
+    checkpoint_seed_key, effect_seed_key, ArtifactFilter, ArtifactsPage, Checkpoint, EffectRow,
+    EventFilter, EventsPage, FlowLabel, LatestRunMark, QueueRun, RecentRun, RunEventContext,
+    ScheduleRunMark, TaskStateRow, TimelineRunRow,
 };
 pub use read::{ListRunsFilter, ListTaskRunsFilter, LogFilter, LogsPage, RunsPage, TaskRunsPage};
 pub use workers::{HostFlowCounts, WorkerRegistration};
+pub use writer::EffectMark;
 pub use writer::{
     ArmExpectation, CreateBackfill, CreateRun, CreateTaskRun, DeletedCounts, FlowRows, NewEvent,
     NewLog, ReportEvent, ReportOutcome, ResetScope, RuleWrite, SchedulePatch, ScheduleWrite,
@@ -291,10 +292,17 @@ impl Store {
     }
 
     /// Merge a JSON object into a run's searchable attributes; false when the run is unknown.
-    pub fn merge_run_attributes(&self, run_id: i64, patch: &str) -> Result<bool> {
+    /// With `effect`, the call is journaled in the same write.
+    pub fn merge_run_attributes(
+        &self,
+        run_id: i64,
+        patch: &str,
+        effect: Option<EffectMark>,
+    ) -> Result<bool> {
         self.write(|reply| WriteCommand::MergeRunAttributes {
             run_id,
             patch: patch.to_string(),
+            effect,
             reply,
         })
     }
@@ -373,13 +381,23 @@ impl Store {
         self.write(|reply| WriteCommand::ClearCheckpointsBefore { before, reply })
     }
 
-    /// Set one task state entry; false when the run does not exist.
-    pub fn task_state_set(&self, run_id: i64, scope: &str, key: &str, value: &str) -> Result<bool> {
+    /// Set one task state entry; false when the run does not exist. With
+    /// `effect` (a flow body's `publish_state`), the call is journaled in the
+    /// same write.
+    pub fn task_state_set(
+        &self,
+        run_id: i64,
+        scope: &str,
+        key: &str,
+        value: &str,
+        effect: Option<EffectMark>,
+    ) -> Result<bool> {
         self.write(|reply| WriteCommand::TaskStateSet {
             run_id,
             scope: scope.into(),
             key: key.into(),
             value: value.into(),
+            effect,
             reply,
         })
     }
@@ -460,7 +478,16 @@ impl Store {
     }
 
     pub fn append_event(&self, event: writer::NewEvent) -> Result<(Event, Id)> {
-        self.write(|reply| WriteCommand::AppendEvent(event, reply))
+        self.write(|reply| WriteCommand::AppendEvent(event, None, reply))
+    }
+
+    /// Append a flow body's event and its journal entry in one write.
+    pub fn append_event_with_effect(
+        &self,
+        event: writer::NewEvent,
+        effect: Option<EffectMark>,
+    ) -> Result<(Event, Id)> {
+        self.write(|reply| WriteCommand::AppendEvent(event, effect, reply))
     }
 
     /// Append many events in one writer round trip.

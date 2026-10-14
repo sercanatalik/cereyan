@@ -907,6 +907,58 @@
         },
         "type": "object"
       },
+      "EffectMark": {
+        "description": "An engine effect a flow body performed: its slot (`<kind>:<name>-<n>`), a\nhash of its content, and the pass that performed it. Recorded in the same\nwrite as the effect, so a later pass or a crash rerun can skip it.",
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "pass": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "slot": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot",
+          "hash"
+        ],
+        "type": "object"
+      },
+      "EffectRow": {
+        "description": "One entry of a run's effect journal: a flow-body effect, by slot and hash.",
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "pass": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "run_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "slot": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slot",
+          "hash",
+          "run_id",
+          "pass"
+        ],
+        "type": "object"
+      },
       "EmitEventBody": {
         "properties": {
           "flow_id": {
@@ -4622,6 +4674,17 @@
             "description": "Remove the entry instead of setting it.",
             "type": "boolean"
           },
+          "effect": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EffectMark",
+                "description": "The journal entry of a flow body's `publish_state`, written with the value."
+              }
+            ]
+          },
           "key": {
             "type": "string"
           },
@@ -5372,6 +5435,13 @@
             "description": "Checkpoints a new attempt may replay: the run's earlier passes and, for a\ncrash rerun, the chain of crashed runs before it.",
             "items": {
               "$ref": "#/components/schemas/Checkpoint"
+            },
+            "type": "array"
+          },
+          "effects": {
+            "description": "The effect journal of the same attempts: the flow-body effects (events,\nartifacts, published state, attributes) that already happened, so the\nengine skips them instead of performing them again.",
+            "items": {
+              "$ref": "#/components/schemas/EffectRow"
             },
             "type": "array"
           },
@@ -7827,6 +7897,40 @@
             "in": "path",
             "name": "id",
             "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The effect's slot, `attributes:<names>-<n>`.",
+            "in": "query",
+            "name": "slot",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "A hash of the patch.",
+            "in": "query",
+            "name": "hash",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "description": "The pass that set them.",
+            "in": "query",
+            "name": "pass",
+            "required": false,
             "schema": {
               "format": "int64",
               "type": "integer"

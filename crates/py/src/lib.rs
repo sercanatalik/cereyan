@@ -335,6 +335,7 @@ impl Store {
             .map_err(to_py)
     }
 
+    #[pyo3(signature = (run_id, scope, key, value, effect=None))]
     fn task_state_set(
         &self,
         py: Python<'_>,
@@ -342,9 +343,11 @@ impl Store {
         scope: String,
         key: String,
         value: String,
+        effect: Option<&str>,
     ) -> PyResult<bool> {
+        let effect = effect_mark(effect)?;
         let store = self.inner.clone();
-        py.detach(move || store.task_state_set(run_id, &scope, &key, &value))
+        py.detach(move || store.task_state_set(run_id, &scope, &key, &value, effect))
             .map_err(to_py)
     }
 
@@ -416,7 +419,8 @@ impl Store {
 
     /// Record an event. `resource` and `related` are JSON; the run's resource is
     /// filled in when `run_id` is given and `resource` is None.
-    #[pyo3(signature = (name, payload="{}", run_id=None, flow_id=None, resource=None, task_run_external_id=None))]
+    #[pyo3(signature = (name, payload="{}", run_id=None, flow_id=None, resource=None, task_run_external_id=None, effect=None))]
+    #[allow(clippy::too_many_arguments)]
     fn append_event(
         &self,
         py: Python<'_>,
@@ -426,7 +430,9 @@ impl Store {
         flow_id: Option<i64>,
         resource: Option<&str>,
         task_run_external_id: Option<String>,
+        effect: Option<&str>,
     ) -> PyResult<i64> {
+        let effect = effect_mark(effect)?;
         let payload: serde_json::Value = serde_json::from_str(payload)
             .map_err(|e| PyValueError::new_err(format!("payload is not JSON: {e}")))?;
         let explicit: Option<cereyan_core::Resource> = match resource {
@@ -477,14 +483,17 @@ impl Store {
                 });
             }
             store
-                .append_event(cereyan_store::NewEvent {
-                    name,
-                    run_id,
-                    flow_id,
-                    payload,
-                    resource,
-                    related,
-                })
+                .append_event_with_effect(
+                    cereyan_store::NewEvent {
+                        name,
+                        run_id,
+                        flow_id,
+                        payload,
+                        resource,
+                        related,
+                    },
+                    effect,
+                )
                 .map(|(event, _)| event.id)
         })
         .map_err(to_py)
@@ -502,7 +511,8 @@ impl Store {
         json(&page)
     }
 
-    #[pyo3(signature = (run_id, kind, data, key=None, task_run_id=None))]
+    #[pyo3(signature = (run_id, kind, data, key=None, task_run_id=None, effect=None))]
+    #[allow(clippy::too_many_arguments)]
     fn upsert_artifact(
         &self,
         py: Python<'_>,
@@ -511,7 +521,9 @@ impl Store {
         data: String,
         key: Option<String>,
         task_run_id: Option<i64>,
+        effect: Option<&str>,
     ) -> PyResult<i64> {
+        let effect = effect_mark(effect)?;
         let store = self.inner.clone();
         py.detach(move || {
             store.upsert_artifact(cereyan_store::UpsertArtifact {
@@ -521,6 +533,7 @@ impl Store {
                 key,
                 data,
                 external_id: None,
+                effect,
             })
         })
         .map_err(to_py)
@@ -683,13 +696,28 @@ impl Store {
     }
 
     /// Merge a JSON object into a run's searchable attributes.
-    fn set_run_attributes(&self, py: Python<'_>, run_id: i64, patch: &str) -> PyResult<bool> {
+    #[pyo3(signature = (run_id, patch, effect=None))]
+    fn set_run_attributes(
+        &self,
+        py: Python<'_>,
+        run_id: i64,
+        patch: &str,
+        effect: Option<&str>,
+    ) -> PyResult<bool> {
         serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(patch)
             .map_err(|e| PyValueError::new_err(format!("attributes must be a JSON object: {e}")))?;
+        let effect = effect_mark(effect)?;
         let store = self.inner.clone();
         let patch = patch.to_string();
-        py.detach(move || store.merge_run_attributes(run_id, &patch))
+        py.detach(move || store.merge_run_attributes(run_id, &patch, effect))
             .map_err(to_py)
+    }
+
+    /// The effect journal a new attempt of `run_id` consults, as a JSON list.
+    fn effects(&self, py: Python<'_>, run_id: i64) -> PyResult<String> {
+        let store = self.inner.clone();
+        let rows = py.detach(move || store.effects(run_id)).map_err(to_py)?;
+        json(&rows)
     }
 
     fn delete_run(&self, py: Python<'_>, run_id: i64) -> PyResult<bool> {
@@ -749,7 +777,11 @@ fn rule_matches(when: &str, event: &str, run: &str) -> PyResult<bool> {
     let e: cereyan_core::Event =
         serde_json::from_str(event).map_err(|e| PyValueError::new_err(format!("event: {e}")))?;
     let run: Option<cereyan_core::Run> = serde_json::from_str(run).ok();
-    let ctx = cereyan_rules::RunContext { run, flow: None };
+    let ctx = cereyan_rules::RunContext {
+        run,
+        flow: None,
+        chain_root: None,
+    };
     Ok(cereyan_rules::matches(&m, &e, &ctx))
 }
 
@@ -872,4 +904,14 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
+}
+
+/// An effect mark passed from Python as JSON (`{"slot", "hash", "pass"}`).
+fn effect_mark(effect: Option<&str>) -> PyResult<Option<cereyan_store::EffectMark>> {
+    effect
+        .map(|text| {
+            serde_json::from_str(text)
+                .map_err(|e| PyValueError::new_err(format!("effect is not a mark: {e}")))
+        })
+        .transpose()
 }

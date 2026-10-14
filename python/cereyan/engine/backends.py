@@ -35,10 +35,14 @@ class Backend:
         """Checkpoints of the run's earlier attempts, by dynamic key; empty when there are none."""
         return {}
 
+    def effects(self) -> list[dict]:
+        """The effect journal of the run's earlier attempts: ``slot``, ``hash``, ``ref``, ``run_id``."""
+        return []
+
     def task_state_get(self, scope: str, key: str) -> str | None:
         raise NotImplementedError
 
-    def task_state_set(self, scope: str, key: str, value_json: str) -> None:
+    def task_state_set(self, scope: str, key: str, value_json: str, effect: dict | None = None) -> None:
         raise NotImplementedError
 
     def task_state_delete(self, scope: str, key: str) -> bool:
@@ -53,14 +57,18 @@ class Backend:
     def release_resources(self, lease) -> None:
         pass
 
-    def emit_event(self, name: str, payload_json: str, task_run_external_id: str | None, resource: dict | None) -> None:
+    # `effect` is a flow-body effect's journal entry (`RunContext.effect`),
+    # written in the same store write as the effect itself.
+    def emit_event(self, name: str, payload_json: str, task_run_external_id: str | None, resource: dict | None,
+                   effect: dict | None = None) -> None:
         raise NotImplementedError
 
-    def set_attributes(self, patch_json: str) -> None:
+    def set_attributes(self, patch_json: str, effect: dict | None = None) -> None:
         """Merge a JSON object into the run's searchable attributes."""
         raise NotImplementedError
 
-    def artifact(self, kind: str, data_json: str, key: str | None, task_run_external_id: str | None) -> str:
+    def artifact(self, kind: str, data_json: str, key: str | None, task_run_external_id: str | None,
+                 effect: dict | None = None) -> str:
         raise NotImplementedError
 
     def transition_task_run(self, external_id: str, state_type: str, name: str | None = None,
@@ -103,6 +111,10 @@ class Backend:
 
 def _details(details: dict | None) -> str | None:
     return json.dumps(details) if details else None
+
+
+def _mark(effect: dict | None) -> str | None:
+    return json.dumps(effect) if effect is not None else None
 
 
 _local_semaphores: dict[str, "threading.BoundedSemaphore"] = {}
@@ -175,11 +187,14 @@ class StoreBackend(Backend):
     def checkpoints(self) -> dict[str, dict]:
         return {c["dynamic_key"]: c for c in json.loads(self.store.checkpoints(self.run_id))}
 
+    def effects(self) -> list[dict]:
+        return json.loads(self.store.effects(self.run_id))
+
     def task_state_get(self, scope, key):
         return self.store.task_state_get(self.run_id, scope, key)
 
-    def task_state_set(self, scope, key, value_json):
-        self.store.task_state_set(self.run_id, scope, key, value_json)
+    def task_state_set(self, scope, key, value_json, effect=None):
+        self.store.task_state_set(self.run_id, scope, key, value_json, _mark(effect))
 
     def task_state_delete(self, scope, key):
         return self.store.task_state_delete(self.run_id, scope, key)
@@ -204,18 +219,19 @@ class StoreBackend(Backend):
         if len(self._logs) >= self.batch_size:
             self.flush_logs()
 
-    def emit_event(self, name, payload_json, task_run_external_id, resource):
-        self.store.append_event(name, payload_json, self.run_id, None, json.dumps(resource) if resource else None, task_run_external_id)
+    def emit_event(self, name, payload_json, task_run_external_id, resource, effect=None):
+        self.store.append_event(name, payload_json, self.run_id, None, json.dumps(resource) if resource else None,
+                                task_run_external_id, _mark(effect))
         from ..rules import evaluate_offline
 
         evaluate_offline(self.store, name)
 
-    def set_attributes(self, patch_json):
-        self.store.set_run_attributes(self.run_id, patch_json)
+    def set_attributes(self, patch_json, effect=None):
+        self.store.set_run_attributes(self.run_id, patch_json, _mark(effect))
 
-    def artifact(self, kind, data_json, key, task_run_external_id):
+    def artifact(self, kind, data_json, key, task_run_external_id, effect=None):
         row_id = self._rows.get(task_run_external_id) if task_run_external_id else None
-        aid = self.store.upsert_artifact(self.run_id, kind, data_json, key, row_id)
+        aid = self.store.upsert_artifact(self.run_id, kind, data_json, key, row_id, _mark(effect))
         return str(aid)
 
     def flush_logs(self) -> None:
@@ -235,15 +251,19 @@ class ReporterBackend(Backend):
     """Batched reporting to a server through the Rust client."""
 
     def __init__(self, client: _core.Client, run_id: int, report_seq: int = 0,
-                 checkpoints: list[dict] | None = None) -> None:
+                 checkpoints: list[dict] | None = None, effects: list[dict] | None = None) -> None:
         self.client = client
         self.run_id = run_id
         self._artifact_ids: dict = {}
         self._checkpoints = {c["dynamic_key"]: c for c in (checkpoints or [])}
+        self._effects = list(effects or [])
         client.begin_run(run_id, report_seq)
 
     def checkpoints(self) -> dict[str, dict]:
         return dict(self._checkpoints)
+
+    def effects(self) -> list[dict]:
+        return list(self._effects)
 
     def task_state_get(self, scope, key):
         from urllib.parse import urlencode
@@ -254,8 +274,11 @@ class ReporterBackend(Backend):
         data = json.loads(text)
         return json.dumps(data["value"]) if data.get("found") else None
 
-    def task_state_set(self, scope, key, value_json):
-        status, text = self.client.post(f"/api/runs/{self.run_id}/state", json.dumps({"scope": scope, "key": key, "value": json.loads(value_json)}))
+    def task_state_set(self, scope, key, value_json, effect=None):
+        body = {"scope": scope, "key": key, "value": json.loads(value_json)}
+        if effect is not None:
+            body["effect"] = effect
+        status, text = self.client.post(f"/api/runs/{self.run_id}/state", json.dumps(body))
         if status >= 300:
             raise CereyanError(f"task_state write was refused ({status}): {text}")
 
@@ -308,17 +331,19 @@ class ReporterBackend(Backend):
     def log(self, task_run_external_id, level, logger, timestamp, message) -> None:
         self.client.log(self.run_id, task_run_external_id, level, logger, timestamp, message)
 
-    def emit_event(self, name, payload_json, task_run_external_id, resource):
-        self.client.emit_event(self.run_id, name, payload_json, task_run_external_id)
+    def emit_event(self, name, payload_json, task_run_external_id, resource, effect=None):
+        self.client.emit_event(self.run_id, name, payload_json, task_run_external_id, _mark(effect))
 
-    def set_attributes(self, patch_json):
-        status, text = self.client.post(f"/api/runs/{self.run_id}/attributes", patch_json)
+    def set_attributes(self, patch_json, effect=None):
+        # The body is the attributes themselves, so the journal entry rides in the query.
+        query = "?" + urlencode(effect) if effect is not None else ""
+        status, text = self.client.post(f"/api/runs/{self.run_id}/attributes{query}", patch_json)
         if status >= 300:
             raise CereyanError(f"set_attributes was refused ({status}): {text}")
 
-    def artifact(self, kind, data_json, key, task_run_external_id):
+    def artifact(self, kind, data_json, key, task_run_external_id, effect=None):
         ext = self._artifact_ids.get((key, task_run_external_id)) if key else None
-        new_ext = self.client.artifact(self.run_id, kind, data_json, key, task_run_external_id, ext)
+        new_ext = self.client.artifact(self.run_id, kind, data_json, key, task_run_external_id, ext, _mark(effect))
         if key:
             self._artifact_ids[(key, task_run_external_id)] = new_ext
         return new_ext

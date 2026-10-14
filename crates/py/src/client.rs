@@ -650,14 +650,17 @@ impl Client {
     }
 
     /// Buffer a custom event for the run.
-    #[pyo3(signature = (run_id, name, payload="{}", task_run_external_id=None))]
+    /// `effect` is the journal entry of a flow body's emit, as JSON.
+    #[pyo3(signature = (run_id, name, payload="{}", task_run_external_id=None, effect=None))]
     fn emit_event(
         &self,
         run_id: i64,
         name: String,
         payload: &str,
         task_run_external_id: Option<&str>,
+        effect: Option<&str>,
     ) -> PyResult<()> {
+        let effect = crate::effect_mark(effect)?;
         let payload: Value = serde_json::from_str(payload)
             .map_err(|e| PyValueError::new_err(format!("payload is not JSON: {e}")))?;
         let ext = task_run_external_id.and_then(Id::parse);
@@ -670,12 +673,14 @@ impl Client {
             name,
             payload,
             task_run_external_id: ext,
+            effect,
         });
         Ok(())
     }
 
     /// Buffer an artifact (JSON data) for the run; returns its external id.
-    #[pyo3(signature = (run_id, kind, data, key=None, task_run_external_id=None, external_id=None))]
+    #[pyo3(signature = (run_id, kind, data, key=None, task_run_external_id=None, external_id=None, effect=None))]
+    #[allow(clippy::too_many_arguments)]
     fn artifact(
         &self,
         run_id: i64,
@@ -684,7 +689,9 @@ impl Client {
         key: Option<String>,
         task_run_external_id: Option<&str>,
         external_id: Option<&str>,
+        effect: Option<&str>,
     ) -> PyResult<String> {
+        let effect = crate::effect_mark(effect)?;
         let data: Value = serde_json::from_str(data)
             .map_err(|e| PyValueError::new_err(format!("data is not JSON: {e}")))?;
         let ext = external_id
@@ -702,6 +709,7 @@ impl Client {
             artifact_kind: kind,
             key,
             data,
+            effect,
         });
         Ok(ext.to_string())
     }

@@ -129,7 +129,13 @@ def publish_state(key: str, value: Any) -> None:
         raise CereyanError(f"publish_state values must be JSON: {exc}") from None
     if len(text.encode()) > 64 * 1024:
         raise CereyanError(f"publish_state value for {key!r} exceeds 64 KB")
-    run.backend.task_state_set("", key, text)
+    # A value an earlier pass already published is not published again, so a
+    # reader never sees it move backwards while the body replays.
+    perform, mark, _ = run.effect("state", key, {"key": key, "value": json.loads(text)})
+    if not perform:
+        return
+    run.backend.task_state_set("", key, text, mark)
+    run.remember_effect(mark)
 
 
 def pause_details(exc: RunPaused) -> dict:

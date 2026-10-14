@@ -56,7 +56,7 @@ Inside the run, `cereyan.runtime.run`, `cereyan.runtime.task_run`, and `cereyan.
 
 ## Attempts
 
-A run's body can execute more than once, and each execution is a **pass**. The first is pass 0; a retry and a resume after a pause are the next. Every pass numbers its task runs from zero, so the same call keeps its dynamic key in each one — `fetch-0` in pass 0 is the same call as `fetch-0` in pass 1 — and the task runs of a later pass are recorded alongside the earlier ones rather than replacing them. `failure_count` grows with retries. A pass after a pause, and a retry of a flow with `checkpoint=True`, replays the tasks an earlier pass completed from their [checkpoints](#checkpoints), recorded as `Replayed`, instead of executing them again; `cache=INPUTS` goes further and reuses a result across runs, recorded as `Cached`. Flow-body code between tasks is not checkpointed and runs on every pass.
+A run's body can execute more than once, and each execution is a **pass**. The first is pass 0; a retry and a resume after a pause are the next. Every pass numbers its task runs from zero, so the same call keeps its dynamic key in each one — `fetch-0` in pass 0 is the same call as `fetch-0` in pass 1 — and the task runs of a later pass are recorded alongside the earlier ones rather than replacing them. `failure_count` grows with retries. A pass after a pause, and a retry of a flow with `checkpoint=True`, replays the tasks an earlier pass completed from their [checkpoints](#checkpoints), recorded as `Replayed`, instead of executing them again; `cache=INPUTS` goes further and reuses a result across runs, recorded as `Cached`. Flow-body code between tasks is not checkpointed and runs on every pass, but the [engine effects](#engine-effects) it already performed are skipped.
 
 A **crash rerun** is not a pass: the supervisor creates a new run linked to the crashed one through `parent_run_id`, with `created_by` of `crash:<id>` and `attempt` one higher, so a crash chain is a chain of runs rather than one run executed twice.
 
@@ -67,6 +67,28 @@ A **crash rerun** is not a pass: the supervisor creates a new run linked to the 
 Every task that completes by executing its body leaves a **checkpoint**: its result, stored under the run in `<home>/storage`, and recorded on the task run as `result_ref` with a hash of its arguments. A crash rerun and a resume after `wait_for_input` start with the checkpoints of the run's earlier passes (and, for a crash rerun, of the crashed runs before it) and replay them: a task whose key and arguments match returns the stored result without executing and is recorded `Completed` with the sub-state `Replayed` and a `task_run.replayed` event. The first task that has no checkpoint or whose arguments differ ends the replay, and everything after it executes as usual, so a flow that reads the clock or draws a random number stays correct at the cost of some repeated work. In-process retries replay only when the flow says `checkpoint=True`, and `checkpoint=False` turns checkpoints off for a flow.
 
 Two limits keep this honest. A result that cannot be pickled, or is larger than `checkpoint_max_bytes` (50 MB by default), is not checkpointed and runs again. And replay is at-least-once: a task that completed in the moments before a crash, before its report reached the server, executes again on the rerun. [Targets](targets-caching-results.md) remain the tool for making that repeat harmless. Checkpoint files are removed `retain_checkpoints_days` (default 7) after the run ends.
+
+## Engine effects
+
+A flow body's calls that change what cereyan records are journaled the way tasks are checkpointed. These calls are `emit_event`, the `create_*` artifacts and `update_progress`, `publish_state`, and `set_attributes`.
+
+Each call is identified by its kind, its name (the event name, the state key, the attribute names, or the artifact key), its position among calls with that name in the pass, and a hash of what it records. On a pass that replays checkpoints, a call whose identity and hash match the journal is skipped, and an artifact call returns the id it returned the first time. Those passes are:
+
+- a resume after a pause or a durable wait;
+- a crash rerun;
+- a retry from failure;
+- a retry of a flow with `checkpoint=True`.
+
+So an event emitted before a question is recorded once, a rule on it fires once, and published state never goes back to an earlier value while the body replays.
+
+Each call is judged on its own:
+
+- A call whose content changed, such as an event payload that holds the current time, is performed again on every pass.
+- Two identical calls in one pass are two calls.
+- Events, published state and attributes follow the crash chain, so a crash rerun does not emit again. A retry from failure inherits them too, and a retry from the start does them anew.
+- Artifacts are each run's own records: a crash rerun creates its own, while the passes of one run do not duplicate them.
+- `checkpoint=False`, a forced run, and an in-process retry of a flow without `checkpoint=True` perform every call again, as they execute every task again.
+- Calls from a task are not journaled. A task replayed from its checkpoint does not execute, and one that executes again performs its effects again.
 
 ## Attributes
 

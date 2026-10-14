@@ -29,6 +29,16 @@ pub fn name_matches(pattern: &str, name: &str) -> bool {
 pub struct RunContext {
     pub run: Option<Run>,
     pub flow: Option<Flow>,
+    /// The first run of the crash chain `run` continues, when it is a crash
+    /// rerun. `once = per_run` counts the whole chain as one run.
+    pub chain_root: Option<i64>,
+}
+
+impl RunContext {
+    /// The run `once = per_run` keys on: the chain's first run, or the run.
+    pub fn guard_run(&self) -> Option<i64> {
+        self.run.as_ref().map(|r| self.chain_root.unwrap_or(r.id))
+    }
 }
 
 fn payload_str(event: &Event, key: &str) -> Option<String> {
@@ -159,7 +169,9 @@ pub fn check_guards(
         if !rule.spec.allow_self && run.created_by == format!("rule:{}", rule.id) {
             return GuardDecision::Skip("self-trigger");
         }
-        if rule.spec.once == "per_run" && state.fired_runs.contains(&run.id) {
+        if rule.spec.once == "per_run"
+            && state.fired_runs.contains(&ctx.chain_root.unwrap_or(run.id))
+        {
             return GuardDecision::Skip("once per run");
         }
     }
@@ -770,6 +782,7 @@ mod tests {
             &RunContext {
                 run: Some(run),
                 flow: None,
+                chain_root: None,
             },
         )
     }
@@ -832,6 +845,7 @@ mod tests {
         let ctx = RunContext {
             run: None,
             flow: None,
+            chain_root: None,
         };
         assert!(matches(&m, &e, &ctx));
 
@@ -929,6 +943,7 @@ mod tests {
         let ctx = RunContext {
             run: Some(run("api")),
             flow: None,
+            chain_root: None,
         };
         assert!(matches(&m, &event("run.failed"), &ctx));
         assert!(!matches(&m, &event("task_run.failed"), &ctx));
@@ -963,6 +978,7 @@ mod tests {
         let ctx = RunContext {
             run: Some(run("api")),
             flow: None,
+            chain_root: None,
         };
         assert_eq!(
             check_guards(&r, &event("run.failed"), &ctx, &st, 0),
@@ -979,6 +995,7 @@ mod tests {
                 ..run("api")
             }),
             flow: None,
+            chain_root: None,
         };
         assert_eq!(
             check_guards(&r, &event("run.failed"), &ctx2, &st, 1_000_000),
@@ -995,6 +1012,7 @@ mod tests {
                 ..run("api")
             }),
             flow: None,
+            chain_root: None,
         };
         assert_eq!(
             check_guards(&r, &event("run.failed"), &ctx3, &st, 22_000_000),
@@ -1006,6 +1024,7 @@ mod tests {
                 ..run("rule:7")
             }),
             flow: None,
+            chain_root: None,
         };
         assert_eq!(
             check_guards(
@@ -1037,6 +1056,7 @@ mod tests {
         let ctx = RunContext {
             run: Some(run("api")),
             flow: None,
+            chain_root: None,
         };
         let context = template_context(&event("run.failed"), &ctx);
         let action = RuleAction {
@@ -1111,5 +1131,45 @@ mod tests {
             ..Default::default()
         })
         .is_err());
+    }
+
+    #[test]
+    fn once_per_run_counts_a_crash_chain_as_one_run() {
+        let r = rule(RuleSpec {
+            once: "per_run".into(),
+            ..Default::default()
+        });
+        let mut st = GuardState::default();
+        let first = RunContext {
+            run: Some(run("api")),
+            flow: None,
+            chain_root: None,
+        };
+        assert_eq!(
+            check_guards(&r, &event("run.crashed"), &first, &st, 0),
+            GuardDecision::Fire
+        );
+        st.record(first.guard_run(), 0);
+        // The crash rerun of run 1 is run 2: the same chain, so no second alert.
+        let rerun = RunContext {
+            run: Some(Run {
+                id: 2,
+                ..run("crash:1")
+            }),
+            flow: None,
+            chain_root: Some(1),
+        };
+        assert_eq!(
+            check_guards(&r, &event("run.crashed"), &rerun, &st, 1),
+            GuardDecision::Skip("once per run")
+        );
+        let never = rule(RuleSpec {
+            once: "never".into(),
+            ..Default::default()
+        });
+        assert_eq!(
+            check_guards(&never, &event("run.crashed"), &rerun, &st, 1),
+            GuardDecision::Fire
+        );
     }
 }

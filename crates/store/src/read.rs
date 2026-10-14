@@ -140,6 +140,11 @@ pub fn checkpoint_seed_key(run_id: i64) -> String {
     format!("run.checkpoints:{run_id}")
 }
 
+/// kv key holding the effect journal a retry was seeded with, as a JSON list.
+pub fn effect_seed_key(run_id: i64) -> String {
+    format!("run.effects:{run_id}")
+}
+
 /// Skip rows per schedule id, as `list_skip_rows` returns them for one.
 pub type SkipRowsBySchedule = std::collections::HashMap<i64, Vec<(i64, i64, String)>>;
 
@@ -300,6 +305,38 @@ pub(crate) fn chain_json(ids: &[i64]) -> String {
     }
     out.push(']');
     out
+}
+
+/// One entry of a run's effect journal: a flow-body effect, by slot and hash.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct EffectRow {
+    pub slot: String,
+    pub hash: String,
+    #[serde(default)]
+    pub r#ref: Option<String>,
+    pub run_id: i64,
+    pub pass: i64,
+}
+
+fn chain_effects(conn: &Connection, chain: &str) -> Result<Vec<EffectRow>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT slot, hash, ref, run_id, pass FROM effect
+         WHERE run_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?1))
+         ORDER BY run_id, pass",
+    )?;
+    let rows = stmt
+        .query_map(rusqlite::params![chain], |r| {
+            Ok(EffectRow {
+                slot: r.get(0)?,
+                hash: r.get(1)?,
+                r#ref: r.get(2)?,
+                run_id: r.get(3)?,
+                pass: r.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 /// A completed task run's stored result, keyed for replay.
@@ -1234,6 +1271,39 @@ impl Store {
         })
     }
 
+    /// The effect journal a new attempt of `run_id` consults: for every slot,
+    /// the latest entry over the run's own passes and the crashed runs it
+    /// reruns, after the seed a retry from failure was given. Entries carry
+    /// their run, so the engine can keep artifacts to the run itself.
+    pub fn effects(&self, run_id: i64) -> Result<Vec<EffectRow>> {
+        self.with_reader(|conn| {
+            let chain = crash_chain(conn, run_id)?;
+            if chain.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut latest: std::collections::HashMap<String, EffectRow> =
+                std::collections::HashMap::new();
+            let keys: Vec<String> = chain.iter().rev().map(|id| effect_seed_key(*id)).collect();
+            for key in keys {
+                let seed: Option<String> = conn
+                    .query_row("SELECT value FROM kv WHERE key = ?1", [&key], |r| r.get(0))
+                    .optional()?;
+                for row in seed
+                    .and_then(|s| serde_json::from_str::<Vec<EffectRow>>(&s).ok())
+                    .unwrap_or_default()
+                {
+                    latest.insert(row.slot.clone(), row);
+                }
+            }
+            for row in chain_effects(conn, &chain_json(&chain))? {
+                latest.insert(row.slot.clone(), row);
+            }
+            let mut out: Vec<EffectRow> = latest.into_values().collect();
+            out.sort_by(|a, b| a.slot.cmp(&b.slot));
+            Ok(out)
+        })
+    }
+
     /// Recent runs of several flows at once, keyed by flow id, newest first
     /// within each flow and capped at `limit` per flow.
     ///
@@ -1948,11 +2018,26 @@ impl Store {
         })
     }
 
-    /// Every task state entry a run wrote itself.
+    /// Every task state entry a run can read: its own and those of the crash
+    /// and retry parents it continues, the nearest run's value winning, as
+    /// `task_state_get` reads them.
     pub fn task_state_list(&self, run_id: i64) -> Result<Vec<TaskStateRow>> {
         self.with_reader(|conn| {
             let mut stmt = conn.prepare_cached(
-                "SELECT scope, key, value, updated_at FROM task_state WHERE run_id = ?1 ORDER BY scope, key",
+                "WITH RECURSIVE chain(id, depth) AS (
+                    SELECT ?1, 0
+                    UNION ALL
+                    SELECT r.parent_run_id, chain.depth + 1 FROM run r JOIN chain ON r.id = chain.id
+                    WHERE r.parent_run_id IS NOT NULL
+                      AND (r.created_by LIKE 'crash:%' OR r.created_by LIKE 'retry:%')
+                      AND chain.depth < 50
+                 ),
+                 ranked AS (
+                    SELECT s.scope, s.key, s.value, s.updated_at,
+                           ROW_NUMBER() OVER (PARTITION BY s.scope, s.key ORDER BY chain.depth) AS n
+                    FROM task_state s JOIN chain ON s.run_id = chain.id
+                 )
+                 SELECT scope, key, value, updated_at FROM ranked WHERE n = 1 ORDER BY scope, key",
             )?;
             let rows = stmt
                 .query_map([run_id], |r| {

@@ -45,6 +45,7 @@ fn busy_run(store: &Store, flow_id: i64, rule_id: i64, logs: usize) -> i64 {
             key: None,
             data: "done".into(),
             external_id: None,
+            effect: None,
         })
         .unwrap();
     store

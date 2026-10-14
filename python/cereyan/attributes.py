@@ -29,4 +29,9 @@ def set_attributes(**values: Any) -> None:
     for name in values:
         if not _NAME.fullmatch(name):
             raise CereyanError(f"attribute name {name!r} must be letters, digits, and underscores")
-    run.backend.set_attributes(json.dumps(values, default=str))
+    patch = json.dumps(values, default=str)
+    perform, mark, _ = run.effect("attributes", ",".join(sorted(values)), json.loads(patch))
+    if not perform:
+        return
+    run.backend.set_attributes(patch, mark)
+    run.remember_effect(mark)

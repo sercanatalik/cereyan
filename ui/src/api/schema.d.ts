@@ -1675,6 +1675,27 @@ export interface components {
             /** Format: int64 */
             right?: number | null;
         };
+        /**
+         * @description An engine effect a flow body performed: its slot (`<kind>:<name>-<n>`), a
+         *     hash of its content, and the pass that performed it. Recorded in the same
+         *     write as the effect, so a later pass or a crash rerun can skip it.
+         */
+        EffectMark: {
+            hash: string;
+            /** Format: int64 */
+            pass?: number;
+            slot: string;
+        };
+        /** @description One entry of a run's effect journal: a flow-body effect, by slot and hash. */
+        EffectRow: {
+            hash: string;
+            /** Format: int64 */
+            pass: number;
+            ref?: string | null;
+            /** Format: int64 */
+            run_id: number;
+            slot: string;
+        };
         EmitEventBody: {
             /** Format: int64 */
             flow_id?: number | null;
@@ -2957,6 +2978,7 @@ export interface components {
         StateBody: {
             /** @description Remove the entry instead of setting it. */
             delete?: boolean;
+            effect?: null | components["schemas"]["EffectMark"];
             key: string;
             scope?: string;
             value?: unknown;
@@ -3271,6 +3293,12 @@ export interface components {
              *     crash rerun, the chain of crashed runs before it.
              */
             checkpoints?: components["schemas"]["Checkpoint"][];
+            /**
+             * @description The effect journal of the same attempts: the flow-body effects (events,
+             *     artifacts, published state, attributes) that already happened, so the
+             *     engine skips them instead of performing them again.
+             */
+            effects?: components["schemas"]["EffectRow"][];
             external_id: string;
             flow: string;
             /** @description A forced (restated) run: the engine ignores targets, caches and checkpoints. */
@@ -4738,7 +4766,14 @@ export interface operations {
     };
     patch_attributes: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description A hash of the patch. */
+                hash?: string | null;
+                /** @description The pass that set them. */
+                pass?: number;
+                /** @description The effect's slot, `attributes:<names>-<n>`. */
+                slot?: string | null;
+            };
             header?: never;
             path: {
                 id: number;

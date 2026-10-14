@@ -161,7 +161,9 @@ def test_served_notes_list_retry_crash_and_cascade(srv):
     rerun = wait_until(lambda: next((r for r in c.runs(flow="crashy", limit=20)["items"] if r["created_by"] == f"crash:{crashed['id']}"), None))
     assert srv.wait_run(rerun["id"])["state"]["type"] == "Completed"
     assert lines(srv)[2:] == ["started:job-7", "resumed:job-7"]
-    assert c._request("GET", f"/api/runs/{rerun['id']}/state") == []
+    # The rerun lists what it can read: the crashed run's entries, through the chain.
+    assert [(r["scope"], r["key"], r["value"]) for r in c._request("GET", f"/api/runs/{rerun['id']}/state")] == [
+        ("remember_then_die-0", "job_id", "job-7")]
     # ... and so does a retry from failure.
     failed = c.run("failing")
     assert srv.wait_run(failed["id"])["state"]["type"] == "Failed"

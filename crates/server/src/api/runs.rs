@@ -670,11 +670,35 @@ pub async fn delete_inner(state: &Arc<AppState>, run: &Run) -> ApiResult<()> {
     Ok(())
 }
 
+/// The journal entry of a flow body's `set_attributes`, in the query string
+/// because the body is the attributes themselves.
+#[derive(Deserialize, Default, utoipa::IntoParams)]
+pub struct AttributesEffect {
+    /// The effect's slot, `attributes:<names>-<n>`.
+    pub slot: Option<String>,
+    /// A hash of the patch.
+    pub hash: Option<String>,
+    /// The pass that set them.
+    #[serde(default)]
+    pub pass: i64,
+}
+
+impl AttributesEffect {
+    fn mark(self) -> Option<cereyan_store::EffectMark> {
+        Some(cereyan_store::EffectMark {
+            slot: self.slot?,
+            hash: self.hash?,
+            pass: self.pass,
+        })
+    }
+}
+
 /// Also served on POST, which is what the engine client speaks.
-#[utoipa::path(patch, path = "/api/runs/{id}/attributes", params(("id" = i64, Path)), request_body = Object, responses((status = 200, body = Run), (status = 404), (status = 422)))]
+#[utoipa::path(patch, path = "/api/runs/{id}/attributes", params(("id" = i64, Path), AttributesEffect), request_body = Object, responses((status = 200, body = Run), (status = 404), (status = 422)))]
 pub async fn patch_attributes(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
+    Query(effect): Query<AttributesEffect>,
     Json(body): Json<serde_json::Map<String, serde_json::Value>>,
 ) -> ApiResult<Json<Run>> {
     if body
@@ -689,7 +713,10 @@ pub async fn patch_attributes(
     if patch.len() > 16 * 1024 {
         return Err(ApiError::Unprocessable("attributes exceed 16 KB".into()));
     }
-    if !state.store.merge_run_attributes(id, &patch)? {
+    if !state
+        .store
+        .merge_run_attributes(id, &patch, effect.mark())?
+    {
         return Err(ApiError::NotFound("run not found".into()));
     }
     let run = state
@@ -913,6 +940,19 @@ pub async fn retry_inner(
             .filter(|c| !invalidated.contains(&c.dynamic_key))
             .collect()
     };
+    // The effects the original chain performed happened, whichever tasks the
+    // retry executes again; only a retry from the start does everything anew.
+    // Artifacts are each run's own records, so the retry records its own.
+    let effects: Vec<cereyan_store::EffectRow> = if from == "start" {
+        Vec::new()
+    } else {
+        state
+            .store
+            .effects(original.id)?
+            .into_iter()
+            .filter(|e| !e.slot.starts_with("artifact:"))
+            .collect()
+    };
     let run = create_run_inner(
         state,
         &flow,
@@ -924,6 +964,12 @@ pub async fn retry_inner(
         Some((original.id, original.attempt + 1)),
     )
     .await?;
+    if !effects.is_empty() {
+        state.store.kv_set(
+            &cereyan_store::effect_seed_key(run.id),
+            &serde_json::to_string(&effects).unwrap_or_else(|_| "[]".into()),
+        )?;
+    }
     if !seed.is_empty() {
         state.store.kv_set(
             &cereyan_store::checkpoint_seed_key(run.id),
@@ -986,6 +1032,9 @@ pub struct StateBody {
     /// Remove the entry instead of setting it.
     #[serde(default)]
     pub delete: bool,
+    /// The journal entry of a flow body's `publish_state`, written with the value.
+    #[serde(default)]
+    pub effect: Option<cereyan_store::EffectMark>,
 }
 
 /// The largest JSON value a task may keep in its state store.
@@ -1047,7 +1096,9 @@ pub async fn set_run_state(
         if text.len() > TASK_STATE_MAX_BYTES {
             return Err(ApiError::Unprocessable("value exceeds 64 KB".into()));
         }
-        state.store.task_state_set(id, &body.scope, &key, &text)?
+        state
+            .store
+            .task_state_set(id, &body.scope, &key, &text, body.effect)?
     };
     if !ok {
         return Err(ApiError::NotFound("run not found".into()));

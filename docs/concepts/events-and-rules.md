@@ -25,7 +25,7 @@ assert events.run.failed == "run.failed"
 
 An **event** is a recorded fact: a name such as `run.failed`, a resource it is about, related resources, a payload, and a sequence number. The engine records one for every meaningful change (run and task-run transitions, schedule changes, rule firings, flow registration, resource exhaustion, expectations), and `emit_event` records custom ones. The [events catalogue](../reference/events.md) lists them all.
 
-`emit_event` records an event each time it is called. In the flow body that means once per pass: a run that retries, resumes after a pause, or wakes from a [durable wait](../guides/wait-durably.md) records the event again. A rule's default `once="per_run"` keeps it from firing twice within one run, but a [crash rerun](../guides/retries-timeouts-crashes.md#survive-a-crash) is a new run, and the events list and anything reading it see every copy. Call it from a task to record it once: a task replayed from its checkpoint does not run, so neither does its `emit_event`.
+`emit_event` in a flow body records its event once per run, however many passes the body takes. A run that resumes after a pause, wakes from a [durable wait](../guides/wait-durably.md), or reruns after a [crash](../guides/retries-timeouts-crashes.md#survive-a-crash) runs the body from the top. When it reaches an emit that an earlier pass already made, with the same name and payload at the same position, it skips the emit. A payload that changes on every pass, such as one holding the current time, is recorded again on every pass. [Engine effects](runs-and-states.md#engine-effects) has the details. An emit from a task is recorded each time the task executes, and a task replayed from its checkpoint does not execute.
 
 A **rule** is `when` plus `do`: a match clause over events and an ordered list of actions, with guards. Rules are how cereyan reacts: run a cleanup flow when an ETL completes, page someone when a nightly flow fails, cancel a run that was started by mistake.
 
@@ -69,7 +69,7 @@ Templates use Jinja syntax rendered in Rust with `event`, `run`, `flow`, `state`
 
 ## Guards
 
-Disabled rules never fire. `once=per_run` (the default) fires at most once per run and `once=never` drops that limit; `cooldown_seconds` and `max_per_minute` throttle; and a rule never fires on events of runs it created unless `allow_self` is set, so a rule that runs a flow cannot trigger itself forever. A keyword that is not one of these is rejected rather than ignored, so a misspelled guard cannot leave a rule running on defaults.
+Disabled rules never fire. `once=per_run` (the default) fires at most once per run, counting a run and its crash reruns as one, and `once=never` drops that limit; `cooldown_seconds` and `max_per_minute` throttle; and a rule never fires on events of runs it created unless `allow_self` is set, so a rule that runs a flow cannot trigger itself forever. A keyword that is not one of these is rejected rather than ignored, so a misspelled guard cannot leave a rule running on defaults.
 
 ## Two kinds of rule
 

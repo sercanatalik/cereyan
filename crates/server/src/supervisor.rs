@@ -627,6 +627,11 @@ pub struct WorkItem {
     /// crash rerun, the chain of crashed runs before it.
     #[serde(default)]
     pub checkpoints: Vec<cereyan_store::Checkpoint>,
+    /// The effect journal of the same attempts: the flow-body effects (events,
+    /// artifacts, published state, attributes) that already happened, so the
+    /// engine skips them instead of performing them again.
+    #[serde(default)]
+    pub effects: Vec<cereyan_store::EffectRow>,
     /// A forced (restated) run: the engine ignores targets, caches and checkpoints.
     #[serde(default)]
     pub force: bool,
