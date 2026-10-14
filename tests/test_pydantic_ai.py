@@ -218,6 +218,100 @@ def test_the_module_names_the_extra_when_pydantic_ai_is_missing(tmp_path):
     assert 'pip install "cereyan[pydantic-ai]"' in out.stdout
 
 
+# ---- once tools, offline -----------------------------------------------------------
+
+
+class _ChargeInDoubt(set):
+    """A run's in-doubt set that holds every call of the `charge` tool, as a crash would."""
+
+    def __contains__(self, key):
+        return "call_tool:charge" in key
+
+
+def _pay_agent(executed, **capability):
+    def model(messages, info):
+        last = messages[-1].parts[-1]
+        if last.part_kind == "user-prompt":
+            return ModelResponse(parts=[ToolCallPart("charge", {"amount": 42}, tool_call_id="pay-1")])
+        return ModelResponse(parts=[TextPart(f"paid: {last.content}")])
+
+    from pydantic_ai import DeferredToolRequests
+
+    agent = Agent(FunctionModel(model), name="payer", output_type=[str, DeferredToolRequests],
+                  capabilities=[CereyanDurability(**capability)])
+
+    @agent.tool_plain
+    def charge(amount: int) -> str:
+        executed.append(amount)
+        return f"charged {amount}"
+
+    return agent
+
+
+def _in_doubt_flow(agent):
+    from cereyan import context
+
+    @flow
+    def pay():
+        context.current_run().in_doubt = _ChargeInDoubt()
+        return agent.run_sync("charge 42").output
+
+    return pay
+
+
+def test_a_probe_value_reaches_the_model_as_the_tool_return(store):
+    executed = []
+    agent = _pay_agent(executed, once_tools={"charge": lambda amount: f"ch_{amount}"})
+    assert _in_doubt_flow(agent)() == "paid: ch_42"
+    assert executed == []
+    _, tasks = last_run(store)
+    unit = next(t for t in tasks if "call_tool:charge" in t["dynamic_key"])
+    assert unit["state"]["name"] == "Recovered" and unit["once"] is True
+
+
+def test_an_unprobed_in_doubt_call_comes_back_as_a_marked_approval(store):
+    from pydantic_ai import DeferredToolRequests
+
+    executed = []
+    agent = _pay_agent(executed, once_tools={"charge": None})
+    out = _in_doubt_flow(agent)()
+    assert isinstance(out, DeferredToolRequests) and executed == []
+    assert [c.tool_call_id for c in out.approvals] == ["pay-1"]
+    mark = out.metadata["pay-1"]["cereyan"]
+    assert mark["in_doubt"] is True and mark["tool"] == "charge" and len(mark["effect_key"]) == 32
+    _, tasks = last_run(store)
+    unit = next(t for t in tasks if "call_tool:charge" in t["dynamic_key"])
+    assert unit["state"]["details"]["in_doubt"] == "deferred"
+
+
+def test_tools_not_named_once_are_unchanged(store):
+    executed = []
+    agent = _pay_agent(executed, once_tools={"other": None})
+    assert _in_doubt_flow(agent)() == "paid: charged 42" and executed == [42]
+    _, tasks = last_run(store)
+    assert not any(t["once"] for t in tasks)
+
+
+def test_an_agent_deferring_once_tools_must_accept_deferred_requests(store):
+    from pydantic_ai.exceptions import UserError
+
+    agent = Agent(FunctionModel(script), name="strict", capabilities=[CereyanDurability(once_tools={"charge": None})])
+
+    @flow
+    def strict():
+        return agent.run_sync("charge").output
+
+    with pytest.raises(UserError, match="DeferredToolRequests"):
+        strict()
+    _, tasks = last_run(store)
+    assert tasks == []
+
+
+def test_once_tools_are_validated():
+    with pytest.raises(ValueError, match="once_tools"):
+        CereyanDurability(once_tools={"charge": "not callable"})
+
+
 # ---- served: crash reruns and approvals ------------------------------------------
 
 AGENTS = '''
@@ -293,6 +387,85 @@ def publish_with_approval() -> str:
     out = publisher.run_sync(message_history=first.all_messages(), deferred_tool_results=results).output
     crash_once("publish")
     return out
+
+from cereyan import NOT_DONE
+from cereyan.pydantic_ai import settle
+
+def die_in_tool(tag):
+    marker = TRACE + "." + tag
+    if not os.path.exists(marker):
+        open(marker, "w").close()
+        os._exit(7)
+
+def pay_script(tool):
+    def run(messages, info):
+        last = messages[-1].parts[-1]
+        if last.part_kind == "user-prompt":
+            return ModelResponse(parts=[ToolCallPart(tool, {"amount": 42}, tool_call_id="pay-1")])
+        return ModelResponse(parts=[TextPart(f"paid: {last.content}")])
+    return run
+
+def found(amount: int) -> str:
+    note(f"probe:{amount}")
+    return "ch_probed"
+
+def nothing(amount: int):
+    note(f"probe:{amount}")
+    return NOT_DONE
+
+payer = Agent(
+    FunctionModel(pay_script("charge")),
+    name="payer",
+    output_type=[str, DeferredToolRequests],
+    capabilities=[CereyanDurability(once_tools={"charge": None})],
+)
+
+@payer.tool_plain
+def charge(amount: int) -> str:
+    note(f"charge:{amount}")
+    die_in_tool("charge")
+    return f"charged {amount}"
+
+@app.flow(crash_retries=1)
+def pay() -> str:
+    first = payer.run_sync("charge 42")
+    out = first.output
+    if isinstance(out, DeferredToolRequests):
+        out = payer.run_sync(message_history=first.all_messages(), deferred_tool_results=settle(out)).output
+    note(f"out:{out}")
+    return out
+
+prober = Agent(
+    FunctionModel(pay_script("charge_probed")),
+    name="prober",
+    capabilities=[CereyanDurability(once_tools={"charge_probed": found})],
+)
+
+@prober.tool_plain
+def charge_probed(amount: int) -> str:
+    note(f"charge:{amount}")
+    die_in_tool("probed")
+    return f"charged {amount}"
+
+@app.flow(crash_retries=1)
+def pay_probed() -> str:
+    return prober.run_sync("charge 42").output
+
+nothing_found = Agent(
+    FunctionModel(pay_script("charge_again")),
+    name="again",
+    capabilities=[CereyanDurability(once_tools={"charge_again": nothing})],
+)
+
+@nothing_found.tool_plain
+def charge_again(amount: int) -> str:
+    note(f"charge:{amount}")
+    die_in_tool("again")
+    return f"charged {amount}"
+
+@app.flow(crash_retries=1)
+def pay_again() -> str:
+    return nothing_found.run_sync("charge 42").output
 '''
 
 
@@ -370,3 +543,61 @@ def test_approve_crash_and_continue(served):
     tasks = served.client._request("GET", f"/api/runs/{rerun['id']}/tasks")
     # The second agent run rebuilt its message history with new timestamps and still matched.
     assert [t["state"]["name"] for t in tasks] == ["Replayed"] * 3
+
+
+# ---- once tools -------------------------------------------------------------------
+
+
+def _in_doubt(served, flow):
+    run = _start(served, flow)
+    rerun = _rerun_of(served, run["id"])
+    paused = served.wait_run(rerun["id"], timeout=40, until=lambda r: r["state"]["type"] in ("Paused", "Completed", "Failed"))
+    assert paused["state"]["type"] == "Paused", paused["state"]
+    return rerun
+
+
+def _unit(served, run_id, tool):
+    tasks = served.client._request("GET", f"/api/runs/{run_id}/tasks")
+    return [t for t in tasks if f"call_tool:{tool}" in t["dynamic_key"]]
+
+
+def test_an_interrupted_once_tool_is_asked_about_and_happened_is_told_to_the_model(served):
+    rerun = _in_doubt(served, "pay")
+    assert [ln for ln in _lines(served) if ln.startswith("charge:")] == ["charge:42"]
+    served.client.resume(rerun["id"], {"action": "happened", "result": "ch_1"})
+    final = _settled(served, rerun["id"])
+    assert final["state"]["type"] == "Completed", final["state"]
+    out = [ln for ln in _lines(served) if ln.startswith("out:")]
+    assert len(out) == 1 and "ch_1" in out[0] and "paid:" in out[0], out
+    assert [ln for ln in _lines(served) if ln.startswith("charge:")] == ["charge:42"]
+    units = _unit(served, rerun["id"], "charge")
+    assert units and all(u["once"] for u in units)
+
+
+def test_an_interrupted_once_tool_answered_run_again_executes_once_more(served):
+    rerun = _in_doubt(served, "pay")
+    served.client.resume(rerun["id"], {"action": "run_again"})
+    assert _settled(served, rerun["id"])["state"]["type"] == "Completed"
+    assert [ln for ln in _lines(served) if ln.startswith("charge:")] == ["charge:42", "charge:42"]
+
+
+def test_an_interrupted_once_tool_answered_fail_fails_the_run(served):
+    rerun = _in_doubt(served, "pay")
+    served.client.resume(rerun["id"], {"action": "fail"})
+    final = _settled(served, rerun["id"])
+    assert final["state"]["type"] == "Failed" and "TaskInDoubt" in final["state"]["message"]
+
+
+def test_a_probe_that_finds_the_tool_effect_recovers_it(served):
+    run = _start(served, "pay_probed")
+    rerun = _rerun_of(served, run["id"])
+    assert _settled(served, rerun["id"])["state"]["type"] == "Completed"
+    assert [ln for ln in _lines(served) if ln.startswith(("charge:", "probe:"))] == ["charge:42", "probe:42"]
+    assert _unit(served, rerun["id"], "charge_probed")[-1]["state"]["name"] == "Recovered"
+
+
+def test_a_probe_that_finds_nothing_runs_the_tool_again(served):
+    run = _start(served, "pay_again")
+    rerun = _rerun_of(served, run["id"])
+    assert _settled(served, rerun["id"])["state"]["type"] == "Completed"
+    assert [ln for ln in _lines(served) if ln.startswith(("charge:", "probe:"))] == ["charge:42", "probe:42", "charge:42"]

@@ -857,6 +857,7 @@ class _Unit:
     name: str
     key: str
     serializer: str
+    once: bool = False
 
 
 async def run_async_unit(
@@ -869,6 +870,9 @@ async def run_async_unit(
     retries: int = 0,
     retry_delay: Any = None,
     timeout: float | None = None,
+    once: bool = False,
+    probe=None,
+    defer=None,
 ) -> Any:
     """Run ``body()``, a coroutine factory, as one task run on the caller's event loop.
 
@@ -879,6 +883,14 @@ async def run_async_unit(
     instead of handing it to the run's runner. Not public API: there is no
     `async def` task yet.
 
+    ``once`` gives the unit `task-effects`' guarantees: its start and outcome are
+    reported to the server before the body runs and before the caller continues,
+    and a call an earlier run of the lineage left unfinished is in doubt. An
+    in-doubt call is settled without running the body: ``probe()`` (sync or
+    async) returns the unit's result, or ``NOT_DONE`` to run it; otherwise, or
+    when the probe raises, ``defer()`` gives the result that hands the decision
+    to the caller. Both are the integration's own encoded results.
+
     The task run and its dynamic key are taken before the first ``await``, so
     units started together with `asyncio.gather` are numbered in the order they
     were called, whatever order they finish in, and a replay finds them again.
@@ -886,7 +898,7 @@ async def run_async_unit(
     run = context.current_run()
     if run is None or run.backend is None:
         raise CereyanError(f"unit {name!r} needs a run in progress")
-    unit = _Unit(name=name, key=key, serializer=serializer)
+    unit = _Unit(name=name, key=key, serializer=serializer, once=once)
     external_id, dynamic_key = _create_task_run(run, unit, [])
     backend = run.backend
     logger = run_logging.get_run_logger()
@@ -901,7 +913,31 @@ async def run_async_unit(
                 backend.transition_task_run(external_id, "Completed", "Replayed", replayed[1], None)
                 return replayed[0]
         backend.transition_task_run(external_id, "Running")
+        if once and not await asyncio.to_thread(backend.report_ahead):
+            message = f"unit {dynamic_key} is once and its start could not be reported; not executing"
+            backend.transition_task_run(external_id, "Failed", None, message, None)
+            raise CereyanError(message)
         logger.info("task %s started", dynamic_key)
+        if once and dynamic_key in run.in_doubt:
+            try:
+                settled = await _settle_unit(dynamic_key, probe, defer, logger)
+            except TaskInDoubt as exc:
+                backend.transition_task_run(external_id, "Failed", None, str(exc), _failure_details(exc))
+                raise
+            if settled is not None:
+                how, result = settled
+                checkpoint = _write_checkpoint(run, unit, dynamic_key, external_id, input_hash, result, logger) if checkpointing else None
+                details = {"recovered": "probe"} if how == "probe" else {"in_doubt": "deferred"}
+                if checkpoint:
+                    details["checkpoint"] = checkpoint
+                if how == "probe":
+                    backend.transition_task_run(external_id, "Completed", "Recovered", "recovered by probe", details)
+                    logger.info("task %s recovered by its probe without executing", dynamic_key)
+                else:
+                    backend.transition_task_run(external_id, "Completed", None, "in doubt: deferred to the caller", details)
+                    logger.info("task %s was in doubt; deferred to the caller without executing", dynamic_key)
+                return result
+            logger.info("task %s was in doubt and runs again", dynamic_key)
         attempt = 0
         while True:
             deadline = None
@@ -942,7 +978,33 @@ async def run_async_unit(
             logger.info("task %s completed", dynamic_key)
             return result
     finally:
+        if once:
+            # The outcome reaches the server before the caller continues.
+            try:
+                await asyncio.to_thread(backend.report_ahead)
+            except Exception:  # noqa: BLE001
+                pass
         context.reset_task_run(token)
+
+
+async def _settle_unit(dynamic_key: str, probe, defer, logger) -> tuple[str, Any] | None:
+    """How an in-doubt unit ends without running: ``("probe", result)``,
+    ``("deferred", result)``, or None to run it."""
+    if probe is not None:
+        try:
+            found = probe()
+            if inspect.isawaitable(found):
+                found = await found
+        except Exception as exc:  # noqa: BLE001 - a failing probe hands the decision on
+            logger.warning("task %s: probe raised %s; deferring instead", dynamic_key, _error_message(exc))
+        else:
+            if found is effects.NOT_DONE:
+                return None
+            return "probe", found
+    if defer is None:
+        raise TaskInDoubt(f"{dynamic_key} was interrupted in an earlier run and may have taken effect, "
+                          "and nothing can settle it here")
+    return "deferred", defer()
 
 
 def _create_task_run(run: context.RunContext, task, parents: list[str]):

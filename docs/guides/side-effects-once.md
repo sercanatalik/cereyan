@@ -123,4 +123,6 @@ assert checkout() == "ch_1" and charged == [4200]
 
 `once` stops cereyan from repeating an effect silently, but a crash still leaves the outcome unknown. A worker cut off from the network keeps executing the call even after its run is declared crashed, and its reports are refused. The rerun reports the call as in doubt, which is the honest answer. Undoing an effect is not built in: if the right answer is to reverse it, do that in the task or flow that follows.
 
+Tools of a durable Pydantic AI agent get the same treatment through `once_tools`; see [Tools that must not repeat](durable-pydantic-ai-agent.md#tools-that-must-not-repeat).
+
 Related: [Retry, time out and survive crashes](retries-timeouts-crashes.md), [Make reruns idempotent with targets](idempotent-reruns.md), [Pause a run for approval](human-approval.md), [Runs and states](../concepts/runs-and-states.md#checkpoints).

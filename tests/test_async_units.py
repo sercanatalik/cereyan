@@ -143,3 +143,68 @@ def test_a_cancelled_unit_is_recorded_cancelled(store):
 def test_a_unit_needs_a_run():
     with pytest.raises(Exception, match="needs a run"):
         asyncio.run(unit("alone", 1, []))
+
+
+# ---- once units --------------------------------------------------------------------
+
+
+def _in_doubt_flow(name, **kw):
+    """A flow whose run says `name-0` was left in doubt by an earlier run."""
+    from cereyan import context
+
+    calls: list[str] = []
+
+    @flow
+    def f():
+        context.current_run().in_doubt.add(f"{name}-0")
+        return asyncio.run(unit(name, "executed", calls, once=True, **kw))
+
+    return f, calls
+
+
+def test_an_in_doubt_unit_with_a_probe_value_is_recovered(store):
+    async def probe():
+        return "found"
+
+    f, calls = _in_doubt_flow("charge", probe=probe)
+    assert f() == "found" and calls == []
+    _, tasks = last_run(store)
+    assert tasks[0]["state"]["name"] == "Recovered" and tasks[0]["once"] is True
+
+
+def test_an_in_doubt_unit_whose_probe_finds_nothing_executes(store):
+    from cereyan import NOT_DONE
+
+    f, calls = _in_doubt_flow("charge", probe=lambda: NOT_DONE)
+    assert f() == "executed" and calls == ["charge"]
+
+
+def test_a_raising_probe_defers(store):
+    def probe():
+        raise RuntimeError("cannot tell")
+
+    f, calls = _in_doubt_flow("charge", probe=probe, defer=lambda: {"deferred": True})
+    assert f() == {"deferred": True} and calls == []
+    _, tasks = last_run(store)
+    assert tasks[0]["state"]["type"] == "Completed" and tasks[0]["state"]["details"]["in_doubt"] == "deferred"
+
+
+def test_an_in_doubt_unit_nothing_can_settle_fails(store):
+    from cereyan import TaskInDoubt
+
+    f, calls = _in_doubt_flow("charge")
+    with pytest.raises(TaskInDoubt):
+        f()
+    assert calls == []
+
+
+def test_a_once_unit_not_in_doubt_runs_and_records_once(store):
+    calls: list[str] = []
+
+    @flow
+    def f():
+        return asyncio.run(unit("charge", "executed", calls, once=True))
+
+    assert f() == "executed" and calls == ["charge"]
+    _, tasks = last_run(store)
+    assert tasks[0]["once"] is True

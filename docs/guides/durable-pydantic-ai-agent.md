@@ -93,7 +93,7 @@ assert load_then_fail() == "loaded orders"
 assert calls == ["orders"]   # the retry replayed the tool call instead of loading again
 ```
 
-Calls are at least once, as with every durable-execution engine: a crash after a tool's effect and before its checkpoint runs the tool again. Give tools that write elsewhere an idempotency key: inside a tool, `cereyan.runtime.task_run.effect_key` identifies the call and stays the same in a crash rerun and a retry from failure. The run's own id would not, because a crash rerun is a new run. See [Run a side effect once](side-effects-once.md).
+Calls are at least once, as with every durable-execution engine: a crash after a tool's effect and before its checkpoint runs the tool again. Give tools that write elsewhere an idempotency key: inside a tool, `cereyan.runtime.task_run.effect_key` identifies the call and stays the same in a crash rerun and a retry from failure. The run's own id would not, because a crash rerun is a new run. For a tool whose effect cannot take a key, see [Tools that must not repeat](#tools-that-must-not-repeat).
 
 ## Ask a person before a tool runs
 
@@ -135,6 +135,79 @@ def publish_with_approval() -> str:
 ```
 
 Served, the run pauses at the question and frees its engine. When it resumes, the first agent run replays without calling the model. After a crash the rerun keeps the answer as well, so the approved tool runs once. A tool cannot ask on its own: `wait_for_input`, `receive`, and the durable waits raise `CereyanError` inside a tool or model call, because pausing works by raising out of the flow body.
+
+## Tools that must not repeat
+
+A tool that sends a message, files a ticket or charges a card should not run twice because the engine died halfway through it. Name it in `once_tools`, the agent counterpart of a [`once` task](side-effects-once.md):
+
+- its start and end reach the server before the agent continues;
+- after a crash, a call that started and never finished is *in doubt* and is not executed again on its own.
+
+A probe settles an in-doubt call. It takes the tool's arguments and returns the tool's result when the effect happened, which the model receives as the tool's return, or `NOT_DONE` to execute the tool:
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.models.function import FunctionModel
+from cereyan import NOT_DONE, flow, runtime
+from cereyan.pydantic_ai import CereyanDurability
+
+tickets: dict[str, str] = {}   # stands in for a ticketing system
+
+def find_ticket(title: str):
+    return tickets.get(runtime.task_run.effect_key, NOT_DONE)
+
+def model(messages, info):
+    last = messages[-1].parts[-1]
+    if last.part_kind == "user-prompt":
+        return ModelResponse(parts=[ToolCallPart("open_ticket", {"title": "orders late"})])
+    return ModelResponse(parts=[TextPart(f"Opened {last.content}.")])
+
+agent = Agent(FunctionModel(model), name="oncall",
+              capabilities=[CereyanDurability(once_tools={"open_ticket": find_ticket})])
+
+@agent.tool_plain
+def open_ticket(title: str) -> str:
+    tickets[runtime.task_run.effect_key] = f"T-{len(tickets) + 1}"
+    return tickets[runtime.task_run.effect_key]
+
+@flow(crash_retries=3)
+def escalate() -> str:
+    return agent.run_sync("The orders load is late. Open a ticket.").output
+
+assert escalate() == "Opened T-1."
+```
+
+Inside the tool and its probe, `runtime.task_run.effect_key` identifies the call, and a crash rerun keeps it. That is what lets the probe find the ticket the interrupted call opened.
+
+A tool mapped to `None` has no probe. Its in-doubt call comes back from the agent run as an approval request, and `settle` asks a person about it from the flow body, with the same three answers as a `once` task:
+
+- **happened:** the call is denied with a message carrying the result, so the model knows;
+- **run again:** the call is approved and executes;
+- **fail:** `settle` raises `TaskInDoubt`.
+
+The agent's `output_type` must include `DeferredToolRequests`, and the capability checks that before the first call:
+
+<!-- notest: the in-doubt path needs a crash rerun on a server -->
+```{.python notest}
+from pydantic_ai import Agent, DeferredToolRequests
+from cereyan import flow
+from cereyan.pydantic_ai import CereyanDurability, settle
+
+agent = Agent("openai:gpt-5", name="payments", output_type=[str, DeferredToolRequests],
+              capabilities=[CereyanDurability(once_tools={"charge": None})])
+
+@flow(crash_retries=3)
+def checkout() -> str:
+    first = agent.run_sync("Charge order 42.")
+    out = first.output
+    if isinstance(out, DeferredToolRequests):
+        results = settle(out)   # asks about in-doubt calls; add your own approvals to the result
+        out = agent.run_sync(message_history=first.all_messages(), deferred_tool_results=results).output
+    return out
+```
+
+Model requests are never `once`: they change nothing outside, and checkpoints already replay them. A `ModelRetry` makes the model call the tool again under a new call id, which is a new call with a new effect key.
 
 ## Tools in parallel
 

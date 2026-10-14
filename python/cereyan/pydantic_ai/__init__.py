@@ -14,5 +14,6 @@ except ImportError as _import_error:  # pragma: no cover - exercised without the
     ) from _import_error
 
 from ._capability import CereyanDurability, CereyanParallelExecutionMode
+from ._settle import settle
 
-__all__ = ["CereyanDurability", "CereyanParallelExecutionMode"]
+__all__ = ["CereyanDurability", "CereyanParallelExecutionMode", "settle"]
