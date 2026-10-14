@@ -74,10 +74,12 @@ export function TaskRail({
         {tasks.map((t) => {
           const selected = t.id === selectedId;
           const sub = retryLine(t, now);
+          // A task still Running in a crashed run stopped when the engine died: no clock.
+          const interrupted = runCrashed && t.state.type === "Running";
           const duration =
             t.total_run_time != null
               ? formatDuration(t.total_run_time)
-              : t.state.type === "Running" && t.start_time
+              : t.state.type === "Running" && t.start_time && !interrupted
                 ? formatDuration(now * 1000 - t.start_time)
                 : "";
           return (
@@ -111,7 +113,7 @@ export function TaskRail({
                     className="text-[11.5px] leading-[15px] text-muted-foreground"
                     data-testid="task-state"
                   >
-                    {runCrashed && t.state.type === "Running" ? "Interrupted" : stateWords(t.state.name)}
+                    {interrupted ? "Interrupted" : stateWords(t.state.name)}
                   </span>
                   {sub ? (
                     <span

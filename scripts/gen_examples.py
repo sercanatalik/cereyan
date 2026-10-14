@@ -7,6 +7,7 @@ An example starts with a header:
     # description: One sentence.
     # order: 2
     # fixture: offline | served
+    # requires: pydantic-ai      (optional: an extra the example needs)
     # ---
 
 Top-level comment lines (a ``#`` in column one) are prose; everything else is code.
@@ -24,6 +25,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXAMPLES = os.path.join(ROOT, "examples")
 OUT_DIR = os.path.join(ROOT, "docs", "examples")
 REPO = "https://github.com/sercanatalik/cereyan/blob/main/examples/"
+# Extras an example may require, and the module that shows the extra is installed.
+EXTRAS = {"pydantic-ai": "pydantic_ai"}
 
 
 def parse(path: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
@@ -44,6 +47,8 @@ def parse(path: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
     int(meta["order"])
     if meta.get("fixture", "offline") not in ("offline", "served"):
         raise SystemExit(f"{path}: fixture must be offline or served")
+    if meta.get("requires") not in (None, *EXTRAS):
+        raise SystemExit(f"{path}: requires must name an extra ({', '.join(EXTRAS)})")
 
     segments: list[tuple[str, str]] = []
     kind = None
@@ -78,6 +83,8 @@ def render(path: str) -> str:
     run_line = f"Source: [`examples/{base}`]({REPO}{base}). Run it with `python examples/{base}`"
     run_line += " while `cereyan serve examples/` is running." if served else " (no server needed)."
     out += [run_line, ""]
+    if meta.get("requires"):
+        out += [f'Needs the optional extra: `pip install "cereyan[{meta["requires"]}]"`.', ""]
     for kind, text in segments:
         if kind == "prose":
             out.append(text)

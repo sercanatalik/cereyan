@@ -8,7 +8,7 @@ node scripts/capture_screenshots.mjs      # all images
 node scripts/capture_screenshots.mjs flows flow-detail --out /tmp/shots   # some, elsewhere
 ```
 
-The `worker` image starts its own server, with a token and one processor, and a worker beside it, both on a temporary copy of `examples/`; it adds about a minute. It needs Node 22 and Chrome (set `CHROME` if Chrome is not in a standard place), and it never touches a server already running on 4200. Check each image by eye before committing, and keep each under 300 KB; the script flags a larger one.
+The agent images need the `pydantic-ai` extra; their runs are started only when the first of them is taken, so the pictures before them show the same history without the agent examples. The `worker` image starts its own server, with a token and one processor, and a worker beside it, both on a temporary copy of `examples/`; it adds about a minute. It needs Node 22 and Chrome (set `CHROME` if Chrome is not in a standard place), and it never touches a server already running on 4200. Check each image by eye before committing, and keep each under 300 KB; the script flags a larger one.
 
 | Image | Shows |
 |---|---|
@@ -21,6 +21,8 @@ The `worker` image starts its own server, with a token and one processor, and a 
 | `skip-dialog.png`, `reschedule-dialog.png` | The Skip upcoming runs dialog set to three runs, and Reschedule with the time moved to 07:30 |
 | `events.png` | The Events feed with a `run.failed` event open |
 | `artifacts.png`, `rules.png`, `variables.png`, `settings.png` | Those pages with the seeded artifacts, rules, and variables |
+| `agent-approval.png`, `agent-run.png` | The [Durable agent](../examples/durable_agent.md) run paused on its refund approval, then completed with the first agent run's model requests and tool calls `Replayed` on the resumed pass |
+| `agent-crashed.png`, `agent-recovered.png`, `agent-in-doubt.png` | The [agent payments](../examples/agent_payments.md) chain: the first run crashed with `refund` interrupted, its rerun with `refund` `Recovered` by the probe and `email_customer` interrupted, and the third run asking whether the email went out, with "happened" chosen |
 | `queue.png` | The Queue page with four idle processors and three runs under Starting later |
 | `worker.png` | A worker's status page, from a second server with a token and one processor so runs spill over to the worker: seven completed runs and one failed, in the light theme |
 

@@ -30,9 +30,16 @@ def header(path: str) -> dict[str, str]:
     return meta
 
 
+# The module that shows an optional extra is installed, by the name a header's `requires` uses.
+EXTRAS = {"pydantic-ai": "pydantic_ai"}
+
+
 @pytest.mark.parametrize("path", FILES, ids=[os.path.basename(p) for p in FILES])
 def test_example_runs(path, request, monkeypatch):
     meta = header(path)
+    if meta.get("requires"):
+        # The CI test job installs no extras; the docs job installs them and runs these.
+        pytest.importorskip(EXTRAS[meta["requires"]], reason=f"needs cereyan[{meta['requires']}]")
     if meta.get("fixture") == "served":
         server = request.getfixturevalue("served")
         monkeypatch.setenv("CEREYAN_HOME", str(server.home))

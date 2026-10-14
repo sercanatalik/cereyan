@@ -89,7 +89,8 @@ def docs_server(tmp_path_factory):
 
     home = tmp_path_factory.mktemp("docs-served-home")
     engine.close_store()
-    server = ServerProcess(str(home), EXAMPLES)
+    # The agent payments example crashes its own engine twice; rerun at once.
+    server = ServerProcess(str(home), EXAMPLES, env={"CEREYAN_FAST_CRASH_RERUN": "1"})
     server.url = server.info["url"]
     try:
         yield server

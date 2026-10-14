@@ -220,6 +220,8 @@ nav:
       - Admission control: examples/admission.md
       - Freshness and deadlines: examples/freshness.md
       - Messages: examples/messages.md
+      - Durable agent: examples/durable_agent.md
+      - An agent that must not pay twice: examples/agent_payments.md
   - Design:
       - Design and limitations: design/limitations.md
       - Architecture: design/architecture.md

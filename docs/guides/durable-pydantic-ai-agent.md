@@ -1,6 +1,6 @@
 # How to make a Pydantic AI agent durable
 
-An agent run makes many model requests and tool calls, and each costs time and money. Add `CereyanDurability` to a [Pydantic AI](https://ai.pydantic.dev) agent and run it from a flow: every model request and tool call becomes a task run with its result checkpointed. A retry, a resume after a pause, or a [crash rerun](retries-timeouts-crashes.md#survive-a-crash) replays the calls that completed instead of making them again.
+An agent run makes many model requests and tool calls, and each costs time and money. Add `CereyanDurability` to a [Pydantic AI](https://ai.pydantic.dev) agent and run it from a flow: every model request and tool call becomes a task run with its result checkpointed. A retry, a resume after a pause, or a [crash rerun](retries-timeouts-crashes.md#survive-a-crash) replays the calls that completed instead of making them again. Two examples show it end to end, with the run page at each step: [Durable agent](../examples/durable_agent.md) pauses for a tool approval and replays its calls, and [An agent that must not pay twice](../examples/agent_payments.md) survives two crashes in the middle of its tools.
 
 ## Install the extra
 
@@ -134,7 +134,7 @@ def publish_with_approval() -> str:
     return agent.run_sync(message_history=first.all_messages(), deferred_tool_results=results).output
 ```
 
-Served, the run pauses at the question and frees its engine. When it resumes, the first agent run replays without calling the model. After a crash the rerun keeps the answer as well, so the approved tool runs once. A tool cannot ask on its own: `wait_for_input`, `receive`, and the durable waits raise `CereyanError` inside a tool or model call, because pausing works by raising out of the flow body.
+Served, the run pauses at the question and frees its engine. When it resumes, the first agent run replays without calling the model. After a crash the rerun keeps the answer as well, so the approved tool runs once. A tool cannot ask on its own: `wait_for_input`, `receive`, and the durable waits raise `CereyanError` inside a tool or model call, because pausing works by raising out of the flow body. [Durable agent](../examples/durable_agent.md) runs this loop and shows the paused run and its replayed calls.
 
 ## Tools that must not repeat
 
@@ -207,7 +207,7 @@ def checkout() -> str:
     return out
 ```
 
-Model requests are never `once`: they change nothing outside, and checkpoints already replay them. A `ModelRetry` makes the model call the tool again under a new call id, which is a new call with a new effect key.
+[An agent that must not pay twice](../examples/agent_payments.md) runs both routes through two crashes, with the run page after each. Model requests are never `once`: they change nothing outside, and checkpoints already replay them. A `ModelRetry` makes the model call the tool again under a new call id, which is a new call with a new effect key.
 
 ## Tools in parallel
 

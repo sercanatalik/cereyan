@@ -424,12 +424,16 @@ test("tasks rail marks once tasks and calls a crashed run's running task interru
       id: 201,
       dynamic_key: "charge-0",
       once: true,
+      total_run_time: null,
+      start_time: 1,
       state: { type: "Running", name: "Running", timestamp: 1 },
     },
   ];
   render(<TaskRail tasks={tasks as any} selectedId={undefined} onSelect={vi.fn()} runCrashed />);
   expect(screen.getByTestId("once-badge")).toHaveTextContent("once");
   expect(screen.getByTestId("task-state")).toHaveTextContent("Interrupted");
+  // It stopped when the engine died, so it has no running clock.
+  expect(screen.queryByText(/\d+ ?(ms|s|min)/)).toBeNull();
 });
 
 test("run page: tasks rail filters logs, Delete lives in the overflow menu", async () => {

@@ -65,7 +65,8 @@ class Demo {
     this.proc = spawn(
       "uv",
       ["run", "--project", ROOT, "cereyan", "serve", path.join(ROOT, "examples"), "--port", String(port), "--max-engines", "4"],
-      { cwd: this.cwd, env: { ...process.env, CEREYAN_HOME: this.home }, stdio: "ignore", detached: true },
+      // The agent payments example crashes its engine twice; rerun at once.
+      { cwd: this.cwd, env: { ...process.env, CEREYAN_HOME: this.home, CEREYAN_FAST_CRASH_RERUN: "1" }, stdio: "ignore", detached: true },
     );
   }
 
@@ -267,6 +268,53 @@ async function seed(demo) {
   return { flows, etl };
 }
 
+// The two agent examples: a support run paused on a refund approval, and a payments
+// run that crashed twice (refund recovered by its probe, then the email interrupted)
+// and whose third run asks, through `settle`, whether the email went out.
+async function seedAgents(demo, flows) {
+  if (!flows.support_ticket || !flows.refund_ticket) {
+    console.warn("agent examples not registered (is the pydantic-ai extra installed?); skipping their images");
+    return null;
+  }
+  const support = await demo.request("POST", `/api/flows/${flows.support_ticket.id}/runs`, { parameters: {} });
+  const first = await demo.request("POST", `/api/flows/${flows.refund_ticket.id}/runs`, { parameters: {} });
+  const deadline = Date.now() + 120_000;
+  const runs = async () => (await demo.get("/api/runs?flow=refund_ticket&limit=20")).items;
+  let second, third;
+  while (Date.now() < deadline) {
+    const all = await runs();
+    second = all.find((r) => r.created_by === `crash:${first.id}`);
+    third = second && all.find((r) => r.created_by === `crash:${second.id}`);
+    const supportState = (await demo.get(`/api/runs/${support.id}`)).state;
+    // An agent's in-doubt call is asked by `settle` through `wait_for_input`: a plain Paused question.
+    if (third?.state.type === "Paused" && supportState.type === "Paused") break;
+    await sleep(500);
+  }
+  if (third?.state.type !== "Paused") throw new Error(`the payments run did not pause (third: ${JSON.stringify(third?.state)})`);
+  const tasks = await demo.get(`/api/runs/${second.id}/tasks`);
+  const refund = tasks.find((t) => t.dynamic_key.includes("call_tool:refund") && t.state.name === "Recovered");
+  return { support: support.id, first: first.id, second: second.id, third: third.id, refundTask: refund?.id };
+}
+
+async function waitRun(base, id, type) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const run = await (await fetch(`${base}/api/runs/${id}`)).json();
+    if (run.state.type === type) return run;
+    await sleep(300);
+  }
+  throw new Error(`run ${id} did not reach ${type}`);
+}
+
+async function answer(base, id, input) {
+  const r = await fetch(`${base}/api/runs/${id}/resume`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ input }),
+  });
+  if (!r.ok) throw new Error(`resume ${id}: ${r.status} ${await r.text()}`);
+}
+
 // ---------------------------------------------------------------- the browser
 
 class Browser {
@@ -357,6 +405,8 @@ class Browser {
 
   async capture(file) {
     const name = path.basename(file);
+    // A form taking focus can scroll the page; every picture starts at the top.
+    await this.eval(`window.scrollTo(0, 0); document.querySelectorAll('main, main *').forEach((e) => { if (e.scrollTop) e.scrollTop = 0; }); true`);
     await sleep(900); // let charts, fonts, and popovers settle
     const { data } = await this.send("Page.captureScreenshot", {
       format: "png",
@@ -389,7 +439,7 @@ const rows = (n) => `document.querySelectorAll('main tbody tr').length >= ${n}`;
 const press = (el) =>
   `(${el}).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))`;
 
-function images({ base, flows, etl }) {
+function images({ base, flows, etl, demo }) {
   const runPage = `${base}/runs/${etl.id}`;
   const flowPage = `${base}/flows/${flows.daily_etl.id}`;
   return {
@@ -484,6 +534,9 @@ function images({ base, flows, etl }) {
       await b.go(`${base}/settings`, "light");
       await b.until("document.querySelector('main').innerText.includes('Engines')", "the engine pool");
     },
+    // Seeded only when their first picture is taken, so the pages captured
+    // before them show the same history as without the agent examples.
+    ...(flows.support_ticket && flows.refund_ticket ? agentImages(base, () => seedAgents(demo, flows)) : {}),
     queue: async (b) => {
       // Last, so its runs for later appear on no other page: three runs join the line soon.
       for (const [name, minutes] of [["etl", 4], ["daily_etl", 18], ["sales", 42]]) {
@@ -515,6 +568,51 @@ function images({ base, flows, etl }) {
   };
 }
 
+// In order: each answers its run's question only after the picture of the question.
+function agentImages(base, seedOnce) {
+  const rail = (text) => `document.querySelector('[data-testid=task-rail]')?.innerText.includes(${JSON.stringify(text)})`;
+  let seeded;
+  const runs = async () => (seeded ??= seedOnce());
+  let agents;
+  return {
+    "agent-approval": async (b) => {
+      agents = await runs();
+      await b.go(`${base}/runs/${agents.support}`, "light");
+      await b.until("document.querySelector('[data-testid=paused-banner] [data-testid=run-form]')", "the approval form");
+    },
+    "agent-run": async (b) => {
+      agents = await runs();
+      await answer(base, agents.support, { approve: true });
+      await waitRun(base, agents.support, "Completed");
+      await b.go(`${base}/runs/${agents.support}`, "light");
+      await b.until(rail("Replayed"), "replayed units");
+    },
+    "agent-crashed": async (b) => {
+      agents = await runs();
+      await b.go(`${base}/runs/${agents.first}`, "light");
+      await b.until(rail("Interrupted"), "the interrupted refund");
+    },
+    "agent-recovered": async (b) => {
+      agents = await runs();
+      await b.go(`${base}/runs/${agents.second}`, "light");
+      await b.until(rail("Recovered"), "the recovered refund");
+      await b.until("document.querySelector('[data-testid=log-list]')?.innerText.includes('recovered by its probe')", "the recovery in the log");
+    },
+    "agent-in-doubt": async (b) => {
+      agents = await runs();
+      await b.go(`${base}/runs/${agents.third}`, "light");
+      await b.until("document.querySelector('[data-testid=paused-banner] select')", "the in-doubt form");
+      // Show the answer about to be given: the action set to "happened".
+      await b.eval(`(() => {
+        const select = document.querySelector('[data-testid=paused-banner] select');
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, 'happened');
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      })()`);
+    },
+  };
+}
+
 const cleanups = [];
 
 // ---------------------------------------------------------------- main
@@ -526,7 +624,7 @@ try {
   await demo.ready();
   console.log(`seeding ${demo.base}`);
   const seeded = await seed(demo);
-  const all = images({ base: demo.base, ...seeded });
+  const all = images({ base: demo.base, demo, ...seeded });
   const unknown = [...only].filter((n) => !(n in all));
   if (unknown.length) throw new Error(`unknown image: ${unknown.join(", ")}; known: ${Object.keys(all).join(", ")}`);
   await browser.open();
