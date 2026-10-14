@@ -72,14 +72,19 @@ pub enum StateName {
     TimedOut,
     Cached,
     Replayed,
+    /// A task run completed from the outcome of an interrupted `once` call,
+    /// found by its probe or given by a person, without executing its body.
+    Recovered,
     Skipped,
     Sleeping,
     AwaitingEvent,
     AwaitingTarget,
+    /// A run asking whether an interrupted `once` call took effect.
+    InDoubt,
 }
 
 impl StateName {
-    pub const ALL: [StateName; 11] = [
+    pub const ALL: [StateName; 13] = [
         StateName::Late,
         StateName::AwaitingRetry,
         StateName::AwaitingResource,
@@ -87,10 +92,12 @@ impl StateName {
         StateName::TimedOut,
         StateName::Cached,
         StateName::Replayed,
+        StateName::Recovered,
         StateName::Skipped,
         StateName::Sleeping,
         StateName::AwaitingEvent,
         StateName::AwaitingTarget,
+        StateName::InDoubt,
     ];
 
     pub fn state_type(self) -> StateType {
@@ -100,10 +107,13 @@ impl StateName {
             }
             StateName::Retrying => StateType::Running,
             StateName::TimedOut => StateType::Failed,
-            StateName::Cached | StateName::Replayed | StateName::Skipped => StateType::Completed,
-            StateName::Sleeping | StateName::AwaitingEvent | StateName::AwaitingTarget => {
-                StateType::Paused
+            StateName::Cached | StateName::Replayed | StateName::Recovered | StateName::Skipped => {
+                StateType::Completed
             }
+            StateName::Sleeping
+            | StateName::AwaitingEvent
+            | StateName::AwaitingTarget
+            | StateName::InDoubt => StateType::Paused,
         }
     }
 
@@ -116,10 +126,12 @@ impl StateName {
             StateName::TimedOut => "TimedOut",
             StateName::Cached => "Cached",
             StateName::Replayed => "Replayed",
+            StateName::Recovered => "Recovered",
             StateName::Skipped => "Skipped",
             StateName::Sleeping => "Sleeping",
             StateName::AwaitingEvent => "AwaitingEvent",
             StateName::AwaitingTarget => "AwaitingTarget",
+            StateName::InDoubt => "InDoubt",
         }
     }
 

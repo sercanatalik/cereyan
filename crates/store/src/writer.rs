@@ -202,6 +202,8 @@ pub struct CreateTaskRun {
     pub parents: Vec<Id>,
     /// Which execution of the run's body this task run belongs to.
     pub pass: i64,
+    /// A `once` task (recorded in `task_run_once`).
+    pub once: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,6 +236,9 @@ pub enum ReportEvent {
         /// though every task run belonged to the first execution.
         #[serde(default)]
         pass: i64,
+        /// A `once` task; absent from older engines, which had none.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        once: bool,
     },
     TaskRunTransition {
         seq: i64,
@@ -1534,6 +1539,12 @@ fn create_task_run(conn: &Connection, t: &CreateTaskRun) -> Result<(i64, Id)> {
             )
             .unwrap_or(0)
         });
+    if t.once && row_id != 0 {
+        conn.execute(
+            "INSERT OR IGNORE INTO task_run_once (task_run_id) VALUES (?1)",
+            params![row_id],
+        )?;
+    }
     Ok((row_id, id))
 }
 
@@ -1794,6 +1805,7 @@ fn apply_report(conn: &Connection, run_id: i64, events: Vec<ReportEvent>) -> Res
                     dynamic_key,
                     parents,
                     pass,
+                    once,
                     ..
                 } => {
                     remember_before(conn, external_id, &mut before);
@@ -1807,6 +1819,7 @@ fn apply_report(conn: &Connection, run_id: i64, events: Vec<ReportEvent>) -> Res
                             external_id: Some(*external_id),
                             parents: parents.clone(),
                             pass: *pass,
+                            once: *once,
                         },
                     )?;
                     ext_cache.insert(*external_id, Some(row_id));
@@ -2014,6 +2027,7 @@ fn delete_expired_runs(
     conn.execute_batch(&format!(
         "DELETE FROM kv WHERE key IN (SELECT 'run.input:' || id FROM run WHERE id IN ({ids}));
          DELETE FROM kv WHERE key IN (SELECT 'run.effects:' || id FROM run WHERE id IN ({ids}));
+         DELETE FROM kv WHERE key IN (SELECT 'run.lineage:' || id FROM run WHERE id IN ({ids}));
          DELETE FROM run WHERE id IN ({ids});"
     ))?;
     Ok(rows)
@@ -2099,6 +2113,10 @@ fn delete_flows(conn: &Connection, flow_ids: &[i64]) -> Result<DeletedCounts> {
         [],
     )?;
     conn.execute(
+        &format!("DELETE FROM kv WHERE key IN (SELECT 'run.lineage:' || id FROM run WHERE flow_id IN ({ids}))"),
+        [],
+    )?;
+    conn.execute(
         &format!("DELETE FROM expectation WHERE flow_id IN ({ids}) OR run_id IN ({runs})"),
         [],
     )?;
@@ -2131,6 +2149,7 @@ fn reset(conn: &Connection, scope: ResetScope, live_flows: &[i64]) -> Result<Del
          DELETE FROM backfill;
          DELETE FROM kv WHERE key LIKE 'run.input:%';
          DELETE FROM kv WHERE key LIKE 'run.effects:%';
+         DELETE FROM kv WHERE key LIKE 'run.lineage:%';
          UPDATE rule SET fire_count = 0, last_fired = NULL;",
     )?;
     if scope == ResetScope::Everything {

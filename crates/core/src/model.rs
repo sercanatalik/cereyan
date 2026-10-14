@@ -161,6 +161,15 @@ pub struct TaskRun {
     /// Hash of the bound arguments, compared on replay.
     #[serde(default)]
     pub input_hash: Option<String>,
+    /// A `once` task: its effect must not repeat silently, so the engine
+    /// reports it ahead and an interrupted call is in doubt.
+    #[serde(default)]
+    pub once: bool,
+    /// The key an outside system can deduplicate this call's effect on, as the
+    /// task saw it in `cereyan.runtime.task_run.effect_key`. Only the task run
+    /// detail endpoint fills it in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect_key: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

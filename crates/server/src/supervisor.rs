@@ -632,6 +632,13 @@ pub struct WorkItem {
     /// engine skips them instead of performing them again.
     #[serde(default)]
     pub effects: Vec<cereyan_store::EffectRow>,
+    /// The external id of the run that started this logical attempt; every
+    /// task call's effect key derives from it.
+    #[serde(default)]
+    pub lineage: String,
+    /// `once` calls an earlier run of the lineage started and never finished.
+    #[serde(default)]
+    pub in_doubt: Vec<String>,
     /// A forced (restated) run: the engine ignores targets, caches and checkpoints.
     #[serde(default)]
     pub force: bool,

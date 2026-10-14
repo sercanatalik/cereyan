@@ -89,6 +89,7 @@ pub fn task_run_event_name(t: &TaskRun) -> Option<EventName> {
         (_, "Skipped") => EventName::TaskRunSkipped,
         (_, "Cached") => EventName::TaskRunCached,
         (_, "Replayed") => EventName::TaskRunReplayed,
+        (_, "Recovered") => EventName::TaskRunRecovered,
         (StateType::Running, _) => EventName::TaskRunRunning,
         (StateType::Completed, _) => EventName::TaskRunCompleted,
         (StateType::Failed, _) => EventName::TaskRunFailed,

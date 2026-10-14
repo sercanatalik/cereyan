@@ -964,6 +964,15 @@ pub async fn retry_inner(
         Some((original.id, original.attempt + 1)),
     )
     .await?;
+    if from != "start" {
+        // The retry continues the original's logical attempt: its task calls
+        // keep their effect keys, and its `once` calls left in doubt stay so.
+        let (root, _) = state.store.lineage(original.id)?;
+        state.store.kv_set(
+            &cereyan_store::lineage_key(run.id),
+            &serde_json::json!({"root": root, "from": original.id}).to_string(),
+        )?;
+    }
     if !effects.is_empty() {
         state.store.kv_set(
             &cereyan_store::effect_seed_key(run.id),

@@ -2434,6 +2434,7 @@ Row counts for the Data tab and the reset dialog.
 | `crash_count` | integer (int32) | yes |  |
 | `created_at` | [`i64`](#i64) | yes |  |
 | `dynamic_key` | string | yes |  |
+| `effect_key` | string or null | no | The key an outside system can deduplicate this call's effect on, as the task saw it in `cereyan.runtime.task_run.effect_key`. Only the task run detail endpoint fills it in. |
 | `end_time` | null or [`i64`](#i64) | no |  |
 | `external_id` | [`Id`](#id) | yes |  |
 | `failure_count` | integer (int32) | yes |  |
@@ -2442,6 +2443,7 @@ Row counts for the Data tab and the reset dialog.
 | `id` | integer (int64) | yes |  |
 | `input_hash` | string or null | no | Hash of the bound arguments, compared on replay. |
 | `name` | string | yes |  |
+| `once` | boolean | no | A `once` task: its effect must not repeat silently, so the engine reports it ahead and an interrupted call is in doubt. |
 | `parents` | [`Id`](#id)[] | no | External ids of task runs this one waited on (futures and wait_for). |
 | `pass` | integer (int64) | no | Which execution of the run's body created this task run: 0 for the first, the next for a resume or an in-process flow retry. Dynamic keys restart with each pass, so the pass tells repeated calls apart. |
 | `project` | string | no |  |
@@ -2606,8 +2608,10 @@ Work handed to an engine.
 | `external_id` | string | yes |  |
 | `flow` | string | yes |  |
 | `force` | boolean | no | A forced (restated) run: the engine ignores targets, caches and checkpoints. |
+| `in_doubt` | array of string | no | `once` calls an earlier run of the lineage started and never finished. |
 | `kind` | string | no | `run`, `hooks`, or `bulk_complete`. |
 | `lease` | integer (int64) | no | The hand-off this execution belongs to. The engine sends it back as `X-Cereyan-Lease` on reports, heartbeats and transitions; an older lease is refused, so a run rerun elsewhere is not also finished here. |
+| `lineage` | string | no | The external id of the run that started this logical attempt; every task call's effect key derives from it. |
 | `options` | object | yes |  |
 | `parameters` | object | yes |  |
 | `pass` | integer (int64) | no | Which execution of the run's body this is: 0 the first time, the next after a resume. The engine counts its own retries up from here and reports it with every task run it creates. |

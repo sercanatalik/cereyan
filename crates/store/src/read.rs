@@ -145,6 +145,55 @@ pub fn effect_seed_key(run_id: i64) -> String {
     format!("run.effects:{run_id}")
 }
 
+/// kv key marking a retry from failure as continuing its original's lineage:
+/// `{"root": <lineage root run id>, "from": <the run it retried>}`.
+pub fn lineage_key(run_id: i64) -> String {
+    format!("run.lineage:{run_id}")
+}
+
+#[derive(Deserialize)]
+struct LineageMark {
+    root: i64,
+    from: i64,
+}
+
+fn lineage_mark(conn: &Connection, run_id: i64) -> Result<Option<LineageMark>> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value FROM kv WHERE key = ?1",
+            [lineage_key(run_id)],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(raw.and_then(|text| serde_json::from_str(&text).ok()))
+}
+
+/// The run that started `run_id`'s logical attempt: the first run of its crash
+/// chain, or what a retry from failure recorded it continues.
+fn lineage_root(conn: &Connection, run_id: i64) -> Result<i64> {
+    let first = *crash_chain(conn, run_id)?.last().unwrap_or(&run_id);
+    Ok(lineage_mark(conn, first)?.map(|m| m.root).unwrap_or(first))
+}
+
+/// Every run of `run_id`'s lineage up to it: its crash chain and, through a
+/// retry from failure, the lineage of the run it retried.
+fn lineage_runs(conn: &Connection, run_id: i64) -> Result<Vec<i64>> {
+    let mut out = Vec::new();
+    let mut next = Some(run_id);
+    while let Some(id) = next.take() {
+        if out.len() > 200 {
+            break;
+        }
+        let chain = crash_chain(conn, id)?;
+        let first = *chain.last().unwrap_or(&id);
+        out.extend(chain);
+        next = lineage_mark(conn, first)?
+            .map(|m| m.from)
+            .filter(|f| !out.contains(f));
+    }
+    Ok(out)
+}
+
 /// Skip rows per schedule id, as `list_skip_rows` returns them for one.
 pub type SkipRowsBySchedule = std::collections::HashMap<i64, Vec<(i64, i64, String)>>;
 
@@ -1268,6 +1317,54 @@ impl Store {
             let mut out: Vec<Checkpoint> = latest.into_values().collect();
             out.sort_by(|a, b| a.dynamic_key.cmp(&b.dynamic_key));
             Ok(out)
+        })
+    }
+
+    /// The lineage root of `run_id` and its external id, from which every task
+    /// call's effect key is derived.
+    pub fn lineage(&self, run_id: i64) -> Result<(i64, Id)> {
+        self.with_reader(|conn| {
+            let root = lineage_root(conn, run_id)?;
+            let blob: Vec<u8> =
+                conn.query_row("SELECT external_id FROM run WHERE id = ?1", [root], |r| {
+                    r.get(0)
+                })?;
+            Ok((
+                root,
+                Id::from_bytes(&blob).unwrap_or_else(cereyan_core::new_id),
+            ))
+        })
+    }
+
+    /// The `once` calls `run_id` must not execute silently: dynamic keys that an
+    /// earlier run of its lineage started (reached Running) and never finished,
+    /// and that no run of the lineage completed.
+    pub fn in_doubt(&self, run_id: i64) -> Result<Vec<String>> {
+        self.with_reader(|conn| {
+            let runs: Vec<i64> = lineage_runs(conn, run_id)?
+                .into_iter()
+                .filter(|id| *id != run_id)
+                .collect();
+            if runs.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut stmt = conn.prepare_cached(
+                "SELECT DISTINCT t.dynamic_key FROM task_run t
+                 JOIN task_run_once o ON o.task_run_id = t.id
+                 WHERE t.run_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?1))
+                   AND t.start_time IS NOT NULL
+                   AND (t.state_type = 'Running'
+                        OR (t.state_type = 'Scheduled' AND t.state_name = 'AwaitingRetry'))
+                   AND NOT EXISTS (
+                       SELECT 1 FROM task_run c
+                       WHERE c.run_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?1))
+                         AND c.dynamic_key = t.dynamic_key AND c.state_type = 'Completed')
+                 ORDER BY t.dynamic_key",
+            )?;
+            let keys = stmt
+                .query_map([chain_json(&runs)], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(keys)
         })
     }
 

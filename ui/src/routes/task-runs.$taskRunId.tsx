@@ -31,6 +31,11 @@ function TaskRunDetail() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-lg font-semibold">{t.dynamic_key}</h1>
         <StateBadge state={t.state} />
+        {t.once ? (
+          <span className="rounded border px-1.5 text-xs text-muted-foreground" data-testid="once-badge">
+            once
+          </span>
+        ) : null}
         <Link
           to="/runs/$runId"
           params={{ runId: String(t.run_id) }}
@@ -55,6 +60,24 @@ function TaskRunDetail() {
         <KeyValueList
           items={[
             { label: "Task key", value: t.task_key },
+            ...(t.effect_key
+              ? [
+                  {
+                    label: "Effect key",
+                    value: (
+                      <button
+                        type="button"
+                        className="font-mono text-xs hover:underline"
+                        title="Copy: pass it as the idempotency key of the API this task calls"
+                        data-testid="effect-key"
+                        onClick={() => void navigator.clipboard?.writeText(t.effect_key ?? "")}
+                      >
+                        {t.effect_key}
+                      </button>
+                    ),
+                  },
+                ]
+              : []),
             { label: "Flow", value: `${t.project}/${t.flow_name}` },
             { label: "Failures", value: String(t.failure_count) },
             { label: "Created", value: formatTime(t.created_at) },

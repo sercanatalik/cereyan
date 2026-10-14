@@ -444,6 +444,7 @@ function RunDetail() {
             selectedId={selectedTask}
             onSelect={setSelectedTask}
             onRerunFrom={active ? undefined : (t) => retry.mutate(t.dynamic_key)}
+            runCrashed={run.data?.state.type === "Crashed"}
             className="min-h-0 flex-1"
           />
         </div>

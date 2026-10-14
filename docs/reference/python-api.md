@@ -29,7 +29,7 @@ Everything below is importable from `cereyan` unless a module path is shown. Thi
 | Attribute | Type | Carries |
 |---|---|---|
 | `cereyan.runtime.run` | `RunContext` | `id`, `external_id`, `name`, `flow`, `parameters`, and `flow_name` and `project` |
-| `cereyan.runtime.task_run` | `TaskRunContext` | `id` (the external UUID), `name`, `task_key`, `dynamic_key` |
+| `cereyan.runtime.task_run` | `TaskRunContext` | `id` (the external UUID), `name`, `task_key`, `dynamic_key`, and `effect_key`, the call's [idempotency key](../guides/side-effects-once.md) |
 | `cereyan.runtime.flow` | `Flow` | The flow of the current run |
 
 ```python
@@ -136,6 +136,12 @@ assert report().endswith("/record-0")   # "report#1: <run name>/record-0"
 ::: cereyan.Snooze
 
 ::: cereyan.WaitTimeout
+
+## Task effects
+
+`cereyan.NOT_DONE` is what a `once` task's `probe` returns when the effect did not happen; any other value is the task's result. See [Run a side effect once](../guides/side-effects-once.md).
+
+::: cereyan.TaskInDoubt
 
 ## Task state
 

@@ -28,7 +28,7 @@ class Backend:
         raise NotImplementedError
 
     def create_task_run(self, name: str, task_key: str, dynamic_key: str, parents: list[str] | None = None,
-                        pass_: int = 0) -> tuple[str, int | None]:
+                        pass_: int = 0, once: bool = False) -> tuple[str, int | None]:
         raise NotImplementedError
 
     def checkpoints(self) -> dict[str, dict]:
@@ -38,6 +38,19 @@ class Backend:
     def effects(self) -> list[dict]:
         """The effect journal of the run's earlier attempts: ``slot``, ``hash``, ``ref``, ``run_id``."""
         return []
+
+    def lineage(self) -> str | None:
+        """The external id of the run's lineage root, or None when unknown."""
+        return None
+
+    def in_doubt(self) -> list[str]:
+        """Dynamic keys of ``once`` calls an earlier run of the lineage left unfinished."""
+        return []
+
+    def report_ahead(self) -> bool:
+        """Send everything reported so far and wait until it is stored; False when it could not be."""
+        self.flush()
+        return True
 
     def task_state_get(self, scope: str, key: str) -> str | None:
         raise NotImplementedError
@@ -175,13 +188,20 @@ class StoreBackend(Backend):
                 settle_expectations_offline(self.store, self.run_id)
         return state
 
-    def create_task_run(self, name, task_key, dynamic_key, parents=None, pass_=0):
-        row_id, external_id = self.store.create_task_run(self.run_id, name, task_key, dynamic_key, list(parents or []), pass_)
+    def lineage(self) -> str | None:
+        return self.store.lineage(self.run_id)
+
+    def in_doubt(self) -> list[str]:
+        return json.loads(self.store.in_doubt(self.run_id))
+
+    def create_task_run(self, name, task_key, dynamic_key, parents=None, pass_=0, once=False):
+        row_id, external_id = self.store.create_task_run(self.run_id, name, task_key, dynamic_key, list(parents or []),
+                                                         pass_, once)
         self._rows[external_id] = row_id
         return external_id, row_id
 
     _TASK_EVENTS = {("Completed", "Skipped"): "task_run.skipped", ("Completed", "Cached"): "task_run.cached",
-                    ("Completed", "Replayed"): "task_run.replayed",
+                    ("Completed", "Replayed"): "task_run.replayed", ("Completed", "Recovered"): "task_run.recovered",
                     "Running": "task_run.running", "Completed": "task_run.completed", "Failed": "task_run.failed"}
 
     def checkpoints(self) -> dict[str, dict]:
@@ -251,8 +271,11 @@ class ReporterBackend(Backend):
     """Batched reporting to a server through the Rust client."""
 
     def __init__(self, client: _core.Client, run_id: int, report_seq: int = 0,
-                 checkpoints: list[dict] | None = None, effects: list[dict] | None = None) -> None:
+                 checkpoints: list[dict] | None = None, effects: list[dict] | None = None,
+                 lineage: str | None = None, in_doubt: list[str] | None = None) -> None:
         self.client = client
+        self._lineage = lineage or None
+        self._in_doubt = list(in_doubt or [])
         self.run_id = run_id
         self._artifact_ids: dict = {}
         self._checkpoints = {c["dynamic_key"]: c for c in (checkpoints or [])}
@@ -264,6 +287,21 @@ class ReporterBackend(Backend):
 
     def effects(self) -> list[dict]:
         return list(self._effects)
+
+    def lineage(self) -> str | None:
+        return self._lineage
+
+    def in_doubt(self) -> list[str]:
+        return list(self._in_doubt)
+
+    def report_ahead(self) -> bool:
+        # `flush` blocks until the server acknowledged the buffer (it returns the
+        # cancel flag); a report it could not deliver raises.
+        try:
+            self.client.flush(self.run_id)
+        except Exception:  # noqa: BLE001
+            return False
+        return True
 
     def task_state_get(self, scope, key):
         from urllib.parse import urlencode
@@ -301,9 +339,10 @@ class ReporterBackend(Backend):
             raise RunRejected(data.get("reason", "rejected"), data.get("current"))
         return data.get("state", data)
 
-    def create_task_run(self, name, task_key, dynamic_key, parents=None, pass_=0):
+    def create_task_run(self, name, task_key, dynamic_key, parents=None, pass_=0, once=False):
         external_id = _core.new_id()
-        self.client.task_run_created(self.run_id, external_id, name, task_key, dynamic_key, list(parents or []), pass_)
+        self.client.task_run_created(self.run_id, external_id, name, task_key, dynamic_key, list(parents or []), pass_,
+                                     once)
         return external_id, None
 
     def acquire_resources(self, resources: dict, logger):

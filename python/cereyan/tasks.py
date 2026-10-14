@@ -81,9 +81,21 @@ class Task:
         on_completion: Iterable[Callable] = (),
         on_failure: Iterable[Callable] = (),
         on_cancellation: Iterable[Callable] = (),
+        once: bool = False,
+        probe: Callable | None = None,
     ) -> None:
         if _is_async_function(fn):
             raise TypeError(_async_message("task", fn))
+        task_name = name or fn.__name__
+        if probe is not None and not once:
+            raise ValueError(f"task {task_name!r}: probe=... only applies to once=True tasks")
+        if probe is not None and not callable(probe):
+            raise ValueError(f"task {task_name!r}: probe must be callable")
+        if once and int(retries) > 0 and probe is None:
+            raise ValueError(
+                f"task {task_name!r}: once=True with retries needs a probe: an attempt that raised may "
+                "still have taken effect, so the probe decides whether to retry"
+            )
         functools.update_wrapper(self, fn)
         self.fn = fn
         self.name = name or fn.__name__
@@ -108,6 +120,8 @@ class Task:
         self.on_completion = list(on_completion)
         self.on_failure = list(on_failure)
         self.on_cancellation = list(on_cancellation)
+        self.once = bool(once)
+        self.probe = probe
         self.key = f"{fn.__module__}.{fn.__qualname__}"
 
     def __repr__(self) -> str:
@@ -187,6 +201,13 @@ def task(
         on_completion (Iterable[Callable]): Hooks ``hook(task, run, state)`` called after a task run completes.
         on_failure (Iterable[Callable]): Hooks called after a task run fails.
         on_cancellation (Iterable[Callable]): Hooks called after a task run is cancelled.
+        once (bool): The task's effect must not repeat silently. Its start and end are
+            reported to the server before the run moves on, and a call an earlier run
+            started and never finished is in doubt: settled by ``probe``, or asked as a
+            question, instead of executing again.
+        probe (Callable | None): For ``once`` tasks: called with the task's arguments when a
+            call is in doubt, and before each retry. Return the task's result when the
+            effect happened, or ``NOT_DONE`` to execute. Required with ``retries``.
 
     Returns:
         Task: The task wrapping ``fn``.

@@ -3038,6 +3038,12 @@ export interface components {
             crash_count: number;
             created_at: components["schemas"]["i64"];
             dynamic_key: string;
+            /**
+             * @description The key an outside system can deduplicate this call's effect on, as the
+             *     task saw it in `cereyan.runtime.task_run.effect_key`. Only the task run
+             *     detail endpoint fills it in.
+             */
+            effect_key?: string | null;
             end_time?: null | components["schemas"]["i64"];
             external_id: components["schemas"]["Id"];
             /** Format: int32 */
@@ -3050,6 +3056,11 @@ export interface components {
             /** @description Hash of the bound arguments, compared on replay. */
             input_hash?: string | null;
             name: string;
+            /**
+             * @description A `once` task: its effect must not repeat silently, so the engine
+             *     reports it ahead and an interrupted call is in doubt.
+             */
+            once?: boolean;
             /** @description External ids of task runs this one waited on (futures and wait_for). */
             parents?: components["schemas"]["Id"][];
             /**
@@ -3303,6 +3314,8 @@ export interface components {
             flow: string;
             /** @description A forced (restated) run: the engine ignores targets, caches and checkpoints. */
             force?: boolean;
+            /** @description `once` calls an earlier run of the lineage started and never finished. */
+            in_doubt?: string[];
             /** @description `run`, `hooks`, or `bulk_complete`. */
             kind?: string;
             /**
@@ -3312,6 +3325,11 @@ export interface components {
              *     is refused, so a run rerun elsewhere is not also finished here.
              */
             lease?: number;
+            /**
+             * @description The external id of the run that started this logical attempt; every
+             *     task call's effect key derives from it.
+             */
+            lineage?: string;
             options: Record<string, never>;
             parameters: Record<string, never>;
             /**

@@ -248,6 +248,7 @@ fn one_rejected_event_does_not_discard_its_report() {
         dynamic_key: "load-0".into(),
         parents: Vec::new(),
         pass: 0,
+        once: false,
     };
     // Two creations claiming one (run, pass, dynamic key). The second is
     // refused, and the event after it still applies: a whole report used to be

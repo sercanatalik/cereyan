@@ -301,6 +301,7 @@
             "id",
             "input_hash",
             "name",
+            "once",
             "parents",
             "pass",
             "project",

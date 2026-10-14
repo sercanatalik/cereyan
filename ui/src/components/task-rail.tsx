@@ -45,6 +45,7 @@ export function TaskRail({
   selectedId,
   onSelect,
   onRerunFrom,
+  runCrashed,
   className,
 }: {
   tasks: TaskRun[];
@@ -52,6 +53,8 @@ export function TaskRail({
   onSelect: (id: number | undefined) => void;
   /** Offered on a finished run: retry the run from this task onwards. */
   onRerunFrom?: (task: TaskRun) => void;
+  /** The run crashed: a task still Running was interrupted, not running. */
+  runCrashed?: boolean;
   className?: string;
 }) {
   const now = useNow(tasks.some((t) => t.state.name === "AwaitingRetry" || t.state.type === "Running"));
@@ -92,12 +95,23 @@ export function TaskRail({
               >
                 <StateDot type={t.state.type} title={t.state.name} />
                 <span className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium">{t.dynamic_key}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate font-medium">{t.dynamic_key}</span>
+                    {t.once ? (
+                      <span
+                        className="rounded border px-1 text-[10.5px] leading-[14px] text-muted-foreground"
+                        title="A once task: its effect is not repeated silently"
+                        data-testid="once-badge"
+                      >
+                        once
+                      </span>
+                    ) : null}
+                  </span>
                   <span
                     className="text-[11.5px] leading-[15px] text-muted-foreground"
                     data-testid="task-state"
                   >
-                    {stateWords(t.state.name)}
+                    {runCrashed && t.state.type === "Running" ? "Interrupted" : stateWords(t.state.name)}
                   </span>
                   {sub ? (
                     <span

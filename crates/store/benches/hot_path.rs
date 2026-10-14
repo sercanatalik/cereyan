@@ -40,6 +40,7 @@ fn short_task_events(run_id: i64, index: usize, seq: &mut i64) -> Vec<ReportEven
             dynamic_key: format!("noop-{index}"),
             parents: Vec::new(),
             pass: 0,
+            once: false,
         },
         ReportEvent::TaskRunTransition {
             seq: next(),

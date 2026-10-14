@@ -93,7 +93,7 @@ assert load_then_fail() == "loaded orders"
 assert calls == ["orders"]   # the retry replayed the tool call instead of loading again
 ```
 
-Calls are at least once, as with every durable-execution engine: a crash after a tool's effect and before its checkpoint runs the tool again. Give tools that write elsewhere an idempotency key, such as the run's id from `cereyan.runtime.run.external_id` plus the tool call's arguments.
+Calls are at least once, as with every durable-execution engine: a crash after a tool's effect and before its checkpoint runs the tool again. Give tools that write elsewhere an idempotency key: inside a tool, `cereyan.runtime.task_run.effect_key` identifies the call and stays the same in a crash rerun and a retry from failure. The run's own id would not, because a crash rerun is a new run. See [Run a side effect once](side-effects-once.md).
 
 ## Ask a person before a tool runs
 

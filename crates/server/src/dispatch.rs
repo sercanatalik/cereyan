@@ -280,7 +280,10 @@ pub fn after_transition(state: &Arc<AppState>, run: &Run, previous: Option<&Stat
 fn name_is_terminal(name: &str) -> bool {
     match StateType::parse(name) {
         Some(t) => t.is_terminal(),
-        None => matches!(name, "Cached" | "Replayed" | "Skipped" | "TimedOut"),
+        None => matches!(
+            name,
+            "Cached" | "Replayed" | "Recovered" | "Skipped" | "TimedOut"
+        ),
     }
 }
 
@@ -1018,6 +1021,7 @@ mod backfill_completion_tests {
             ("Crashed", true),
             ("Cached", true),
             ("Replayed", true),
+            ("Recovered", true),
             ("Skipped", true),
             ("TimedOut", true),
             ("Pending", false),

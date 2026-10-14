@@ -5,7 +5,8 @@ from __future__ import annotations
 from ._core import StoreLocked, TransitionRejected
 from . import client, runtime
 from .apps import App, get_default_app
-from .exceptions import Abort, CereyanError, ParameterError
+from .exceptions import Abort, CereyanError, ParameterError, TaskInDoubt
+from .effects import NOT_DONE
 from .flows import Flow, flow, Unique
 from .logging import get_run_logger
 from . import artifacts, events, states, task_state
@@ -32,6 +33,8 @@ __all__ = [
     "CachePolicy",
     "Abort",
     "CereyanError",
+    "NOT_DONE",
+    "TaskInDoubt",
     "Continuous",
     "Cron",
     "Future",

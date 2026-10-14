@@ -20,7 +20,8 @@ from .. import _core, context, names
 from .. import masking
 from .. import logging as run_logging
 from ..config import load_project_config
-from ..exceptions import Abort, CereyanError, RunPaused, Snooze
+from .. import effects
+from ..exceptions import Abort, CereyanError, RunPaused, Snooze, TaskInDoubt
 from ..results import _hash_inputs, cache_key, checkpoint_key, encode, result_store
 from ..runners import Future, ThreadRunner, UpstreamFailed, collect_futures, resolve_futures
 from ..schedules import retry_delay_for
@@ -324,6 +325,16 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
             ctx.effects = {}
     else:
         ctx.journal = False
+    # Every task call's effect key derives from the lineage; the `once` calls an
+    # earlier run of it left unfinished must not execute again unsettled.
+    try:
+        ctx.lineage = backend.lineage() or run.external_id
+    except Exception:  # noqa: BLE001 - the run's own id is a lineage of its own
+        ctx.lineage = run.external_id
+    try:
+        ctx.in_doubt = set(backend.in_doubt())
+    except Exception:  # noqa: BLE001
+        ctx.in_doubt = set()
     token = context.set_run(ctx)
     handler = run_logging.install(backend, run.id)
     logger = run_logging.get_run_logger()
@@ -724,19 +735,51 @@ def _write_checkpoint(run: context.RunContext, task, dynamic_key: str, external_
     return {"input_hash": input_hash, "result_ref": key}
 
 
-def _run_task_attempts(run: context.RunContext, task, args: tuple, kwargs: dict, external_id: str, dynamic_key: str) -> Any:
+def _run_task_attempts(run: context.RunContext, task, args: tuple, kwargs: dict, external_id: str, dynamic_key: str,
+                       settled: tuple[str, Any] | None = None) -> Any:
     backend = run.backend
     logger = run_logging.get_run_logger()
-    ctx = context.TaskRunContext(id=external_id, name=task.name, task_key=task.key, dynamic_key=dynamic_key)
+    ctx = context.TaskRunContext(id=external_id, name=task.name, task_key=task.key, dynamic_key=dynamic_key,
+                                 lineage=run.lineage)
     token = context.set_task_run(ctx)
+    once = getattr(task, "once", False)
     lease = None
     try:
         lease = _acquire_resources(run, task, logger)
         backend.transition_task_run(external_id, "Running")
+        if once and not backend.report_ahead():
+            # Unless the server knows the call started, a crash during it would
+            # look like a call that never ran, and the rerun would run it again.
+            raise CereyanError(f"task {dynamic_key} is once=True and its start could not be reported; not executing")
         logger.info("task %s started", dynamic_key)
+        if _in_doubt(run, task, dynamic_key):
+            how = "answer"
+            if settled is None:
+                found = _probe(task, args, kwargs, dynamic_key, logger)
+                if found is effects.NOT_DONE:
+                    settled = ("run_again", None)
+                elif found is not _NO_ANSWER:
+                    settled, how = ("happened", found), "probe"
+            if settled is None:
+                try:
+                    settled = effects.settle(run, task, dynamic_key)
+                except RunPaused:
+                    backend.transition_task_run(external_id, "Cancelled", None, "in doubt: asked", None)
+                    raise
+                except TaskInDoubt as exc:
+                    backend.transition_task_run(external_id, "Failed", None, str(exc), _failure_details(exc))
+                    raise
+            if settled[0] == "happened":
+                return _recover(run, task, args, kwargs, external_id, dynamic_key, settled[1], how, logger)
+            logger.info("task %s was in doubt and runs again", dynamic_key)
         attempt = 0
         while True:
             try:
+                if attempt > 0 and once and task.probe is not None:
+                    # The failed attempt may still have taken effect: ask the probe first.
+                    found = task.probe(*args, **kwargs)
+                    if found is not effects.NOT_DONE:
+                        return _recover(run, task, args, kwargs, external_id, dynamic_key, found, "probe", logger)
                 with run_logging.capture_prints(task.log_prints):
                     result, outcome = _execute_task_body(run, task, args, kwargs, external_id, dynamic_key, logger)
                 if outcome is True:
@@ -781,8 +824,30 @@ def _run_task_attempts(run: context.RunContext, task, args: tuple, kwargs: dict,
                 run_hooks(task.on_failure, task, _run_dict(run), state, logger)
                 raise
     finally:
+        if once:
+            # The outcome reaches the server before the run moves on, so a crash
+            # from here on finds the call finished, not in doubt.
+            try:
+                backend.report_ahead()
+            except Exception:  # noqa: BLE001
+                pass
         _release_resources(run, lease)
         context.reset_task_run(token)
+
+
+_NO_ANSWER = object()
+
+
+def _probe(task, args: tuple, kwargs: dict, dynamic_key: str, logger):
+    """What a `once` task's probe says about an in-doubt call: a result,
+    `NOT_DONE`, or `_NO_ANSWER` when there is no probe or it raised."""
+    if task.probe is None:
+        return _NO_ANSWER
+    try:
+        return task.probe(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - a failing probe means a person decides
+        logger.warning("task %s: probe raised %s; asking instead", dynamic_key, _error_message(exc))
+        return _NO_ANSWER
 
 
 @dataclass
@@ -825,7 +890,8 @@ async def run_async_unit(
     external_id, dynamic_key = _create_task_run(run, unit, [])
     backend = run.backend
     logger = run_logging.get_run_logger()
-    token = context.set_task_run(context.TaskRunContext(id=external_id, name=name, task_key=key, dynamic_key=dynamic_key, unit=True))
+    token = context.set_task_run(context.TaskRunContext(id=external_id, name=name, task_key=key, dynamic_key=dynamic_key,
+                                                        unit=True, lineage=run.lineage))
     try:
         checkpointing = run.flow.checkpoint is not False
         input_hash = input_hash if checkpointing else None
@@ -881,7 +947,8 @@ async def run_async_unit(
 
 def _create_task_run(run: context.RunContext, task, parents: list[str]):
     dynamic_key = run.next_dynamic_key(task.name)
-    external_id, _row = run.backend.create_task_run(task.name, task.key, dynamic_key, parents, run.pass_)
+    external_id, _row = run.backend.create_task_run(task.name, task.key, dynamic_key, parents, run.pass_,
+                                                    getattr(task, "once", False))
     run.backend.transition_task_run(external_id, "Pending")
     return external_id, dynamic_key
 
@@ -898,7 +965,51 @@ def run_task(task, args: tuple, kwargs: dict, wait_for=None) -> Any:
         raise UpstreamFailed(f"upstream task {failed.dynamic_key} failed")
     args = tuple(resolve_futures(a) for a in args)
     kwargs = {k: resolve_futures(v) for k, v in kwargs.items()}
-    return _run_task_attempts(run, task, args, kwargs, external_id, dynamic_key)
+    settled = _settle_on_body(run, task, external_id, dynamic_key)
+    return _run_task_attempts(run, task, args, kwargs, external_id, dynamic_key, settled)
+
+
+def _in_doubt(run: context.RunContext, task, dynamic_key: str) -> bool:
+    return getattr(task, "once", False) and dynamic_key in run.in_doubt
+
+
+def _settle_on_body(run: context.RunContext, task, external_id: str, dynamic_key: str):
+    """Settle an in-doubt call that has no probe before it runs: the answer, or a pause.
+
+    A call with a probe is settled by the probe, on the task's own thread.
+    """
+    if not _in_doubt(run, task, dynamic_key) or task.probe is not None:
+        return None
+    try:
+        return effects.settle(run, task, dynamic_key)
+    except RunPaused:
+        run.backend.transition_task_run(external_id, "Cancelled", None, "in doubt: asked", None)
+        run.backend.report_ahead()
+        raise
+    except TaskInDoubt as exc:
+        run.backend.transition_task_run(external_id, "Failed", None, str(exc), _failure_details(exc))
+        run.backend.report_ahead()
+        raise
+
+
+def _recover(run: context.RunContext, task, args: tuple, kwargs: dict, external_id: str, dynamic_key: str, value: Any,
+             how: str, logger) -> Any:
+    """Complete an in-doubt call from what its probe found or a person answered, without executing.
+
+    The value is checkpointed like a result, so a later crash replays it.
+    """
+    checkpoint = None
+    if run.flow.checkpoint is not False:
+        input_hash = _hash_inputs(_bind_task_values(task, args, kwargs))
+        checkpoint = _write_checkpoint(run, task, dynamic_key, external_id, input_hash, value, logger)
+    details = {"recovered": how}
+    if checkpoint:
+        details["checkpoint"] = checkpoint
+    state = run.backend.transition_task_run(external_id, "Completed", "Recovered",
+                                            f"recovered by {how}", details)
+    logger.info("task %s recovered by its %s without executing", dynamic_key, how)
+    run_hooks(task.on_completion, task, _run_dict(run), state, logger)
+    return value
 
 
 def _wait_upstream(futures: list[Future]):
@@ -916,6 +1027,9 @@ def submit_task(task, args: tuple, kwargs: dict, wait_for=None) -> Future:
     assert run is not None and run.backend is not None and run.runner is not None
     upstream = collect_futures(args, kwargs, wait_for)
     external_id, dynamic_key = _create_task_run(run, task, [f.external_id for f in upstream])
+    # An in-doubt call without a probe is settled here, on the flow body's
+    # thread, where a question can pause the run; the task's own thread cannot.
+    settled = _settle_on_body(run, task, external_id, dynamic_key)
     future = Future(task, external_id, dynamic_key)
     future._runner = run.runner
     run.futures.append(future)
@@ -927,7 +1041,7 @@ def submit_task(task, args: tuple, kwargs: dict, wait_for=None) -> Future:
             raise UpstreamFailed(f"upstream task {failed.dynamic_key} failed")
         resolved_args = tuple(resolve_futures(a) for a in args)
         resolved_kwargs = {k: resolve_futures(v) for k, v in kwargs.items()}
-        return _run_task_attempts(run, task, resolved_args, resolved_kwargs, external_id, dynamic_key)
+        return _run_task_attempts(run, task, resolved_args, resolved_kwargs, external_id, dynamic_key, settled)
 
     inner = run.runner.submit(body)
 

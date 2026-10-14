@@ -417,6 +417,21 @@ test("retry line and task rail selection", () => {
   expect(onSelect).toHaveBeenCalledWith(101);
 });
 
+test("tasks rail marks once tasks and calls a crashed run's running task interrupted", () => {
+  const tasks = [
+    {
+      ...TASKS[0],
+      id: 201,
+      dynamic_key: "charge-0",
+      once: true,
+      state: { type: "Running", name: "Running", timestamp: 1 },
+    },
+  ];
+  render(<TaskRail tasks={tasks as any} selectedId={undefined} onSelect={vi.fn()} runCrashed />);
+  expect(screen.getByTestId("once-badge")).toHaveTextContent("once");
+  expect(screen.getByTestId("task-state")).toHaveTextContent("Interrupted");
+});
+
 test("run page: tasks rail filters logs, Delete lives in the overflow menu", async () => {
   mount("/runs/10");
   await screen.findByTestId("run-header");

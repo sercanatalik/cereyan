@@ -17,9 +17,9 @@ pub use home::resolve_home;
 pub use manage::{ProjectCounts, ProjectRow, TableCounts, BACKUP_DIR};
 pub use migrations::latest_version as latest_schema_version;
 pub use read::{
-    checkpoint_seed_key, effect_seed_key, ArtifactFilter, ArtifactsPage, Checkpoint, EffectRow,
-    EventFilter, EventsPage, FlowLabel, LatestRunMark, QueueRun, RecentRun, RunEventContext,
-    ScheduleRunMark, TaskStateRow, TimelineRunRow,
+    checkpoint_seed_key, effect_seed_key, lineage_key, ArtifactFilter, ArtifactsPage, Checkpoint,
+    EffectRow, EventFilter, EventsPage, FlowLabel, LatestRunMark, QueueRun, RecentRun,
+    RunEventContext, ScheduleRunMark, TaskStateRow, TimelineRunRow,
 };
 pub use read::{ListRunsFilter, ListTaskRunsFilter, LogFilter, LogsPage, RunsPage, TaskRunsPage};
 pub use workers::{HostFlowCounts, WorkerRegistration};
@@ -679,6 +679,7 @@ impl Store {
             external_id: None,
             parents: Vec::new(),
             pass,
+            once: false,
         })
     }
 

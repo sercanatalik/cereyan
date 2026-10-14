@@ -53,6 +53,7 @@ pub enum EventName {
     TaskRunSkipped,
     TaskRunCached,
     TaskRunReplayed,
+    TaskRunRecovered,
     FlowRegistered,
     FlowDisabled,
     FlowEnabled,
@@ -77,7 +78,7 @@ pub enum EventName {
 }
 
 impl EventName {
-    pub const ALL: [EventName; 43] = [
+    pub const ALL: [EventName; 44] = [
         EventName::RunScheduled,
         EventName::RunPending,
         EventName::RunRunning,
@@ -99,6 +100,7 @@ impl EventName {
         EventName::TaskRunSkipped,
         EventName::TaskRunCached,
         EventName::TaskRunReplayed,
+        EventName::TaskRunRecovered,
         EventName::FlowRegistered,
         EventName::FlowDisabled,
         EventName::FlowEnabled,
@@ -146,6 +148,7 @@ impl EventName {
             EventName::TaskRunSkipped => "task_run.skipped",
             EventName::TaskRunCached => "task_run.cached",
             EventName::TaskRunReplayed => "task_run.replayed",
+            EventName::TaskRunRecovered => "task_run.recovered",
             EventName::FlowRegistered => "flow.registered",
             EventName::FlowDisabled => "flow.disabled",
             EventName::FlowEnabled => "flow.enabled",
@@ -196,7 +199,8 @@ impl EventName {
             | EventName::TaskRunCancelled
             | EventName::TaskRunSkipped
             | EventName::TaskRunCached
-            | EventName::TaskRunReplayed => "task_run",
+            | EventName::TaskRunReplayed
+            | EventName::TaskRunRecovered => "task_run",
             EventName::FlowRegistered
             | EventName::FlowDisabled
             | EventName::FlowEnabled
@@ -244,6 +248,7 @@ impl EventName {
             EventName::TaskRunSkipped => "The task's `output=` target already existed",
             EventName::TaskRunCached => "The task returned a persisted result",
             EventName::TaskRunReplayed => "The task returned the checkpoint an earlier attempt of the run recorded, without executing",
+            EventName::TaskRunRecovered => "An interrupted `once` task completed from what its probe found, or what a person answered, without executing",
             EventName::FlowRegistered => "The server registered the flow at start or on handoff",
             EventName::FlowDisabled => "`disable_after` tripped; the flow's schedules are paused until `until`",
             EventName::FlowEnabled => "The disable window ended and the schedules resumed",
@@ -320,7 +325,8 @@ impl EventName {
             | EventName::TaskRunCancelled
             | EventName::TaskRunSkipped
             | EventName::TaskRunCached
-            | EventName::TaskRunReplayed => {
+            | EventName::TaskRunReplayed
+            | EventName::TaskRunRecovered => {
                 &["task", "dynamic_key", "state", "message", "flow", "project"]
             }
             EventName::FlowRegistered => &["flow", "project", "module"],
@@ -555,6 +561,7 @@ mod tests {
             "task_run.skipped",
             "task_run.cached",
             "task_run.replayed",
+            "task_run.recovered",
             "flow.registered",
             "flow.disabled",
             "flow.enabled",

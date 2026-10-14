@@ -4856,6 +4856,13 @@
           "dynamic_key": {
             "type": "string"
           },
+          "effect_key": {
+            "description": "The key an outside system can deduplicate this call's effect on, as the\ntask saw it in `cereyan.runtime.task_run.effect_key`. Only the task run\ndetail endpoint fills it in.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "end_time": {
             "oneOf": [
               {
@@ -4894,6 +4901,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "once": {
+            "description": "A `once` task: its effect must not repeat silently, so the engine\nreports it ahead and an interrupted call is in doubt.",
+            "type": "boolean"
           },
           "parents": {
             "description": "External ids of task runs this one waited on (futures and wait_for).",
@@ -5455,6 +5466,13 @@
             "description": "A forced (restated) run: the engine ignores targets, caches and checkpoints.",
             "type": "boolean"
           },
+          "in_doubt": {
+            "description": "`once` calls an earlier run of the lineage started and never finished.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "kind": {
             "description": "`run`, `hooks`, or `bulk_complete`.",
             "type": "string"
@@ -5463,6 +5481,10 @@
             "description": "The hand-off this execution belongs to. The engine sends it back as\n`X-Cereyan-Lease` on reports, heartbeats and transitions; an older lease\nis refused, so a run rerun elsewhere is not also finished here.",
             "format": "int64",
             "type": "integer"
+          },
+          "lineage": {
+            "description": "The external id of the run that started this logical attempt; every\ntask call's effect key derives from it.",
+            "type": "string"
           },
           "options": {
             "type": "object"

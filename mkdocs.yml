@@ -167,6 +167,7 @@ nav:
           - Retry, time out and survive crashes: guides/retries-timeouts-crashes.md
           - Run code on state changes: guides/state-hooks.md
           - Make reruns idempotent with targets: guides/idempotent-reruns.md
+          - Run a side effect once: guides/side-effects-once.md
           - Cache task results: guides/cache-results.md
       - Running work:
           - Organise flows into projects and groups: guides/organise-projects-and-groups.md

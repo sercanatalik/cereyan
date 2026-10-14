@@ -228,7 +228,8 @@ impl Store {
     }
 
     /// Returns (task_run_id, external_id).
-    #[pyo3(signature = (run_id, name, task_key, dynamic_key, parents=None, pass_=0))]
+    #[pyo3(signature = (run_id, name, task_key, dynamic_key, parents=None, pass_=0, once=false))]
+    #[allow(clippy::too_many_arguments)]
     fn create_task_run(
         &self,
         py: Python<'_>,
@@ -238,6 +239,7 @@ impl Store {
         dynamic_key: String,
         parents: Option<Vec<String>>,
         pass_: i64,
+        once: bool,
     ) -> PyResult<(i64, String)> {
         let store = self.inner.clone();
         let parents: Vec<cereyan_core::Id> = parents
@@ -255,6 +257,7 @@ impl Store {
                     external_id: None,
                     parents,
                     pass: pass_,
+                    once,
                 })
             })
             .map_err(to_py)?;
@@ -711,6 +714,20 @@ impl Store {
         let patch = patch.to_string();
         py.detach(move || store.merge_run_attributes(run_id, &patch, effect))
             .map_err(to_py)
+    }
+
+    /// The external id of `run_id`'s lineage root, from which effect keys derive.
+    fn lineage(&self, py: Python<'_>, run_id: i64) -> PyResult<String> {
+        let store = self.inner.clone();
+        let (_, ext) = py.detach(move || store.lineage(run_id)).map_err(to_py)?;
+        Ok(ext.to_string())
+    }
+
+    /// The `once` calls `run_id` must not execute silently, as a JSON list.
+    fn in_doubt(&self, py: Python<'_>, run_id: i64) -> PyResult<String> {
+        let store = self.inner.clone();
+        let keys = py.detach(move || store.in_doubt(run_id)).map_err(to_py)?;
+        json(&keys)
     }
 
     /// The effect journal a new attempt of `run_id` consults, as a JSON list.

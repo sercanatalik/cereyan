@@ -44,6 +44,13 @@ class RunContext:
     #: Whether flow-body effects are journaled and skipped at all: off for
     #: ``checkpoint=False`` flows and forced runs, which repeat everything.
     journal: bool = True
+    #: The external id of the run that started this logical attempt: the first
+    #: run of the crash chain, or what a retry from failure continues. Every
+    #: task call's effect key derives from it.
+    lineage: str = ""
+    #: Dynamic keys of ``once`` calls an earlier run of the lineage started and
+    #: never finished: they must not execute again unless something settles them.
+    in_doubt: set[str] = field(default_factory=set)
     #: The thread executing the flow body, captured where the context is made.
     #: `wait_for_input` pauses by raising out of the body, which only works on
     #: this thread; from a task on a worker thread it would surface as a task
@@ -148,6 +155,20 @@ class TaskRunContext:
     # An async unit (`run_async_unit`) awaits on the flow thread, so the thread
     # check alone would let a wait inside it pause the run from a task run.
     unit: bool = False
+    #: The run's lineage root, from which `effect_key` derives.
+    lineage: str = ""
+
+    @property
+    def effect_key(self) -> str:
+        """A key for this call's effect that an outside system can deduplicate on.
+
+        The same for this call across passes, crash reruns and retries from
+        failure; different after a retry from the start or a forced run, and for
+        every other call. Pass it as the idempotency key of the API the task calls.
+        """
+        from .effects import effect_key
+
+        return effect_key(self.lineage, self.dynamic_key)
 
     @property
     def external_id(self) -> str:

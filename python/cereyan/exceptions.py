@@ -47,6 +47,12 @@ class ParameterError(CereyanError, ValueError):
         )
 
 
+class TaskInDoubt(CereyanError):
+    """A ``once`` task was interrupted in an earlier run and may have taken
+    effect, and nothing settled it: the answer was to fail, or the call could
+    not ask (offline, or off the flow body's thread, without a probe)."""
+
+
 class WaitTimeout(CereyanError):
     """A durable wait ended without what it waited for: ``wait_for_event``'s
     ``within`` or ``wait_for_target``'s ``timeout`` passed."""

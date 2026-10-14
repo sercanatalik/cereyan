@@ -589,7 +589,8 @@ impl Client {
         })
     }
 
-    #[pyo3(signature = (run_id, external_id, name, task_key, dynamic_key, parents=None, pass_=0))]
+    #[pyo3(signature = (run_id, external_id, name, task_key, dynamic_key, parents=None, pass_=0, once=false))]
+    #[allow(clippy::too_many_arguments)]
     fn task_run_created(
         &self,
         run_id: i64,
@@ -599,6 +600,7 @@ impl Client {
         dynamic_key: String,
         parents: Option<Vec<String>>,
         pass_: i64,
+        once: bool,
     ) -> PyResult<()> {
         let ext = Id::parse(external_id).ok_or_else(|| PyValueError::new_err("bad external id"))?;
         let parents: Vec<Id> = parents
@@ -618,6 +620,7 @@ impl Client {
             dynamic_key,
             parents,
             pass: pass_,
+            once,
         });
         Ok(())
     }
