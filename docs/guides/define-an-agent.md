@@ -14,7 +14,7 @@ agent = served.client._request("POST", "/api/agents", body={
     "api_key": None,
     "instructions": "You handle support tickets for {team}. Refund damaged items.",
     "prompt": "Handle ticket {ticket}.",
-    "tools": [{"kind": "self", "name": "cereyan", "options": {"tools": ["list_runs"]}}],
+    "tools": [{"kind": "capability", "name": "WebSearch", "options": {}}],
     "policy": {"approvals": "ask", "once": []},
     "limits": {"tokens": 50000, "requests": 20, "cost_usd": 0.5, "timeout_seconds": 600},
     "output": {"kind": "text"},
