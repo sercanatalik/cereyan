@@ -49,6 +49,7 @@
   "/api/runs/{id}/artifacts",
   "/api/runs/{id}/attributes",
   "/api/runs/{id}/cancel",
+  "/api/runs/{id}/chain",
   "/api/runs/{id}/graph",
   "/api/runs/{id}/input",
   "/api/runs/{id}/logs",

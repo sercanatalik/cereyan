@@ -50,6 +50,7 @@ Named sub-states refine a type: `Late` and `AwaitingRetry` and `AwaitingResource
 - The flow, project, parameters, tags, and name.
 - `created_by`: `script` for a plain call, `client` for the API and CLI, `schedule:<id>`, `backfill:<id>`, `rule:<id>`, `run:<id>` for a dependency, `catchup`, `crash:<n>` for a crash rerun, and `mcp:<client>` for an agent.
 - Timing: created, scheduled, start, end, total run time; and counters for failures and crashes.
+- The body's return value, as the flow-level state `result`, when it is JSON under 64 KB; rules read it as `result`, and `GET /api/runs/{id}/state?key=result` returns it. A run a rule created also records the run it came from as its parent, and `GET /api/runs/{id}/chain` walks those links.
 - Every log line, task run, artifact, and event.
 
 Inside the run, `cereyan.runtime.run`, `cereyan.runtime.task_run`, and `cereyan.runtime.flow` read the run in progress — its id, name, and parameters — and are `None` outside one; see the [Python API](../reference/python-api.md).

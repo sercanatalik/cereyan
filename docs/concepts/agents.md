@@ -48,4 +48,10 @@ Tools named under `once` are [once tools](../guides/side-effects-once.md): a cal
 
 Limits cap each run's tokens, model requests, estimated cost and time; `[agents] cost_per_day` caps all agents together. A definition that no longer passes the allowlist is disabled, not run.
 
-Related: [Define an agent in the UI](../guides/define-an-agent.md), [Make a Pydantic AI agent durable](../guides/durable-pydantic-ai-agent.md), [Configuration](../reference/configuration.md#agents).
+## Handoffs
+
+A **handoff** runs the next agent or flow when this one ends, with the result in its prompt. It is a [rule](events-and-rules.md): the match names the agent's flow, the action is `run_flow` of the target, and the rule may carry a `condition` over the result (`not result.approved`) and, when the target points back up the chain, `max_per_chain`, the most rounds the loop may take. Every run a rule creates records the run it came from, so a chain is walkable from any of its runs (`GET /api/runs/{id}/chain`), and the agent page's Handoffs tab shows the links, the rounds used, and the last chain with each run's result, tokens and time.
+
+The upstream result reaches an agent inside a `<cereyan-handoff from="reviewer" run="tidy-moose">` block after the task, marked as data, so a tool that read a hostile page cannot steer the next agent through its output. A chain is finite by construction: the server refuses a rule that closes a loop without a bound, and at the bound the rule records `rule.loop_limited` and runs its `on_limit` action instead.
+
+Related: [Define an agent in the UI](../guides/define-an-agent.md), [Hand off between agents](../guides/hand-off-between-agents.md), [Make a Pydantic AI agent durable](../guides/durable-pydantic-ai-agent.md), [Configuration](../reference/configuration.md#agents).

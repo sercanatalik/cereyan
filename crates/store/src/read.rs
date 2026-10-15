@@ -35,6 +35,18 @@ static SQL_GET_RUN_BY_EXTERNAL_ID: LazyLock<String> = LazyLock::new(|| {
         "SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id WHERE r.external_id = ?1"
     )
 });
+static SQL_RUN_CHAIN: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "WITH RECURSIVE down(id, depth) AS (
+            SELECT ?1, 0
+            UNION ALL
+            SELECT c.id, down.depth + 1 FROM run c JOIN down
+              ON c.parent_run_id = down.id OR c.created_by = 'run:' || down.id
+            WHERE down.depth < 100
+         ) SELECT {RUN_COLUMNS} FROM run r JOIN flow f ON f.id = r.flow_id
+         WHERE r.id IN (SELECT id FROM down) ORDER BY r.created_at, r.id LIMIT 500"
+    )
+});
 static SQL_GET_TASK_RUN: LazyLock<String> =
     LazyLock::new(|| format!("SELECT {TASK_RUN_COLUMNS} FROM {TASK_RUN_FROM} WHERE t.id = ?1"));
 static SQL_GET_FLOW: LazyLock<String> =
@@ -2090,6 +2102,46 @@ impl Store {
     /// The newest run of `run_id`'s crash chain: the run that continues it now.
     pub fn crash_chain_head(&self, run_id: i64) -> Result<i64> {
         self.with_reader(|conn| crash_chain_head(conn, run_id))
+    }
+
+    /// The run and every run above it through `parent_run_id` (crash reruns,
+    /// retries, rule-created runs) and `created_by = run:<id>` (dependencies),
+    /// nearest first, as `(id, created_by)`; the last entry is the chain's root.
+    pub fn run_ancestors(&self, run_id: i64) -> Result<Vec<(i64, String)>> {
+        self.with_reader(|conn| {
+            let mut walk = conn.prepare_cached(
+                "WITH RECURSIVE up(id, depth) AS (
+                    SELECT ?1, 0
+                    UNION ALL
+                    SELECT CASE WHEN r.parent_run_id IS NOT NULL THEN r.parent_run_id
+                                ELSE CAST(substr(r.created_by, 5) AS INTEGER) END, up.depth + 1
+                    FROM run r JOIN up ON r.id = up.id
+                    WHERE (r.parent_run_id IS NOT NULL OR r.created_by LIKE 'run:%') AND up.depth < 100
+                 ) SELECT r.id, r.created_by FROM up JOIN run r ON r.id = up.id ORDER BY up.depth",
+            )?;
+            let rows = walk
+                .query_map(rusqlite::params![run_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Every run in `run_id`'s chain: the root found by `run_ancestors`, then
+    /// everything reachable from it downward through the same links, in
+    /// creation order, 500 at most.
+    pub fn run_chain(&self, run_id: i64) -> Result<Vec<Run>> {
+        let root = self
+            .run_ancestors(run_id)?
+            .last()
+            .map(|(id, _)| *id)
+            .unwrap_or(run_id);
+        self.with_reader(|conn| {
+            let mut stmt = conn.prepare_cached(&SQL_RUN_CHAIN)?;
+            let rows = stmt
+                .query_map(rusqlite::params![root], run_from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
     }
 
     /// One task state value, from the run or the crash and retry parents it

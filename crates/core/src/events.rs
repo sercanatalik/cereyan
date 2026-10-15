@@ -70,6 +70,7 @@ pub enum EventName {
     RuleFired,
     RuleActionCompleted,
     RuleActionFailed,
+    RuleLoopLimited,
     ExpectationArmed,
     ExpectationMet,
     ExpectationLapsed,
@@ -78,7 +79,7 @@ pub enum EventName {
 }
 
 impl EventName {
-    pub const ALL: [EventName; 44] = [
+    pub const ALL: [EventName; 45] = [
         EventName::RunScheduled,
         EventName::RunPending,
         EventName::RunRunning,
@@ -117,6 +118,7 @@ impl EventName {
         EventName::RuleFired,
         EventName::RuleActionCompleted,
         EventName::RuleActionFailed,
+        EventName::RuleLoopLimited,
         EventName::ExpectationArmed,
         EventName::ExpectationMet,
         EventName::ExpectationLapsed,
@@ -165,6 +167,7 @@ impl EventName {
             EventName::RuleFired => "rule.fired",
             EventName::RuleActionCompleted => "rule.action.completed",
             EventName::RuleActionFailed => "rule.action.failed",
+            EventName::RuleLoopLimited => "rule.loop_limited",
             EventName::ExpectationArmed => "expectation.armed",
             EventName::ExpectationMet => "expectation.met",
             EventName::ExpectationLapsed => "expectation.lapsed",
@@ -216,6 +219,7 @@ impl EventName {
             EventName::RuleFired
             | EventName::RuleActionCompleted
             | EventName::RuleActionFailed
+            | EventName::RuleLoopLimited
             | EventName::ExpectationArmed
             | EventName::ExpectationMet
             | EventName::ExpectationLapsed => "rule",
@@ -265,6 +269,7 @@ impl EventName {
             EventName::RuleFired => "A rule matched an event and its actions started",
             EventName::RuleActionCompleted => "One action finished",
             EventName::RuleActionFailed => "One action failed, including a template that did not render",
+            EventName::RuleLoopLimited => "A rule with `max_per_chain` would have added one more run to a chain already holding its bound; its actions did not run and `on_limit` ran instead when set",
             EventName::ExpectationArmed => "A proactive rule's `when` event armed an expectation",
             EventName::ExpectationMet => "The expected event arrived before the deadline",
             EventName::ExpectationLapsed => "The deadline passed, or a clock-armed rule's tick found no matching event; the rule's actions run against this event",
@@ -357,6 +362,7 @@ impl EventName {
             EventName::RuleFired => &["rule_id", "rule", "event", "event_id"],
             EventName::RuleActionCompleted => &["rule_id", "action", "index", "detail"],
             EventName::RuleActionFailed => &["rule_id", "action", "index", "error"],
+            EventName::RuleLoopLimited => &["rule_id", "rule", "chain_root", "rounds", "limit"],
             EventName::ExpectationArmed => &["id", "rule_id", "key", "run_id", "deadline"],
             EventName::ExpectationMet => &["id", "rule_id", "key"],
             EventName::ExpectationLapsed => &[
@@ -578,6 +584,7 @@ mod tests {
             "rule.fired",
             "rule.action.completed",
             "rule.action.failed",
+            "rule.loop_limited",
             "expectation.armed",
             "expectation.met",
             "expectation.lapsed",

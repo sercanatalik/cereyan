@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { api, unwrap } from "@/api/client";
+import { AgentHandoffs } from "@/components/agent-handoffs";
 import { KeyValueList } from "@/components/key-value-list";
 import { RunForm } from "@/components/run-form";
 import { describeSchedule } from "@/components/schedule-editor";
@@ -12,7 +13,9 @@ import { CardHead } from "@/components/ui/card";
 import { Modal } from "@/components/ui/modal";
 import { Switch } from "@/components/ui/switch";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
+import { UnderlineTabs } from "@/components/ui/underline-tabs";
 import { formatCost, formatTokens, toolTags, useAgent } from "@/lib/agents";
+import { handoffsOf } from "@/lib/handoffs";
 import { formatDuration, formatTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/agents/$agentId/")({ component: AgentPage });
@@ -45,6 +48,8 @@ function AgentPage() {
     queryFn: async () => unwrap(await api.GET("/api/agents/{id}/approvals", { params: { path: { id } } })),
   });
   const [running, setRunning] = useState(false);
+  const [tab, setTab] = useState("overview");
+  const rules = useQuery({ queryKey: ["rules"], queryFn: async () => unwrap(await api.GET("/api/rules")) });
   const invalidate = () => {
     client.invalidateQueries({ queryKey: ["agent", id] });
     client.invalidateQueries({ queryKey: ["agents"] });
@@ -88,6 +93,8 @@ function AgentPage() {
   if (!a) return <Page crumbs={[{ label: "Agents", to: "/agents" }, { label: agentId }]}>Loading</Page>;
   const d = a.definition;
   const last = runs.data?.items[0];
+  const links = handoffsOf(rules.data ?? [], a.name);
+  const handoffCount = links.incoming.length + links.outgoing.length;
   return (
     <Page crumbs={[{ label: "Agents", to: "/agents" }, { label: a.name }]}>
       <div className="flex flex-wrap items-center gap-3">
@@ -148,7 +155,18 @@ function AgentPage() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <UnderlineTabs
+        items={[
+          { value: "overview", label: "Overview" },
+          { value: "handoffs", label: handoffCount ? `Handoffs ${handoffCount}` : "Handoffs" },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+      {tab === "handoffs" ? (
+        <AgentHandoffs flowName={a.name} project={a.project} latestRunId={last?.id} />
+      ) : null}
+      <div className={tab === "overview" ? "grid grid-cols-1 gap-4 lg:grid-cols-3" : "hidden"}>
         <div className="flex flex-col gap-4">
           <section className="rounded-lg border bg-card" aria-label="Definition">
             <CardHead title="Definition" />

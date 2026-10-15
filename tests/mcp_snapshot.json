@@ -312,6 +312,12 @@
             "state",
             "task_key",
             "total_run_time"
+          ],
+          "task_state": [
+            "key",
+            "scope",
+            "updated_at",
+            "value"
           ]
         },
         "keys": [

@@ -308,6 +308,7 @@ pub fn expectation_due(state: &Arc<AppState>, id: i64) {
             run,
             flow,
             chain_root: None,
+            result: None,
         },
         Some(&exp),
     );
@@ -393,6 +394,7 @@ pub fn clock_tick(state: &Arc<AppState>, rule_id: i64) {
             run: None,
             flow,
             chain_root: None,
+            result: None,
         },
         None,
     );
@@ -507,11 +509,36 @@ fn context_for(state: &AppState, event: &Event) -> RunContext {
         .filter(|r| r.created_by.starts_with("crash:"))
         .and_then(|r| state.store.crash_chain(r.id).ok())
         .and_then(|chain| chain.last().copied());
+    // A result exists only once a run has ended, so only terminal run events
+    // pay the read; it is what `condition` and `{{ result }}` see.
+    let result = run
+        .as_ref()
+        .filter(|r| event.name.starts_with("run.") && r.state.is_terminal())
+        .and_then(|r| {
+            state
+                .store
+                .task_state_get(r.id, "", "result")
+                .ok()
+                .flatten()
+        })
+        .map(|text| serde_json::from_str(&text).unwrap_or(Value::String(text)));
     RunContext {
         run,
         flow,
         chain_root,
+        result,
     }
+}
+
+/// How many runs `rule` already added above `run` in its chain: the rounds a
+/// loop has taken. Zero for a run outside any chain.
+fn loop_count(state: &AppState, rule: &RuleRow, run: &Run) -> i64 {
+    let tag = format!("rule:{}", rule.id);
+    state
+        .store
+        .run_ancestors(run.id)
+        .map(|rows| rows.iter().filter(|(_, by)| *by == tag).count() as i64)
+        .unwrap_or(0)
 }
 
 /// Evaluate every candidate rule against a freshly recorded event.
@@ -535,9 +562,11 @@ pub fn on_event(state: &Arc<AppState>, event: Event) {
     if !event.name.starts_with("expectation.") {
         track_expectations(state, &event, &ctx, &candidates);
     }
-    let mut to_fire: Vec<RuleRow> = Vec::new();
+    let mut to_fire: Vec<(RuleRow, i64)> = Vec::new();
+    let mut to_limit: Vec<(RuleRow, i64)> = Vec::new();
     {
         let mut guards = state.rules.guards.lock().unwrap_or_else(|e| e.into_inner());
+        let mut template_ctx: Option<Value> = None;
         for rule in rules
             .iter()
             .filter(|r| candidates.contains(&r.id) && !r.spec.is_proactive())
@@ -545,22 +574,53 @@ pub fn on_event(state: &Arc<AppState>, event: Event) {
             if !cereyan_rules::matches(&rule.spec.when, &event, &ctx) {
                 continue;
             }
+            // The rounds this rule has already added to the run's chain: the
+            // condition may read it, and the bound compares against it.
+            let rounds = match (
+                &ctx.run,
+                rule.spec.max_per_chain > 0
+                    || rule
+                        .spec
+                        .condition
+                        .as_deref()
+                        .is_some_and(|c| c.contains("loop")),
+            ) {
+                (Some(run), true) => loop_count(state, rule, run),
+                _ => 0,
+            };
+            if let Some(expr) = &rule.spec.condition {
+                let tctx =
+                    template_ctx.get_or_insert_with(|| template_context_for(state, &event, &ctx));
+                let mut with_loop = tctx.clone();
+                with_loop["loop"] = json!({"count": rounds});
+                match cereyan_rules::evaluate_condition(expr, &with_loop) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    // A condition that cannot evaluate is a quiet no; the dry run shows why.
+                    Err(_) => continue,
+                }
+            }
+            if rule.spec.max_per_chain > 0 && ctx.run.is_some() && rounds >= rule.spec.max_per_chain
+            {
+                to_limit.push((rule.as_ref().clone(), rounds));
+                continue;
+            }
             let g = guards.entry(rule.id).or_default();
             match cereyan_rules::check_guards(rule, &event, &ctx, g, now) {
                 GuardDecision::Fire => {
                     g.record(ctx.guard_run(), now);
-                    to_fire.push(rule.as_ref().clone());
+                    to_fire.push((rule.as_ref().clone(), rounds));
                 }
                 GuardDecision::Skip(_) => {}
             }
         }
     }
-    if to_fire.is_empty() {
+    if to_fire.is_empty() && to_limit.is_empty() {
         return;
     }
     // A maintenance window: the firing is recorded, nothing acts, no rule.* event.
     if state.pause().is_some_and(|p| p.suppress_rules) {
-        for rule in &to_fire {
+        for (rule, _) in to_fire.iter().chain(to_limit.iter()) {
             let outcomes: Vec<Value> = rule
                 .spec
                 .actions
@@ -581,11 +641,99 @@ pub fn on_event(state: &Arc<AppState>, event: Event) {
     std::thread::Builder::new()
         .name("cereyan-rules".into())
         .spawn(move || {
-            for rule in to_fire {
-                fire(&st, &rule, &event, &ctx);
+            for (rule, rounds) in to_fire {
+                fire_with(&st, &rule, &event, &ctx, rounds);
+            }
+            for (rule, rounds) in to_limit {
+                limit(&st, &rule, &event, &ctx, rounds);
             }
         })
         .ok();
+}
+
+/// The template context for an event, with `run.url` filled in.
+fn template_context_for(state: &AppState, event: &Event, ctx: &RunContext) -> Value {
+    let mut template_ctx = cereyan_rules::template_context(event, ctx);
+    if let Some(run) = &ctx.run {
+        if let Some(obj) = template_ctx.get_mut("run").and_then(|r| r.as_object_mut()) {
+            obj.insert("url".into(), json!(run_url(state, run.id)));
+        }
+    }
+    template_ctx
+}
+
+/// A bounded rule at its bound: record the firing as `limited`, say so with an
+/// event, and run `on_limit` in its place when the rule has one.
+fn limit(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunContext, rounds: i64) {
+    let mut outcomes: Vec<Value> = rule
+        .spec
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(i, a)| json!({"index": i, "kind": a.kind, "status": "limited"}))
+        .collect();
+    let chain_root = ctx
+        .run
+        .as_ref()
+        .and_then(|r| state.store.run_ancestors(r.id).ok())
+        .and_then(|rows| rows.last().map(|(id, _)| *id));
+    let firing_id = state
+        .store
+        .record_firing(
+            rule.id,
+            Some(event.id),
+            ctx.run.as_ref().map(|r| r.id),
+            &serde_json::to_string(&outcomes).unwrap_or_else(|_| "[]".into()),
+        )
+        .ok();
+    let _ = state.record_engine_event(
+        EventName::RuleLoopLimited,
+        ctx.run.as_ref().map(|r| r.id),
+        ctx.flow.as_ref().map(|f| f.id),
+        json!({"rule_id": rule.id, "rule": rule.name, "chain_root": chain_root, "rounds": rounds, "limit": rule.spec.max_per_chain}),
+    );
+    if let Some(action) = &rule.spec.on_limit {
+        let env = cereyan_rules::environment();
+        let mut template_ctx = template_context_for(state, event, ctx);
+        template_ctx["loop"] = json!({"count": rounds});
+        let index = outcomes.len();
+        let outcome = match cereyan_rules::render_action(&env, action, &template_ctx) {
+            Ok(rendered) => match run_with_timeout(
+                state.clone(),
+                rule.clone(),
+                rendered,
+                ctx.clone(),
+                event.clone(),
+            ) {
+                Ok(detail) => {
+                    json!({"index": index, "kind": action.kind, "status": "completed", "on_limit": true, "detail": detail})
+                }
+                Err(e) => {
+                    json!({"index": index, "kind": action.kind, "status": "failed", "on_limit": true, "error": e})
+                }
+            },
+            Err(e) => {
+                json!({"index": index, "kind": action.kind, "status": "failed", "on_limit": true, "error": e.to_string()})
+            }
+        };
+        outcomes.push(outcome);
+        if let Some(id) = firing_id {
+            let _ = state.store.update_firing(
+                id,
+                &serde_json::to_string(&outcomes).unwrap_or_else(|_| "[]".into()),
+            );
+        }
+    }
+    if let Ok(Some(updated)) = state.store.get_rule(rule.id) {
+        state
+            .rules
+            .update_counters(rule.id, updated.fire_count, updated.last_fired);
+        state.stream.publish(
+            "rule.updated",
+            rule.id.to_string(),
+            serde_json::to_value(&updated).unwrap_or_default(),
+        );
+    }
 }
 
 /// Execute a rule's actions against an event and record the firing.
@@ -600,13 +748,15 @@ pub fn run_url(state: &AppState, run_id: i64) -> String {
 }
 
 pub fn fire(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunContext) {
+    fire_with(state, rule, event, ctx, 0)
+}
+
+/// `fire`, with the rounds the rule already added to the run's chain in scope
+/// as `loop.count`.
+fn fire_with(state: &Arc<AppState>, rule: &RuleRow, event: &Event, ctx: &RunContext, rounds: i64) {
     let env = cereyan_rules::environment();
-    let mut template_ctx = cereyan_rules::template_context(event, ctx);
-    if let Some(run) = &ctx.run {
-        if let Some(obj) = template_ctx.get_mut("run").and_then(|r| r.as_object_mut()) {
-            obj.insert("url".into(), json!(run_url(state, run.id)));
-        }
-    }
+    let mut template_ctx = template_context_for(state, event, ctx);
+    template_ctx["loop"] = json!({"count": rounds});
     let mut outcomes: Vec<Value> = rule
         .spec
         .actions
@@ -749,6 +899,21 @@ pub fn execute(
                     }
                 }
             }
+            if action.copy_parameters {
+                if let Some(run) = &ctx.run {
+                    for (k, v) in &run.parameters {
+                        if params.contains_key(k)
+                            || flow
+                                .parameter_schema
+                                .get("properties")
+                                .and_then(|p| p.get(k))
+                                .is_some()
+                        {
+                            params.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+            }
             for (k, v) in &action.parameters {
                 params.insert(k.clone(), v.clone());
             }
@@ -773,6 +938,8 @@ pub fn execute(
                 initial_state: Some(State::new(StateType::Scheduled)),
                 priority: options.priority,
                 scheduled_time: due,
+                // The run it came from, so a chain of handoffs is walkable.
+                parent_run_id: ctx.run.as_ref().map(|r| r.id),
                 unique,
                 ..Default::default()
             }) {
@@ -1025,6 +1192,7 @@ fn test_proactive_rule(state: &Arc<AppState>, rule: &RuleRow) -> Result<Value, S
         run: None,
         flow: None,
         chain_root: None,
+        result: None,
     };
     let mut armed_at = now;
     if rule.spec.at.is_none() {
@@ -1240,7 +1408,19 @@ pub fn test_rule(state: &Arc<AppState>, rule: &RuleRow) -> Result<Value, String>
         );
     };
     let env = cereyan_rules::environment();
-    let template_ctx = cereyan_rules::template_context(&event, &ctx);
+    let mut template_ctx = template_context_for(state, &event, &ctx);
+    let rounds = match &ctx.run {
+        Some(run) if rule.spec.max_per_chain > 0 => loop_count(state, rule, run),
+        _ => 0,
+    };
+    template_ctx["loop"] = json!({"count": rounds});
+    let condition =
+        rule.spec.condition.as_ref().map(|expr| {
+            match cereyan_rules::evaluate_condition(expr, &template_ctx) {
+                Ok(v) => json!({"expression": expr, "value": v}),
+                Err(e) => json!({"expression": expr, "value": false, "error": e}),
+            }
+        });
     let actions: Vec<Value> = rule
         .spec
         .actions
@@ -1252,7 +1432,11 @@ pub fn test_rule(state: &Arc<AppState>, rule: &RuleRow) -> Result<Value, String>
             },
         )
         .collect();
-    Ok(json!({"event": event, "actions": actions}))
+    let mut out = json!({"event": event, "actions": actions, "loop": {"count": rounds}});
+    if let Some(c) = condition {
+        out["condition"] = c;
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

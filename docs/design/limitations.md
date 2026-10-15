@@ -52,6 +52,7 @@ Cereyan is built for one machine, one wheel, and pipelines that can always be re
 - Retention deletes logs and events older than `retain_days`, and runs older than `retain_runs_days` when that is set; persisted results under `storage/` are a cache keyed by task inputs and are not deleted per run.
 - Unix sockets and engine niceness do not exist on Windows.
 - A timeout or a cancel interrupts a running flow in Python code and in `time.sleep` on every platform, and in any blocking system call on Linux and macOS. A flow stuck in a call the platform cannot interrupt, such as a loop inside a C extension or most blocking I/O on Windows, is timed out when the call returns offline, and ended by the supervisor when served.
-- Schedules, dependencies, backfills, data rules, clock-armed proactive rules, and pausing need a running server; offline scripts record runs and fire code rules that a server has registered.
+- Schedules, dependencies, backfills, data rules, clock-armed proactive rules, and pausing need a running server; offline scripts record runs and fire code rules that a server has registered. A rule with a `condition` or `max_per_chain` is server-only too: offline it does not fire.
+- A loop of handoffs at its bound cannot ask in the inbox, since no run is paused at that moment; `on_limit` runs a flow or sends a webhook instead.
 
 Related: [Architecture](architecture.md), [Migrate from Prefect or Luigi](../guides/migrate.md).

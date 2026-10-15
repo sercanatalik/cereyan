@@ -798,6 +798,7 @@ fn rule_matches(when: &str, event: &str, run: &str) -> PyResult<bool> {
         run,
         flow: None,
         chain_root: None,
+        result: None,
     };
     Ok(cereyan_rules::matches(&m, &e, &ctx))
 }

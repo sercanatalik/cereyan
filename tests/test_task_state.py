@@ -140,7 +140,8 @@ def test_offline_notes_survive_retries_and_flow_scope(isolated_home):
     store = engine.get_store()
     run = json.loads(store.list_runs())["items"][-1]
     rows = json.loads(store.task_state_list(run["id"]))
-    assert [(r["scope"], r["key"], r["value"]) for r in rows] == [("submit-0", "job_id", "j-1")]
+    # The body's return value is kept as the flow-level note `result`.
+    assert sorted((r["scope"], r["key"], str(r["value"])) for r in rows) == [("", "result", "j-1"), ("submit-0", "job_id", "j-1")]
 
 
 def test_served_notes_list_retry_crash_and_cascade(srv):
@@ -149,7 +150,8 @@ def test_served_notes_list_retry_crash_and_cascade(srv):
     assert srv.wait_run(run["id"])["state"]["type"] == "Completed"
     assert lines(srv) == ["started:job-2026-09-20", "resumed:job-2026-09-20"]
     rows = c._request("GET", f"/api/runs/{run['id']}/state")
-    assert [(r["scope"], r["key"], r["value"]) for r in rows] == [("", "flow_note", {"day": "2026-09-20"}), ("submit_job-0", "job_id", "job-2026-09-20")]
+    assert [(r["scope"], r["key"], r["value"]) for r in rows] == [
+        ("", "flow_note", {"day": "2026-09-20"}), ("", "result", "job-2026-09-20"), ("submit_job-0", "job_id", "job-2026-09-20")]
     one = c._request("GET", f"/api/runs/{run['id']}/state", params={"scope": "submit_job-0", "key": "job_id"})
     assert one == {"found": True, "value": "job-2026-09-20"}
     assert c._request("GET", f"/api/runs/{run['id']}/state", params={"scope": "nope", "key": "job_id"})["found"] is False
@@ -163,14 +165,14 @@ def test_served_notes_list_retry_crash_and_cascade(srv):
     assert lines(srv)[2:] == ["started:job-7", "resumed:job-7"]
     # The rerun lists what it can read: the crashed run's entries, through the chain.
     assert [(r["scope"], r["key"], r["value"]) for r in c._request("GET", f"/api/runs/{rerun['id']}/state")] == [
-        ("remember_then_die-0", "job_id", "job-7")]
+        ("", "result", "ok"), ("remember_then_die-0", "job_id", "job-7")]
     # ... and so does a retry from failure.
     failed = c.run("failing")
     assert srv.wait_run(failed["id"])["state"]["type"] == "Failed"
     out = c.retry(failed["id"])
     assert srv.wait_run(out["run"]["id"])["state"]["type"] == "Completed"
     own = c._request("GET", f"/api/runs/{out['run']['id']}/state")
-    assert [(r["key"], r["value"]) for r in own] == [("attempts", 2)]
+    assert sorted((r["key"], r["value"]) for r in own) == [("attempts", 2), ("result", 1)]
     # Deleting the run takes its entries along.
     c._request("DELETE", f"/api/runs/{run['id']}")
     with pytest.raises(ApiError) as err:

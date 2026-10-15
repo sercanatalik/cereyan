@@ -80,6 +80,7 @@ pub const BUILTIN_PATHS: &[&str] = &[
     "/api/engine/failed",
     "/api/engine/local-path",
     "/api/runs/{id}/graph",
+    "/api/runs/{id}/chain",
     "/api/flows/{id}/schedules",
     "/api/flows/{id}/upcoming",
     "/api/flows/{id}/pause",

@@ -100,6 +100,7 @@ Resource `rule`, related the run and flow of the triggering event.
 | `rule.fired` | `rule_id`, `rule`, `event`, `event_id` | A rule matched an event and its actions started |
 | `rule.action.completed` | `rule_id`, `action`, `index`, `detail` | One action finished |
 | `rule.action.failed` | `rule_id`, `action`, `index`, `error` | One action failed, including a template that did not render |
+| `rule.loop_limited` | `rule_id`, `rule`, `chain_root`, `rounds`, `limit` | A rule with `max_per_chain` would have added one more run to a chain already holding its bound; its actions did not run and `on_limit` ran instead when set |
 | `expectation.armed` | `id`, `rule_id`, `key`, `run_id`, `deadline` | A proactive rule's `when` event armed an expectation |
 | `expectation.met` | `id`, `rule_id`, `key` | The expected event arrived before the deadline |
 | `expectation.lapsed` | `rule_id`, `rule`, `flow`, `project`, `run`, `run_name`, `expected`, `deadline`, `armed_at`, `expectation_id` | The deadline passed, or a clock-armed rule's tick found no matching event; the rule's actions run against this event |

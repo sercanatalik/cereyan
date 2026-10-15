@@ -775,6 +775,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{id}/chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The chain a run belongs to: linked through handoffs, dependencies, retries
+         *     and crash reruns, in creation order.
+         */
+        get: operations["run_chain"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{id}/graph": {
         parameters: {
             query?: never;
@@ -1662,6 +1682,22 @@ export interface components {
         };
         /** @enum {string} */
         CatchupPolicy: "skip" | "latest" | "all";
+        /** @description One run of a chain: the run, what made it, and the result it handed on. */
+        ChainRun: components["schemas"]["Run"] & {
+            /** @description The run's `result` note as text, cut at 200 characters. */
+            result?: string | null;
+            /**
+             * Format: int64
+             * @description 1 + the earlier chain runs of the same flow; a crash rerun or retry keeps its parent's.
+             */
+            round: number;
+            rule?: string | null;
+            /**
+             * Format: int64
+             * @description The rule that created the run, for `created_by = rule:<id>`.
+             */
+            rule_id?: number | null;
+        };
         /** @description A completed task run's stored result, keyed for replay. */
         Checkpoint: {
             dynamic_key: string;
@@ -2553,6 +2589,12 @@ export interface components {
              */
             chat_id: string | null;
             /**
+             * @description `run_flow`: copy the triggering run's parameters by name into those the
+             *     target declares, before templates apply, as `after=` does.
+             * @default false
+             */
+            copy_parameters: boolean;
+            /**
              * Format: double
              * @description `run_flow`: seconds from the firing after which the run starts.
              * @default null
@@ -2571,6 +2613,12 @@ export interface components {
             /** @default null */
             method: string | null;
             parameters?: Record<string, never>;
+            /**
+             * @description `run_flow` into an agent: whether the runner appends the triggering
+             *     run's result as a data block (unset means yes).
+             * @default null
+             */
+            pass_result: boolean | null;
             /**
              * @description Webhook body preset: `slack`, `teams`, `discord`, `ntfy`, `telegram`, or `pagerduty`.
              * @default null
@@ -2647,13 +2695,17 @@ export interface components {
         RulePatch: {
             allow_self?: boolean | null;
             at?: Record<string, never>;
+            condition?: string | null;
             /** Format: double */
             cooldown_seconds?: number | null;
             do?: components["schemas"]["RuleAction"][] | null;
             enabled?: boolean | null;
             /** Format: int64 */
+            max_per_chain?: number | null;
+            /** Format: int64 */
             max_per_minute?: number | null;
             name?: string | null;
+            on_limit?: Record<string, never>;
             once?: string | null;
             unless?: Record<string, never>;
             when?: Record<string, never>;
@@ -2687,6 +2739,12 @@ export interface components {
             /** @default null */
             at: null | components["schemas"]["RuleClock"];
             /**
+             * @description A Jinja expression over the template context, checked after the match
+             *     and before the guards; undefined values are false.
+             * @default null
+             */
+            condition: string | null;
+            /**
              * Format: double
              * @default 0
              */
@@ -2695,9 +2753,17 @@ export interface components {
             do: components["schemas"]["RuleAction"][];
             /**
              * Format: int64
+             * @description The most runs this rule may add to one chain; 0 is off.
+             * @default 0
+             */
+            max_per_chain: number;
+            /**
+             * Format: int64
              * @default 60
              */
             max_per_minute: number;
+            /** @default null */
+            on_limit: null | components["schemas"]["RuleAction"];
             /**
              * @description `per_run` or `never`.
              * @default per_run
@@ -2786,6 +2852,11 @@ export interface components {
              *     or the request carried an idempotency key.
              */
             unique_key?: string | null;
+        };
+        RunChain: {
+            /** Format: int64 */
+            root: number;
+            runs: components["schemas"]["ChainRun"][];
         };
         RunComparison: {
             artifacts: components["schemas"]["ArtifactDiff"][];
@@ -5271,6 +5342,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Run"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    run_chain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunChain"];
                 };
             };
             404: {

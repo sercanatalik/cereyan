@@ -319,6 +319,20 @@ Also served on POST, which is what the engine client speaks.
 | 200 | [`Run`](#run) (application/json) |
 | 404 | no body |
 
+### `GET /api/runs/{id}/chain`
+
+The chain a run belongs to: linked through handoffs, dependencies, retries
+and crash reruns, in creation order.
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+| Status | Body |
+|---|---|
+| 200 | [`RunChain`](#runchain) (application/json) |
+| 404 | no body |
+
 ### `GET /api/runs/{id}/graph`
 
 | Parameter | In | Type | Required | Description |
@@ -1473,6 +1487,12 @@ Type: any.
 
 One of: `skip`, `latest`, `all`.
 
+### `ChainRun`
+
+One run of a chain: the run, what made it, and the result it handed on.
+
+Type: any.
+
 ### `Checkpoint`
 
 A completed task run's stored result, keyed for replay.
@@ -2199,6 +2219,7 @@ One rule action. `kind` selects the variant; other fields are optional.
 | `body` | string or null | no |  |
 | `callable` | string or null | no | Name of the Python callable for `call` actions (code rules). |
 | `chat_id` | string or null | no | Telegram chat id. |
+| `copy_parameters` | boolean | no | `run_flow`: copy the triggering run's parameters by name into those the target declares, before templates apply, as `after=` does. |
 | `delay` | number or null (double) | no | `run_flow`: seconds from the firing after which the run starts. |
 | `flow` | string or null | no |  |
 | `headers` | object | no |  |
@@ -2206,6 +2227,7 @@ One rule action. `kind` selects the variant; other fields are optional.
 | `message` | string or null | no |  |
 | `method` | string or null | no |  |
 | `parameters` | object | no |  |
+| `pass_result` | boolean or null | no | `run_flow` into an agent: whether the runner appends the triggering run's result as a data block (unset means yes). |
 | `preset` | string or null | no | Webhook body preset: `slack`, `teams`, `discord`, `ntfy`, `telegram`, or `pagerduty`. |
 | `routing_key` | string or null | no | PagerDuty Events API routing key. |
 | `secret` | string or null | no | Webhook signing secret (Standard Webhooks headers when set). |
@@ -2258,11 +2280,14 @@ Match clause of a rule.
 |---|---|---|---|
 | `allow_self` | boolean or null | no |  |
 | `at` | object | no |  |
+| `condition` | string or null | no |  |
 | `cooldown_seconds` | number or null (double) | no |  |
 | `do` | array or null | no |  |
 | `enabled` | boolean or null | no |  |
+| `max_per_chain` | integer or null (int64) | no |  |
 | `max_per_minute` | integer or null (int64) | no |  |
 | `name` | string or null | no |  |
+| `on_limit` | object | no |  |
 | `once` | string or null | no |  |
 | `unless` | object | no |  |
 | `when` | object | no |  |
@@ -2279,9 +2304,12 @@ Type: any.
 | `after_consecutive` | integer (int64) | no | Fire only on an event whose `failures_in_a_row` is at least this; 0 is off. |
 | `allow_self` | boolean | no |  |
 | `at` | null or [`RuleClock`](#ruleclock) | no |  |
+| `condition` | string or null | no | A Jinja expression over the template context, checked after the match and before the guards; undefined values are false. |
 | `cooldown_seconds` | number (double) | no |  |
 | `do` | [`RuleAction`](#ruleaction)[] | no |  |
+| `max_per_chain` | integer (int64) | no | The most runs this rule may add to one chain; 0 is off. |
 | `max_per_minute` | integer (int64) | no |  |
+| `on_limit` | null or [`RuleAction`](#ruleaction) | no |  |
 | `once` | string | no | `per_run` or `never`. |
 | `unless` | null or [`RuleMatch`](#rulematch) | no |  |
 | `when` | [`RuleMatch`](#rulematch) | no |  |
@@ -2324,6 +2352,13 @@ Type: any.
 | `task_counts` | object | no | Task runs of this run counted by state type; empty until tasks exist. |
 | `total_run_time` | null or [`i64`](#i64) | no |  |
 | `unique_key` | string or null | no | The admission key the run was created under, when the flow is unique or the request carried an idempotency key. |
+
+### `RunChain`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `root` | integer (int64) | yes |  |
+| `runs` | [`ChainRun`](#chainrun)[] | yes |  |
 
 ### `RunComparison`
 

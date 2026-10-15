@@ -4,7 +4,13 @@ import { useState } from "react";
 import { ApiError, api, unwrap } from "@/api/client";
 import type { components } from "@/api/schema";
 import { JsonView } from "@/components/json-view";
-import { RuleForm, summarizeDo, summarizeUnless, summarizeWhen } from "@/components/rule-form";
+import {
+  RuleForm,
+  summarizeDo,
+  summarizeGuards,
+  summarizeUnless,
+  summarizeWhen,
+} from "@/components/rule-form";
 import { Page } from "@/components/shell";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
@@ -166,6 +172,7 @@ function RulesPage() {
                   {r.unless ? (
                     <div className="text-amber-600 dark:text-amber-400">{summarizeUnless(r)}</div>
                   ) : null}
+                  {summarizeGuards(r) ? <div className="font-mono">{summarizeGuards(r)}</div> : null}
                 </Td>
                 <Td className="text-xs text-muted-foreground">{summarizeDo(r.do)}</Td>
                 <Td>

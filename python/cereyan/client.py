@@ -260,6 +260,12 @@ class Client:
         ``{found, value}`` for that one entry."""
         return self._request("GET", f"/api/runs/{run_id}/state", params={"scope": scope, "key": key})
 
+    def run_chain(self, run_id: int) -> dict:
+        """``GET /api/runs/{id}/chain``: the runs linked to this one through handoffs,
+        dependencies, retries and crash reruns, as ``{root, runs}`` in creation order,
+        each run with its ``rule``, ``round`` and a ``result`` preview."""
+        return self._request("GET", f"/api/runs/{run_id}/chain")
+
     def cancel(self, run_id: int) -> dict:
         """``POST /api/runs/{id}/cancel``: cancel a queued run at once or ask a running one to stop."""
         return self._request("POST", f"/api/runs/{run_id}/cancel")

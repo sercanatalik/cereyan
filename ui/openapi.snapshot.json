@@ -656,6 +656,48 @@
         ],
         "type": "string"
       },
+      "ChainRun": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Run"
+          },
+          {
+            "properties": {
+              "result": {
+                "description": "The run's `result` note as text, cut at 200 characters.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "round": {
+                "description": "1 + the earlier chain runs of the same flow; a crash rerun or retry keeps its parent's.",
+                "format": "int64",
+                "type": "integer"
+              },
+              "rule": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "rule_id": {
+                "description": "The rule that created the run, for `created_by = rule:<id>`.",
+                "format": "int64",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "round"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "One run of a chain: the run, what made it, and the result it handed on."
+      },
       "Checkpoint": {
         "description": "A completed task run's stored result, keyed for replay.",
         "properties": {
@@ -3167,6 +3209,11 @@
               "null"
             ]
           },
+          "copy_parameters": {
+            "default": false,
+            "description": "`run_flow`: copy the triggering run's parameters by name into those the\ntarget declares, before templates apply, as `after=` does.",
+            "type": "boolean"
+          },
           "delay": {
             "default": null,
             "description": "`run_flow`: seconds from the firing after which the run starts.",
@@ -3207,6 +3254,14 @@
           },
           "parameters": {
             "type": "object"
+          },
+          "pass_result": {
+            "default": null,
+            "description": "`run_flow` into an agent: whether the runner appends the triggering\nrun's result as a data block (unset means yes).",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "preset": {
             "default": null,
@@ -3412,6 +3467,12 @@
           "at": {
             "type": "object"
           },
+          "condition": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "cooldown_seconds": {
             "format": "double",
             "type": [
@@ -3434,6 +3495,13 @@
               "null"
             ]
           },
+          "max_per_chain": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "max_per_minute": {
             "format": "int64",
             "type": [
@@ -3446,6 +3514,9 @@
               "string",
               "null"
             ]
+          },
+          "on_limit": {
+            "type": "object"
           },
           "once": {
             "type": [
@@ -3558,6 +3629,14 @@
               }
             ]
           },
+          "condition": {
+            "default": null,
+            "description": "A Jinja expression over the template context, checked after the match\nand before the guards; undefined values are false.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "cooldown_seconds": {
             "default": 0.0,
             "format": "double",
@@ -3570,10 +3649,28 @@
             },
             "type": "array"
           },
+          "max_per_chain": {
+            "default": 0,
+            "description": "The most runs this rule may add to one chain; 0 is off.",
+            "format": "int64",
+            "type": "integer"
+          },
           "max_per_minute": {
             "default": 60,
             "format": "int64",
             "type": "integer"
+          },
+          "on_limit": {
+            "default": null,
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RuleAction",
+                "description": "What to do instead when `max_per_chain` is reached."
+              }
+            ]
           },
           "once": {
             "default": "per_run",
@@ -3819,6 +3916,25 @@
           "failure_count",
           "crash_count",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "RunChain": {
+        "properties": {
+          "root": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ChainRun"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "root",
+          "runs"
         ],
         "type": "object"
       },
@@ -8641,6 +8757,41 @@
             "description": ""
           }
         },
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/runs/{id}/chain": {
+      "get": {
+        "operationId": "run_chain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunChain"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "summary": "The chain a run belongs to: linked through handoffs, dependencies, retries\nand crash reruns, in creation order.",
         "tags": [
           "runs"
         ]

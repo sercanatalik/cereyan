@@ -31,7 +31,7 @@ A **rule** is `when` plus `do`: a match clause over events and an ordered list o
 
 ## Matching
 
-`when` names event names or prefixes (`run.*`), flows, tags, states, and a project. A rule fires for an event that matches every clause it sets.
+`when` names event names or prefixes (`run.*`), flows, tags, states, and a project. A rule fires for an event that matches every clause it sets. A rule may add a `condition`, a Jinja expression over the template context such as `not result.approved`, checked after the match; an undefined value is false.
 
 A value in `states` matches the run's state *type* or its sub-state *name*, so `states=["Scheduled"]` covers a run that is `Late` or `AwaitingRetry` and `states=["Late"]` narrows to just that one. See [States and transitions](../reference/states.md).
 
@@ -56,7 +56,7 @@ Every other name is yours and is never checked, so `on="orders.table_empty"` nee
 
 | Action | Effect |
 |---|---|
-| `run_flow` | Create a run of a flow with templated parameters, now or after `delay` seconds |
+| `run_flow` | Create a run of a flow with templated parameters, now or after `delay` seconds, linked to the run it came from; `copy_parameters` copies shared parameters by name |
 | `cancel_run` | Cancel the run the event is about |
 | `cancel_runs` | Cancel the active runs a templated selector matches (flow, parameters, states), never the event's own run |
 | `set_state` | Force the run into a state |
@@ -65,11 +65,11 @@ Every other name is yours and is never checked, so `on="orders.table_empty"` nee
 | `email` | SMTP through `[email]` in `cereyan.toml` |
 | `call` | A code rule's function, `fn(event, run)` |
 
-Templates use Jinja syntax rendered in Rust with `event`, `run`, `flow`, `state`, `payload`, and `parameters` in scope. An undefined variable is an error; a failing template fails only its action and is recorded as `rule.action.failed`.
+Templates use Jinja syntax rendered in Rust with `event`, `run`, `flow`, `state`, `payload`, `parameters`, `result` (the run's return value, once it has ended) and `loop.count` in scope. An undefined variable is an error; a failing template fails only its action and is recorded as `rule.action.failed`.
 
 ## Guards
 
-Disabled rules never fire. `once=per_run` (the default) fires at most once per run, counting a run and its crash reruns as one, and `once=never` drops that limit; `cooldown_seconds` and `max_per_minute` throttle; and a rule never fires on events of runs it created unless `allow_self` is set, so a rule that runs a flow cannot trigger itself forever. A keyword that is not one of these is rejected rather than ignored, so a misspelled guard cannot leave a rule running on defaults.
+Disabled rules never fire. `once=per_run` (the default) fires at most once per run, counting a run and its crash reruns as one, and `once=never` drops that limit; `cooldown_seconds` and `max_per_minute` throttle; and a rule never fires on events of runs it created unless `allow_self` is set, so a rule that runs a flow cannot trigger itself forever. Two rules that run each other's flows would, so a rule that closes such a loop is refused unless `max_per_chain` bounds the runs it may add to one chain; at the bound it records `rule.loop_limited` and runs `on_limit` instead. This is how [agents hand off](agents.md#handoffs) to each other. A keyword that is not one of these is rejected rather than ignored, so a misspelled guard cannot leave a rule running on defaults.
 
 ## Two kinds of rule
 

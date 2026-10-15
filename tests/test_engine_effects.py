@@ -207,7 +207,7 @@ def test_a_crash_rerun_does_not_emit_again(srv):
     assert len([a for a in c.artifacts(run["id"]) if a["kind"] == "markdown"]) == 1
     assert len([a for a in c.artifacts(rerun["id"]) if a["kind"] == "markdown"]) == 1
     # State is read through the chain, so the rerun lists the crashed run's value.
-    assert [(r["key"], r["value"]) for r in c.run_state(rerun["id"])] == [("progress", 1)]
+    assert sorted((r["key"], r["value"]) for r in c.run_state(rerun["id"])) == [("progress", 1), ("result", "survived")]
 
 
 def test_offline_identical_emits_stay_distinct_and_changed_ones_repeat(store):
@@ -297,7 +297,8 @@ def test_offline_task_effects_are_not_journaled_and_artifacts_return_their_id(st
     assert mixed() == "ok"
     run = json.loads(store.list_runs())["items"][0]
     slots = [e["slot"] for e in json.loads(store.effects(run["id"]))]
-    assert slots == ["artifact:~markdown-0"]
+    # The task's emit is not journaled; the artifact and the result note are.
+    assert slots == ["artifact:~markdown-0", "state:result-0"]
     assert ids[0] == ids[1] and ids[0]
     assert len(json.loads(store.artifacts(run["id"]))) == 1
 

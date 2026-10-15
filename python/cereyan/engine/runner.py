@@ -188,6 +188,25 @@ def run_hooks(hooks, owner, run: dict | Any, state: dict, logger) -> None:
             logger.error("hook %s raised:\n%s", getattr(hook, "__name__", hook), traceback.format_exc())
 
 
+def _record_result(ctx: context.RunContext, result: Any, logger) -> None:
+    """Keep the body's return value as the flow-level state ``result`` when it is
+    JSON and small, so rules and the next agent in a chain can read it. Anything
+    else is left to the caller, as before."""
+    if result is None:
+        return
+    from ..inputs import publish_state
+    from ..task_state import get as state_get
+
+    try:
+        if state_get("result", None) is not None:
+            return  # the flow keeps its own note under that key
+        publish_state("result", result)
+    except CereyanError as exc:
+        logger.debug("result not recorded: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("result not recorded: %s: %s", type(exc).__name__, exc)
+
+
 def _run_dict(ctx: context.RunContext) -> dict:
     return {
         "id": ctx.id,
@@ -354,6 +373,7 @@ def execute_run(flow, values: dict[str, Any], backend: Backend, run: RunInfo) ->
                 with run_logging.capture_prints(flow.log_prints), _FlowTimeout(flow.timeout_seconds if backend.offline else None, logger):
                     result = flow.fn(**values)
                 _wait_for_futures(ctx, logger)
+                _record_result(ctx, result, logger)
                 break
             except RunPaused as exc:
                 # Waiting for a person, a time, an event, or a target: end the

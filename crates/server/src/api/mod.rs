@@ -120,6 +120,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         runs::set_run_state,
         runs::run_tasks,
         runs::run_graph,
+        runs::run_chain,
         runs::transition_run,
         runs::cancel_run,
         task_runs::list_task_runs,
@@ -269,6 +270,8 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         crate::supervisor::WorkItem,
         error::ErrorBody,
         runs::RunGraph,
+        runs::RunChain,
+        runs::ChainRun,
         runs::GraphNode,
         runs::GraphEdge,
         cereyan_core::ScheduleRow,
@@ -396,6 +399,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .route("/api/runs/{id}/tasks", get(runs::run_tasks))
         .route("/api/runs/{id}/graph", get(runs::run_graph))
+        .route("/api/runs/{id}/chain", get(runs::run_chain))
         .route(
             "/api/flows/{id}/schedules",
             get(schedules::list_schedules).post(schedules::create_schedule),

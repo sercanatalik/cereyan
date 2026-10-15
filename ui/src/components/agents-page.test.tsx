@@ -124,13 +124,139 @@ const FLOW = {
   batch_key: null,
 };
 
+const REVIEWER = {
+  ...AGENT,
+  id: 8,
+  name: "reviewer",
+  flow_id: 43,
+  definition: { ...DEFINITION, name: "reviewer" },
+};
+const REVIEWER_FLOW = {
+  ...FLOW,
+  id: 43,
+  name: "reviewer",
+  options: { agent: true, agent_id: 8 },
+  schedules: [],
+};
+
+const FORWARD = {
+  id: 11,
+  external_id: "r11",
+  name: "handoff: digest → reviewer",
+  enabled: true,
+  source: "ui",
+  when: { events: ["run.completed"], flows: ["digest"], tags: [], states: [], project: null },
+  do: [
+    {
+      kind: "run_flow",
+      flow: "reviewer",
+      parameters: { prompt: "Check: {{ result }}" },
+      copy_parameters: true,
+    },
+  ],
+  once: "per_run",
+  cooldown_seconds: 0,
+  max_per_minute: 60,
+  allow_self: false,
+  after_consecutive: 0,
+  max_per_chain: 0,
+  fire_count: 2,
+  last_fired: null,
+  created_at: 1,
+  updated_at: 1,
+};
+const BACK = {
+  ...FORWARD,
+  id: 12,
+  name: "handoff: reviewer → digest",
+  when: { events: ["run.completed"], flows: ["reviewer"], tags: [], states: [], project: null },
+  condition: "not result.approved",
+  max_per_chain: 3,
+  do: [{ kind: "run_flow", flow: "digest", parameters: { prompt: "Redo: {{ result.notes }}" }, delay: 300 }],
+};
+
+const CHAIN = {
+  root: 9,
+  runs: [
+    {
+      id: 9,
+      name: "quiet-heron",
+      flow_name: "digest",
+      flow_id: 42,
+      state: { type: "Completed", name: "Completed", timestamp: 1 },
+      created_by: "schedule",
+      attributes: { tokens: 14200 },
+      round: 1,
+      rule_id: null,
+      rule: null,
+      result: "2 failures overnight",
+      created_at: 1,
+      total_run_time: 41000000,
+      parameters: {},
+      tags: [],
+      project: "examples",
+      external_id: "a",
+      failure_count: 0,
+      crash_count: 0,
+    },
+    {
+      id: 10,
+      name: "tidy-moose",
+      flow_name: "reviewer",
+      flow_id: 43,
+      state: { type: "Completed", name: "Completed", timestamp: 2 },
+      created_by: "rule:11",
+      parent_run_id: 9,
+      attributes: { tokens: 9800 },
+      round: 1,
+      rule_id: 11,
+      rule: "handoff: digest → reviewer",
+      result: '{"approved":false,"notes":"row limit"}',
+      created_at: 2,
+      total_run_time: 52000000,
+      parameters: {},
+      tags: [],
+      project: "examples",
+      external_id: "b",
+      failure_count: 0,
+      crash_count: 0,
+    },
+    {
+      id: 13,
+      name: "calm-plover",
+      flow_name: "digest",
+      flow_id: 42,
+      state: { type: "Completed", name: "Completed", timestamp: 3 },
+      created_by: "rule:12",
+      parent_run_id: 10,
+      attributes: { tokens: 15000 },
+      round: 2,
+      rule_id: 12,
+      rule: "handoff: reviewer → digest",
+      result: "2 failures overnight, both in nightly",
+      created_at: 3,
+      total_run_time: 39000000,
+      parameters: {},
+      tags: [],
+      project: "examples",
+      external_id: "c",
+      failure_count: 0,
+      crash_count: 0,
+    },
+  ],
+};
+
 let agents: any[] = [AGENT];
 let posted: any[] = [];
+let rules: any[] = [];
+let postedRules: any[] = [];
 
 beforeEach(() => {
   localStorage.clear();
   agents = [AGENT];
   posted = [];
+  rules = [];
+  postedRules = [];
   fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = input instanceof Request ? input : null;
     const url = new URL(request ? request.url : String(input), "http://x");
@@ -143,6 +269,14 @@ beforeEach(() => {
     if (p === "/api/agents") return json(agents);
     if (p === "/api/agents/catalogue") return json(CATALOGUE);
     if (p === "/api/agents/7") return json(AGENT);
+    if (p === "/api/agents/8") return json(REVIEWER);
+    if (p === "/api/rules" && method === "POST") {
+      postedRules.push(JSON.parse(await (request as Request).text()));
+      return json({ ...FORWARD, id: 99, ...postedRules[0] }, 201);
+    }
+    if (p === "/api/rules") return json(rules);
+    if (p === "/api/runs/9/chain") return json(CHAIN);
+    if (p === "/api/runs/13/chain") return json(CHAIN);
     if (p === "/api/agents/7/approvals")
       return json([
         {
@@ -155,8 +289,9 @@ beforeEach(() => {
           created_at: 1,
         },
       ]);
-    if (p === "/api/flows") return json([FLOW]);
+    if (p === "/api/flows") return json([FLOW, REVIEWER_FLOW]);
     if (p === "/api/flows/42") return json(FLOW);
+    if (p === "/api/flows/43") return json(REVIEWER_FLOW);
     if (p === "/api/runs")
       return json({
         items: [
@@ -355,4 +490,64 @@ test("a conversation is built from the unit summaries with replay and in-doubt m
   );
   // The question sits inside the conversation, answerable in place.
   expect(screen.getByTestId("paused-banner")).toHaveTextContent("Did email_customer go out?");
+});
+
+test("the Handoffs tab lists the links as rules, the loop's rounds, and the last chain", async () => {
+  rules = [FORWARD, BACK];
+  agents = [AGENT, REVIEWER];
+  mount("/agents/7");
+  await screen.findByRole("heading", { name: "digest" });
+  fireEvent.click(await screen.findByRole("tab", { name: /Handoffs/ }));
+  const out = await screen.findByTestId("handoff-out");
+  expect(out).toHaveTextContent("digest");
+  expect(out).toHaveTextContent("on Completed");
+  expect(out).toHaveTextContent("reviewer");
+  const incoming = screen.getByTestId("handoff-in");
+  expect(incoming).toHaveTextContent("reviewer");
+  expect(incoming).toHaveTextContent("if not result.approved");
+  // The chain of the latest run, with the loop drawn where the round starts over.
+  const chainRuns = await screen.findAllByTestId("chain-run");
+  expect(chainRuns).toHaveLength(3);
+  expect(chainRuns[1]).toHaveTextContent("tidy-moose");
+  expect(chainRuns[1]).toHaveTextContent('{"approved":false');
+  expect(screen.getByTestId("chain-loop")).toHaveTextContent("back to digest · round 2");
+  expect(chainRuns[2]).toHaveTextContent("round 2");
+});
+
+test("the handoff editor requires a bound when the target points back up the chain", async () => {
+  rules = [FORWARD];
+  agents = [AGENT, REVIEWER];
+  mount("/agents/8");
+  await screen.findByRole("heading", { name: "reviewer" });
+  fireEvent.click(await screen.findByRole("tab", { name: /Handoffs/ }));
+  fireEvent.click(await screen.findByTestId("add-handoff"));
+  await screen.findByTestId("handoff-editor");
+  expect(screen.queryByTestId("loop-limits")).toBeNull();
+  fireEvent.change(screen.getByTestId("handoff-to"), { target: { value: "digest" } });
+  // digest already hands off to reviewer, so this closes a loop.
+  expect(await screen.findByTestId("loop-limits")).toBeInTheDocument();
+  expect(screen.getByTestId("save-handoff")).toBeDisabled();
+  fireEvent.change(screen.getByLabelText(/Only when/), { target: { value: "not result.approved" } });
+  fireEvent.change(screen.getByLabelText("With prompt"), { target: { value: "Redo: {{ result.notes }}" } });
+  fireEvent.change(screen.getByLabelText(/At most/), { target: { value: "3" } });
+  fireEvent.change(screen.getByLabelText(/Wait between rounds/), { target: { value: "300" } });
+  expect(screen.getByTestId("save-handoff")).toBeEnabled();
+  fireEvent.click(screen.getByTestId("save-handoff"));
+  await waitFor(() => expect(postedRules).toHaveLength(1));
+  expect(postedRules[0]).toMatchObject({
+    name: "handoff: reviewer → digest",
+    when: { events: ["run.completed"], flows: ["reviewer"] },
+    condition: "not result.approved",
+    max_per_chain: 3,
+    do: [
+      {
+        kind: "run_flow",
+        flow: "digest",
+        parameters: { prompt: "Redo: {{ result.notes }}" },
+        copy_parameters: true,
+        pass_result: true,
+        delay: 300,
+      },
+    ],
+  });
 });

@@ -132,6 +132,13 @@ pub struct RulePatch {
     #[serde(default)]
     pub allow_self: Option<bool>,
     #[serde(default)]
+    pub condition: Option<Option<String>>,
+    #[serde(default)]
+    pub max_per_chain: Option<i64>,
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub on_limit: Option<Option<cereyan_core::RuleAction>>,
+    #[serde(default)]
     #[schema(value_type = Object)]
     pub unless: Option<Option<cereyan_core::RuleMatch>>,
     #[serde(default)]
@@ -161,6 +168,9 @@ pub async fn create_rule(
             "call actions are only available to code rules".into(),
         ));
     }
+    if body.enabled {
+        refuse_unbounded_loop(&state, &body.spec, None).map_err(ApiError::Unprocessable)?;
+    }
     let st = state.clone();
     let id = tokio::task::spawn_blocking(move || {
         let id = st.store.upsert_rule(RuleWrite {
@@ -186,6 +196,73 @@ pub async fn create_rule(
         serde_json::to_value(&row).unwrap_or_default(),
     );
     Ok((StatusCode::CREATED, Json(row)))
+}
+
+/// Refuse a data rule that closes a loop in the run_flow graph without a
+/// bound: its targets reach back to one of its own `when.flows` through the
+/// enabled rules' `run_flow` actions. A rule naming no source flow is not
+/// checked, since it cannot be placed in the graph.
+fn refuse_unbounded_loop(
+    state: &AppState,
+    spec: &RuleSpec,
+    own_id: Option<i64>,
+) -> Result<(), String> {
+    if spec.max_per_chain > 0 || spec.when.flows.is_empty() {
+        return Ok(());
+    }
+    // A rule that runs its own source flow cannot loop while `allow_self` is
+    // off: the self-trigger guard stops it. Only a deliberate self-loop counts.
+    let targets: Vec<String> = spec
+        .actions
+        .iter()
+        .filter(|a| a.kind == "run_flow")
+        .filter_map(|a| a.flow.clone())
+        .filter(|to| spec.allow_self || !spec.when.flows.contains(to))
+        .collect();
+    if targets.is_empty() {
+        return Ok(());
+    }
+    // Edges from every source flow to every target, over the other enabled rules.
+    let mut edges: Vec<(String, String)> = Vec::new();
+    for rule in state.rules.all().iter() {
+        if !rule.enabled || Some(rule.id) == own_id {
+            continue;
+        }
+        for from in &rule.spec.when.flows {
+            for a in rule.spec.actions.iter().filter(|a| a.kind == "run_flow") {
+                if let Some(to) = &a.flow {
+                    edges.push((from.clone(), to.clone()));
+                }
+            }
+        }
+    }
+    for target in &targets {
+        // Depth-first from the target, remembering the path for the message.
+        let mut stack: Vec<Vec<String>> = vec![vec![target.clone()]];
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        while let Some(path) = stack.pop() {
+            let here = path.last().cloned().unwrap_or_default();
+            if let Some(source) = spec.when.flows.iter().find(|f| **f == here) {
+                let mut loop_path: Vec<String> = vec![source.clone()];
+                loop_path.extend(path.iter().cloned());
+                return Err(format!(
+                    "this rule closes a loop ({}); set max_per_chain to bound it",
+                    loop_path.join(" → ")
+                ));
+            }
+            if !seen.insert(here.clone()) {
+                continue;
+            }
+            for (from, to) in &edges {
+                if *from == here {
+                    let mut next = path.clone();
+                    next.push(to.clone());
+                    stack.push(next);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[utoipa::path(get, path = "/api/rules/{id}", params(("id" = i64, Path)), responses((status = 200, body = RuleRow), (status = 404)))]
@@ -217,6 +294,9 @@ pub async fn patch_rule(
         || body.cooldown_seconds.is_some()
         || body.max_per_minute.is_some()
         || body.allow_self.is_some()
+        || body.condition.is_some()
+        || body.max_per_chain.is_some()
+        || body.on_limit.is_some()
         || body.unless.is_some()
         || body.within.is_some()
         || body.at.is_some();
@@ -244,6 +324,15 @@ pub async fn patch_rule(
     if let Some(s) = body.allow_self {
         spec.allow_self = s;
     }
+    if let Some(c) = body.condition {
+        spec.condition = c.filter(|c| !c.trim().is_empty());
+    }
+    if let Some(m) = body.max_per_chain {
+        spec.max_per_chain = m;
+    }
+    if let Some(a) = body.on_limit {
+        spec.on_limit = a.map(Box::new);
+    }
     if let Some(u) = body.unless {
         spec.unless = u;
     }
@@ -254,6 +343,9 @@ pub async fn patch_rule(
         spec.at = a;
     }
     cereyan_rules::validate_spec(&spec).map_err(ApiError::Unprocessable)?;
+    if body.enabled.unwrap_or(current.enabled) && current.source != "code" {
+        refuse_unbounded_loop(&state, &spec, Some(id)).map_err(ApiError::Unprocessable)?;
+    }
     let disabling = body.enabled == Some(false) && current.enabled;
     let st = state.clone();
     tokio::task::spawn_blocking(move || {

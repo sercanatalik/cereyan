@@ -214,6 +214,8 @@ def evaluate_offline(store: _core.Store, event_name: str) -> None:
         if row.get("unless"):
             _track_offline(row, event, run, run_json)
             continue
+        if row.get("condition") or row.get("max_per_chain"):
+            continue  # conditions and chain bounds read the store the server keeps: server only
         if not _core.rule_matches(json.dumps(row["when"]), json.dumps(event), run_json):
             continue
         _fire_offline(store, row, event, run)

@@ -1486,6 +1486,91 @@ pub struct RunGraph {
     pub edges: Vec<GraphEdge>,
 }
 
+/// One run of a chain: the run, what made it, and the result it handed on.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ChainRun {
+    #[serde(flatten)]
+    pub run: Run,
+    /// The rule that created the run, for `created_by = rule:<id>`.
+    pub rule_id: Option<i64>,
+    pub rule: Option<String>,
+    /// 1 + the earlier chain runs of the same flow; a crash rerun or retry keeps its parent's.
+    pub round: i64,
+    /// The run's `result` note as text, cut at 200 characters.
+    pub result: Option<String>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct RunChain {
+    pub root: i64,
+    pub runs: Vec<ChainRun>,
+}
+
+/// The chain a run belongs to: linked through handoffs, dependencies, retries
+/// and crash reruns, in creation order.
+#[utoipa::path(get, path = "/api/runs/{id}/chain", params(("id" = i64, Path)), responses((status = 200, body = RunChain), (status = 404)))]
+pub async fn run_chain(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<RunChain>> {
+    state
+        .store
+        .get_run(id)?
+        .ok_or_else(|| ApiError::NotFound("run not found".into()))?;
+    let st = state.clone();
+    let chain =
+        tokio::task::spawn_blocking(move || -> Result<RunChain, cereyan_store::StoreError> {
+            let runs = st.store.run_chain(id)?;
+            let root = runs.first().map(|r| r.id).unwrap_or(id);
+            let mut rounds_by_flow: std::collections::HashMap<i64, i64> =
+                std::collections::HashMap::new();
+            let mut round_of: std::collections::HashMap<i64, i64> =
+                std::collections::HashMap::new();
+            let mut out = Vec::with_capacity(runs.len());
+            for run in runs {
+                let continues =
+                    run.created_by.starts_with("crash:") || run.created_by.starts_with("retry:");
+                let round = match (
+                    continues,
+                    run.parent_run_id.and_then(|p| round_of.get(&p).copied()),
+                ) {
+                    (true, Some(r)) => r,
+                    _ => {
+                        let n = rounds_by_flow.entry(run.flow_id).or_insert(0);
+                        *n += 1;
+                        *n
+                    }
+                };
+                round_of.insert(run.id, round);
+                let rule_id = run
+                    .created_by
+                    .strip_prefix("rule:")
+                    .and_then(|t| t.parse::<i64>().ok());
+                let rule = rule_id.and_then(|rid| st.rules.get(rid)).map(|r| r.name);
+                let result = st
+                    .store
+                    .task_state_get(run.id, "", "result")?
+                    .map(|text| match serde_json::from_str::<Value>(&text) {
+                        Ok(Value::String(s)) => s,
+                        Ok(v) => v.to_string(),
+                        Err(_) => text,
+                    })
+                    .map(|t| t.chars().take(200).collect::<String>());
+                out.push(ChainRun {
+                    run,
+                    rule_id,
+                    rule,
+                    round,
+                    result,
+                });
+            }
+            Ok(RunChain { root, runs: out })
+        })
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))??;
+    Ok(Json(chain))
+}
+
 #[utoipa::path(get, path = "/api/runs/{id}/graph", params(("id" = i64, Path), PassQuery), responses((status = 200, body = RunGraph)))]
 pub async fn run_graph(
     State(state): State<Arc<AppState>>,

@@ -555,6 +555,13 @@ pub struct RuleAction {
     pub states: Vec<String>,
     /// `run_flow`: seconds from the firing after which the run starts.
     pub delay: Option<f64>,
+    /// `run_flow`: copy the triggering run's parameters by name into those the
+    /// target declares, before templates apply, as `after=` does.
+    pub copy_parameters: bool,
+    /// `run_flow` into an agent: whether the runner appends the triggering
+    /// run's result as a data block (unset means yes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pass_result: Option<bool>,
 }
 
 /// Clock of a clock-armed proactive rule: a cron expression in a timezone.
@@ -581,6 +588,15 @@ pub struct RuleSpec {
     pub allow_self: bool,
     /// Fire only on an event whose `failures_in_a_row` is at least this; 0 is off.
     pub after_consecutive: i64,
+    /// A Jinja expression over the template context, checked after the match
+    /// and before the guards; undefined values are false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub condition: Option<String>,
+    /// The most runs this rule may add to one chain; 0 is off.
+    pub max_per_chain: i64,
+    /// What to do instead when `max_per_chain` is reached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_limit: Option<Box<RuleAction>>,
     /// Proactive rules: the expected event that disarms an expectation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unless: Option<RuleMatch>,
@@ -602,6 +618,9 @@ impl Default for RuleSpec {
             max_per_minute: 60,
             allow_self: false,
             after_consecutive: 0,
+            condition: None,
+            max_per_chain: 0,
+            on_limit: None,
             unless: None,
             within: None,
             at: None,

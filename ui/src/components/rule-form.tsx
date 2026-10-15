@@ -29,6 +29,14 @@ export function summarizeWhen(when: RuleSpec["when"]): string {
   return parts.join(" · ");
 }
 
+/** The guards worth a glance in a list: the condition and the loop bound. */
+export function summarizeGuards(rule: Pick<RuleSpec, "condition" | "max_per_chain">): string {
+  const parts: string[] = [];
+  if (rule.condition) parts.push(`if ${rule.condition}`);
+  if (rule.max_per_chain) parts.push(`≤${rule.max_per_chain} per chain`);
+  return parts.join(" · ");
+}
+
 export function summarizeDo(actions: RuleAction[]): string {
   return actions
     .map((a) => {
@@ -77,6 +85,9 @@ export function emptyRule(): { name: string; enabled: boolean } & RuleSpec {
     max_per_minute: 60,
     allow_self: false,
     after_consecutive: 0,
+    condition: null,
+    max_per_chain: 0,
+    on_limit: null,
     unless: null,
     within: null,
     at: null,

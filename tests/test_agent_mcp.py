@@ -526,7 +526,10 @@ def test_get_run_lists_task_state(agent):
     srv.wait_run(run["id"])
     srv.client._request("POST", f"/api/runs/{run['id']}/state", body={"scope": "step-0", "key": "job_id", "value": "j-9"})
     out = call(srv, "get_run", run_id=run["id"])["data"]
-    assert out["task_state"] == [{"scope": "step-0", "key": "job_id", "value": "j-9", "updated_at": out["task_state"][0]["updated_at"]}]
+    noted = [s for s in out["task_state"] if s["scope"] == "step-0"]
+    assert noted == [{"scope": "step-0", "key": "job_id", "value": "j-9", "updated_at": noted[0]["updated_at"]}]
+    # The body's return value is listed too, as the flow-level note `result`.
+    assert [s["key"] for s in out["task_state"] if s["scope"] == ""] == ["result"]
 
 
 def test_backfill_values_and_missing_only_dry_run(agent):

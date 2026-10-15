@@ -106,7 +106,7 @@ jobs:
             uv pip install "pydantic-ai-slim==${{ matrix.pydantic-ai }}"
           fi
       - name: Pydantic AI tests
-        run: uv run --no-sync pytest -q tests/test_pydantic_ai.py tests/test_async_units.py --timeout 300 -rf
+        run: uv run --no-sync pytest -q tests/test_pydantic_ai.py tests/test_async_units.py tests/test_ui_agents.py tests/test_agent_handoffs.py --timeout 300 -rf
 
   docs:
     name: Docs

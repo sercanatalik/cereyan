@@ -193,6 +193,7 @@ nav:
           - Secure the server: guides/secure-the-server.md
           - Sign in with your identity provider: guides/sign-in-with-your-identity-provider.md
           - Define an agent in the UI: guides/define-an-agent.md
+          - Hand off between agents: guides/hand-off-between-agents.md
           - Use cereyan from an AI assistant: guides/ai-assistants.md
           - Make a Pydantic AI agent durable: guides/durable-pydantic-ai-agent.md
           - Test a pipeline: guides/test-a-pipeline.md

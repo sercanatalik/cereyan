@@ -32,6 +32,8 @@ pub struct RunContext {
     /// The first run of the crash chain `run` continues, when it is a crash
     /// rerun. `once = per_run` counts the whole chain as one run.
     pub chain_root: Option<i64>,
+    /// The run's `result` note, loaded for terminal `run.*` events only.
+    pub result: Option<Value>,
 }
 
 impl RunContext {
@@ -253,7 +255,22 @@ pub fn template_context(event: &Event, ctx: &RunContext) -> Value {
         "state": state,
         "payload": Value::Object(event.payload.clone()),
         "parameters": parameters,
+        "result": ctx.result.clone().unwrap_or(Value::Null),
+        "loop": {"count": 0},
     })
+}
+
+/// Evaluate a rule's `condition` against a template context. Undefined values
+/// are false rather than errors, so `result.approved` on a run without a
+/// result is a quiet no.
+pub fn evaluate_condition(expression: &str, context: &Value) -> Result<bool, String> {
+    let mut env = Environment::new();
+    env.set_undefined_behavior(UndefinedBehavior::Lenient);
+    let expr = env
+        .compile_expression(expression)
+        .map_err(|e| format!("condition: {e}"))?;
+    let value = expr.eval(context).map_err(|e| format!("condition: {e}"))?;
+    Ok(value.is_true())
 }
 
 pub fn render(
@@ -541,7 +558,49 @@ pub fn validate_spec(spec: &RuleSpec) -> Result<(), String> {
     } else if spec.at.is_some() {
         return Err("at is only valid together with unless".into());
     }
+    if let Some(expr) = &spec.condition {
+        if expr.trim().is_empty() {
+            return Err("condition must not be empty; leave it out instead".into());
+        }
+        let mut env = Environment::new();
+        env.set_undefined_behavior(UndefinedBehavior::Lenient);
+        env.compile_expression(expr)
+            .map_err(|e| format!("condition: {e}"))?;
+    }
+    if spec.max_per_chain < 0 {
+        return Err("max_per_chain must be zero or more".into());
+    }
+    if let Some(a) = &spec.on_limit {
+        if spec.max_per_chain == 0 {
+            return Err("on_limit needs max_per_chain".into());
+        }
+        validate_action(usize::MAX, a)
+            .map_err(|e| e.replace(&format!("action {} ", usize::MAX), "on_limit "))?;
+    }
     for (i, a) in spec.actions.iter().enumerate() {
+        validate_action(i, a)?;
+    }
+    let env = environment();
+    for (i, a) in spec.actions.iter().enumerate() {
+        for (field, text) in [
+            ("body", &a.body),
+            ("subject", &a.subject),
+            ("message", &a.message),
+            ("url", &a.url),
+        ] {
+            if let Some(t) = text {
+                if let Err(e) = env.template_from_str(t) {
+                    return Err(format!("action {i}: {field} template: {e}"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// One action's shape, by kind.
+fn validate_action(i: usize, a: &RuleAction) -> Result<(), String> {
+    {
         match a.kind.as_str() {
             "run_flow" => {
                 if a.flow.as_deref().unwrap_or("").is_empty() {
@@ -603,21 +662,6 @@ pub fn validate_spec(spec: &RuleSpec) -> Result<(), String> {
                 }
             }
             other => return Err(format!("action {i}: unknown kind {other:?}")),
-        }
-    }
-    let env = environment();
-    for (i, a) in spec.actions.iter().enumerate() {
-        for (field, text) in [
-            ("body", &a.body),
-            ("subject", &a.subject),
-            ("message", &a.message),
-            ("url", &a.url),
-        ] {
-            if let Some(t) = text {
-                if let Err(e) = env.template_from_str(t) {
-                    return Err(format!("action {i}: {field} template: {e}"));
-                }
-            }
         }
     }
     Ok(())
@@ -783,6 +827,7 @@ mod tests {
                 run: Some(run),
                 flow: None,
                 chain_root: None,
+                result: None,
             },
         )
     }
@@ -846,6 +891,7 @@ mod tests {
             run: None,
             flow: None,
             chain_root: None,
+            result: None,
         };
         assert!(matches(&m, &e, &ctx));
 
@@ -944,6 +990,7 @@ mod tests {
             run: Some(run("api")),
             flow: None,
             chain_root: None,
+            result: None,
         };
         assert!(matches(&m, &event("run.failed"), &ctx));
         assert!(!matches(&m, &event("task_run.failed"), &ctx));
@@ -979,6 +1026,7 @@ mod tests {
             run: Some(run("api")),
             flow: None,
             chain_root: None,
+            result: None,
         };
         assert_eq!(
             check_guards(&r, &event("run.failed"), &ctx, &st, 0),
@@ -996,6 +1044,7 @@ mod tests {
             }),
             flow: None,
             chain_root: None,
+            result: None,
         };
         assert_eq!(
             check_guards(&r, &event("run.failed"), &ctx2, &st, 1_000_000),
@@ -1013,6 +1062,7 @@ mod tests {
             }),
             flow: None,
             chain_root: None,
+            result: None,
         };
         assert_eq!(
             check_guards(&r, &event("run.failed"), &ctx3, &st, 22_000_000),
@@ -1025,6 +1075,7 @@ mod tests {
             }),
             flow: None,
             chain_root: None,
+            result: None,
         };
         assert_eq!(
             check_guards(
@@ -1057,6 +1108,7 @@ mod tests {
             run: Some(run("api")),
             flow: None,
             chain_root: None,
+            result: None,
         };
         let context = template_context(&event("run.failed"), &ctx);
         let action = RuleAction {
@@ -1144,6 +1196,7 @@ mod tests {
             run: Some(run("api")),
             flow: None,
             chain_root: None,
+            result: None,
         };
         assert_eq!(
             check_guards(&r, &event("run.crashed"), &first, &st, 0),
@@ -1158,6 +1211,7 @@ mod tests {
             }),
             flow: None,
             chain_root: Some(1),
+            result: None,
         };
         assert_eq!(
             check_guards(&r, &event("run.crashed"), &rerun, &st, 1),

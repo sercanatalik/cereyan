@@ -43,7 +43,7 @@ Any name outside those prefixes is a custom event of yours and is accepted as ty
 
 | Kind | Fields | Effect |
 |---|---|---|
-| `run_flow` | `flow`, `parameters` (templated), `delay` (seconds) | Create a run, now or `delay` seconds later; it records `created_by = rule:<id>` |
+| `run_flow` | `flow`, `parameters` (templated), `delay` (seconds), `copy_parameters`, `pass_result` | Create a run, now or `delay` seconds later; it records `created_by = rule:<id>` and the event's run as its parent. `copy_parameters` copies the event's run's parameters by name into those the target declares before the templates apply; `pass_result: false` keeps the result out of an agent's prompt |
 | `cancel_run` | | Cancel the run the event is about |
 | `cancel_runs` | `flow` (templated, defaults to the event's flow), `parameters` (templated), `states` | Cancel every active run of the flow whose parameters equal the rendered values, in the given state types (all non-terminal ones by default), never the event's own run; the outcome lists the ids |
 | `set_state` | `state_type`, `message` | Force the run into a state |
@@ -58,13 +58,16 @@ While the scheduler is [paused for maintenance](../concepts/schedules.md#pausing
 
 ## Templates
 
-Fields marked templated use Jinja syntax, rendered in Rust, with `event`, `run`, `flow`, `state`, `payload`, and `parameters` in scope:
+Fields marked templated use Jinja syntax, rendered in Rust, with `event`, `run`, `flow`, `state`, `payload`, `parameters`, `result` and `loop` in scope:
 
 ```text
 {{ flow.name }} run {{ run.name }} ended {{ state.type }}: {{ state.message }}
 {{ run.parameters.day }}
 {{ payload.table }}
+{{ result.rows }} rows loaded, round {{ loop.count }}
 ```
+
+`result` is the run's return value, recorded as the state `result` when the body returns JSON under 64 KB; it is present for `run.*` events of a run that has ended. `loop.count` is how many runs this rule already added to the event's run's chain.
 
 An undefined variable is an error for that action only. **Test** on the rule page (`POST /api/rules/{id}/test`) renders the templates against the most recent matching event without executing anything.
 
@@ -115,6 +118,14 @@ assert app.rules[0].spec()["when"]["events"] == ["run.failed"]
 
 The function receives the event and the run as dicts and its return value is recorded with the firing. Code rules are re-registered on every server start, show read-only on the Rules page with a `code` badge, and fire on the offline path for a script's own events once a server has registered them. Guards are keyword arguments: `once`, `cooldown_seconds`, `max_per_minute`, `allow_self`, and `name` — anything else raises, so a misspelled guard cannot silently leave the rule on its defaults.
 
+## Conditions
+
+`condition` is a Jinja expression checked after the match and before the guards, so a false condition consumes no `once` or cooldown: `result.rows > 0`, `not result.approved`, `payload.table == "orders"`. An undefined value is false rather than an error, so a run without a result does not fire. A condition that does not compile is refused when the rule is saved, and **Test** reports what it evaluated to against the latest matching event.
+
+## Loops
+
+Two rules that run each other's flows would never stop, so a data rule whose `run_flow` leads back to one of its own `when` flows is refused unless it has `max_per_chain`, the most runs the rule may add to one chain. A chain is the runs linked through `parent_run_id` and `created_by = run:<id>`: what a rule created from a run, a dependency, a retry and a crash rerun, so a rerun of a round is not a new round. At the bound the rule does not fire: the firing is recorded with its actions `limited`, a `rule.loop_limited` event names the rule, the chain's root and the rounds, and `on_limit`, one action, runs in its place. A rule that runs its own flow is only a loop with `allow_self`; without it the self-trigger guard stops it.
+
 ## Guards
 
 - `once="per_run"` (the default) fires at most once per run, so a run that retries three times alerts once. `once="never"` lifts the limit and fires on every matching event.
@@ -127,6 +138,6 @@ A rule whose names are all valid can still match nothing — the wrong flow, a t
 
 ## See what fired
 
-The rule page lists firings with each action's outcome; `GET /api/rules/{id}/firings` returns them. Every firing also records `rule.fired` and per-action `rule.action.completed` or `rule.action.failed` events.
+The rule page lists firings with each action's outcome; `GET /api/rules/{id}/firings` returns them. Every firing also records `rule.fired` and per-action `rule.action.completed` or `rule.action.failed` events, and a bounded rule at its bound records `rule.loop_limited`.
 
 Related: [Events and rules](../concepts/events-and-rules.md), [Detect when something did not happen](detect-missing-events.md).

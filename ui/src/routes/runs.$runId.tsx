@@ -236,6 +236,16 @@ function RunDetail() {
   });
   const previous = earlier.data?.items.find((x) => x.id < id) ?? null;
   // Notes tasks kept for their own later attempts (task_state).
+  const chain = useQuery({
+    queryKey: ["chain", id],
+    queryFn: async () => unwrap(await api.GET("/api/runs/{id}/chain", { params: { path: { id } } })),
+    enabled: tab === "details",
+  });
+  const rules = useQuery({
+    queryKey: ["rules"],
+    queryFn: async () => unwrap(await api.GET("/api/rules")),
+    enabled: tab === "details" && !!run.data?.created_by?.startsWith("rule:"),
+  });
   const notes = useQuery({
     queryKey: ["run-state", id],
     queryFn: async () => unwrap(await api.GET("/api/runs/{id}/state", { params: { path: { id } } })),
@@ -506,10 +516,62 @@ function RunDetail() {
                       <Link to="/runs/$runId" params={{ runId: r.created_by.slice(4) }} className="underline">
                         run {r.created_by.slice(4)}
                       </Link>
+                    ) : r.created_by?.startsWith("rule:") ? (
+                      <span data-testid="created-by-rule">
+                        rule{" "}
+                        <Link to="/rules" className="underline">
+                          {rules.data?.find((x) => String(x.id) === (r.created_by ?? "").slice(5))?.name ??
+                            (r.created_by ?? "").slice(5)}
+                        </Link>
+                        {r.parent_run_id != null ? (
+                          <>
+                            {" from "}
+                            <Link
+                              to="/runs/$runId"
+                              params={{ runId: String(r.parent_run_id) }}
+                              className="underline"
+                            >
+                              run{" "}
+                              {chain.data?.runs.find((x) => x.id === r.parent_run_id)?.name ??
+                                r.parent_run_id}
+                            </Link>
+                          </>
+                        ) : null}
+                      </span>
                     ) : (
                       r.created_by
                     ),
                   },
+                  ...(chain.data && chain.data.runs.length > 1
+                    ? [
+                        {
+                          label: "Chain",
+                          value: (
+                            <span className="flex flex-wrap gap-1 text-xs" data-testid="run-chain">
+                              {chain.data.runs.map((x, i) => (
+                                <span key={x.id}>
+                                  {i > 0 ? <span className="text-muted-foreground">→ </span> : null}
+                                  {x.id === r.id ? (
+                                    <span className="font-medium">{x.flow_name}</span>
+                                  ) : (
+                                    <Link
+                                      to="/runs/$runId"
+                                      params={{ runId: String(x.id) }}
+                                      className="underline"
+                                    >
+                                      {x.flow_name}
+                                    </Link>
+                                  )}
+                                  {x.round > 1 ? (
+                                    <span className="text-muted-foreground"> {x.round}</span>
+                                  ) : null}
+                                </span>
+                              ))}
+                            </span>
+                          ),
+                        },
+                      ]
+                    : []),
                   { label: "Scheduled for", value: formatTime(r.scheduled_time) },
                   { label: "Priority", value: String(r.priority ?? 0) },
                   { label: "Attempt", value: String(r.attempt ?? 0) },
