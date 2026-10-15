@@ -30,6 +30,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0023_run_message.sql"),
     include_str!("../migrations/0024_effect_journal.sql"),
     include_str!("../migrations/0025_task_run_once.sql"),
+    include_str!("../migrations/0026_agents.sql"),
 ];
 
 pub fn latest_version() -> i64 {

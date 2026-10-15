@@ -99,6 +99,16 @@ Each key is a resource name and its value the total, for example `db = 4`. A key
 |---|---|---|---|
 | `title` | string | `cereyan` | Name shown next to the mark in the top bar, cut to 240 px with an ellipsis, and in full as the browser tab title. It is trimmed and may have at most 80 characters and no control characters; an invalid title logs a warning at startup and `cereyan` shows instead. |
 
+### `[agents]`
+
+What an [agent defined in the UI](../concepts/agents.md) may start or reach, and how much all agents may spend. Absent or empty lists allow nothing from the UI.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `mcp_commands` | array of strings | `[]` | Executables a stdio MCP server attached to an agent may start, such as `npx` or `uvx`, matched on the executable; arguments stay free. A definition naming another command is refused when saved, and an existing agent is disabled rather than run when the command leaves the list. |
+| `mcp_urls` | array of strings | `[]` | URL patterns an HTTP MCP server may use, with `*` standing for any part of a host segment (`https://*.internal.example.com/mcp`), and `self` for the server's own MCP tools. |
+| `cost_per_day` | number | `0` | A cap on the estimated cost of all agent runs in a UTC day, in dollars. When today's runs reach it, a new agent run fails at start naming the cap; `0` means no cap. |
+
 The Settings page (`PATCH /api/settings`) updates resource totals, retention, the crash retry default, and the UI title and writes them back to `cereyan.toml`. Writing back rewrites the file, so comments in it are not kept. A server with no served directory has no file to write: a title saved there lasts until the server restarts.
 
 The Settings page's Environment tab (`GET /api/settings/environment`) lists every setting in effect with where its value came from, following the precedence below: the flag, the environment variable, `app.serve()`, `cereyan.toml`, an edit in Settings, or the default. It shows `cereyan.toml` with `[server] token` and `[email] password` replaced, and never sends either value.

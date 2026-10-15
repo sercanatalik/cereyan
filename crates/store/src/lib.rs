@@ -1,6 +1,7 @@
 //! SQLite store: one writer thread with group commit, a read pool, an OS
 //! advisory lock, embedded migrations, and corruption quarantine.
 
+mod agents;
 mod error;
 mod home;
 mod manage;
@@ -12,6 +13,7 @@ pub mod secrets;
 mod workers;
 mod writer;
 
+pub use agents::{AgentRow, AgentWrite, ApprovalRow};
 pub use error::StoreError;
 pub use home::resolve_home;
 pub use manage::{ProjectCounts, ProjectRow, TableCounts, BACKUP_DIR};

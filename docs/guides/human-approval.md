@@ -82,4 +82,4 @@ A [retry from failure](retries-timeouts-crashes.md#retry-a-finished-run-from-whe
 
 Without a server, `wait_for_input` reads the answer from the terminal (as JSON when a schema is given) and raises `CereyanError` when there is no interactive terminal, so scripts under cron fail fast instead of hanging.
 
-Related: [Send a message to a running flow](messages.md), [Use cereyan with an AI agent](agents.md) for answering questions from an agent, [Cache task results](cache-results.md).
+Related: [Send a message to a running flow](messages.md), [Use cereyan with an AI agent](ai-assistants.md) for answering questions from an agent, [Cache task results](cache-results.md).

@@ -1,6 +1,7 @@
 //! HTTP API under `/api`, the SSE stream, engine endpoints, custom routes,
 //! and the embedded UI fallback.
 
+pub mod agents;
 pub mod backfills;
 pub mod counts;
 pub mod database;
@@ -26,7 +27,7 @@ pub mod workers;
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use serde::Serialize;
 use utoipa::OpenApi;
@@ -58,6 +59,9 @@ pub struct ServerInfo {
     pub token_file: Option<String>,
     /// The global pause while the scheduler is paused.
     pub paused: Option<crate::scheduler::Pause>,
+    /// What this host can run beyond flows: `pydantic_ai` is the extra's version, or null.
+    #[schema(value_type = Object)]
+    pub features: serde_json::Map<String, serde_json::Value>,
 }
 
 #[utoipa::path(get, path = "/api/health", responses((status = 200, description = "Server is up")))]
@@ -87,6 +91,7 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         exposed: state.exposed(),
         token_file: state.token_file(),
         paused: state.pause(),
+        features: state.config.features.clone(),
     })
 }
 
@@ -199,9 +204,28 @@ async fn server_info(State(state): State<Arc<AppState>>) -> Json<ServerInfo> {
         observability::get_variable,
         observability::patch_variable,
         observability::delete_variable,
+        agents::list_agents,
+        agents::create_agent,
+        agents::catalogue,
+        agents::get_agent,
+        agents::patch_agent,
+        agents::delete_agent,
+        agents::list_approvals,
+        agents::add_approval,
+        agents::delete_approval,
     ),
     components(schemas(
         ServerInfo,
+        agents::AgentDefinition,
+        agents::AgentResponse,
+        agents::ToolSpec,
+        agents::Policy,
+        agents::Limits,
+        agents::Output,
+        agents::ApprovalBody,
+        agents::Usage24h,
+        cereyan_store::AgentRow,
+        cereyan_store::ApprovalRow,
         crate::scheduler::Pause,
         pause::SchedulerStatus,
         pause::PauseBody,
@@ -436,6 +460,25 @@ pub fn router(state: Arc<AppState>) -> Router {
             get(observability::list_events).post(observability::emit_event),
         )
         .route("/api/events/{id}", get(observability::get_event))
+        .route(
+            "/api/agents",
+            get(agents::list_agents).post(agents::create_agent),
+        )
+        .route("/api/agents/catalogue", get(agents::catalogue))
+        .route(
+            "/api/agents/{id}",
+            get(agents::get_agent)
+                .patch(agents::patch_agent)
+                .delete(agents::delete_agent),
+        )
+        .route(
+            "/api/agents/{id}/approvals",
+            get(agents::list_approvals).post(agents::add_approval),
+        )
+        .route(
+            "/api/agents/{id}/approvals/{aid}",
+            delete(agents::delete_approval),
+        )
         .route(
             "/api/rules",
             get(observability::list_rules).post(observability::create_rule),

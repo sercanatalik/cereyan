@@ -1,6 +1,6 @@
-# How to use cereyan with an AI agent
+# How to use cereyan from an AI assistant
 
-Cereyan has a built-in [MCP](https://modelcontextprotocol.io) server, so an agent can list flows, start runs, follow and diagnose them, backfill, manage schedules, answer a paused run's question, and send a waiting run a message. Nothing extra to install; it ships in the wheel and runs inside `cereyan serve`.
+Cereyan has a built-in [MCP](https://modelcontextprotocol.io) server, so an assistant such as Claude Code or Claude Desktop can list flows, start runs, follow and diagnose them, backfill, manage schedules, answer a paused run's question, and send a waiting run a message. Nothing extra to install; it ships in the wheel and runs inside `cereyan serve`.
 
 ## Connect Claude Code or Claude Desktop
 

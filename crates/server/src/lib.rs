@@ -164,6 +164,15 @@ pub struct ServeConfig {
     /// The address people reach the UI at, for `{{ run.url }}` in rule templates.
     #[serde(default)]
     pub public_url: Option<String>,
+    /// `[agents]` in cereyan.toml: what a UI-defined agent may start or reach.
+    #[serde(default)]
+    pub agents: api::agents::AgentsConfig,
+    /// What agents may be given on this host, computed by Python at start.
+    #[serde(default)]
+    pub agent_catalogue: serde_json::Value,
+    /// What this host can run beyond flows, such as the Pydantic AI version.
+    #[serde(default)]
+    pub features: serde_json::Map<String, serde_json::Value>,
 }
 
 fn default_auth_scope() -> String {
@@ -355,6 +364,7 @@ impl Server {
             .write()
             .unwrap_or_else(|e| e.into_inner()) = rule_dispatcher;
         rules::load(&state);
+        api::agents::register_all(&state);
         for (key, slot) in [
             ("retain_days", &state.retain_days),
             ("retain_runs_days", &state.retain_runs_days),

@@ -102,6 +102,15 @@ const bytes = (n: unknown): string | null =>
   typeof n === "number" && n > 0 ? `${Math.round(n / 1024 ** 3)} GB` : null;
 
 /** The host card: what the worker reported about its machine. */
+/** Whether the host can run agents: the Pydantic AI version it reported, or that it cannot. */
+function agentsText(w: HostFacts): string | null {
+  const features = (w.meta as { features?: { pydantic_ai?: string | null } } | undefined)?.features;
+  if (!features) return null;
+  return features.pydantic_ai
+    ? `Pydantic AI ${features.pydantic_ai}`
+    : "no pydantic-ai extra: agents cannot run here";
+}
+
 export function HostCard({ w, aside }: { w: HostFacts; aside?: string }) {
   const memTotal = bytes(w.meta?.memory_total);
   const memFree = bytes(w.meta?.memory_available);
@@ -115,6 +124,7 @@ export function HostCard({ w, aside }: { w: HostFacts; aside?: string }) {
     ["Memory", memTotal ? (memFree ? `${memTotal} (${memFree} free)` : memTotal) : null],
     ["Python", metaText(w, "python")],
     ["cereyan", w.version],
+    ["Agents", agentsText(w)],
     ["Process", metaText(w, "pid") ? `pid ${metaText(w, "pid")}` : null],
     ["Checkout", metaText(w, "checkout")],
     ["Git", metaText(w, "git")],

@@ -235,3 +235,17 @@ def test_a_module_that_does_not_resolve_from_its_source_dir(tmp_path, monkeypatc
     assert "flows.financing.app is not found from" in source[0]["message"]
     assert str(root / "flows" / "financing") in source[0]["message"]
     assert "error: module flows.financing.app" in render(report)
+
+
+def test_check_warns_about_agents_on_a_host_without_the_extra(tmp_path, monkeypatch):
+    from cereyan import check, serve
+
+    (tmp_path / "cereyan.toml").write_text('[agents]\nmcp_urls = ["self"]\n')
+    (tmp_path / "pipeline.py").write_text("from cereyan import flow\n\n@flow\ndef f():\n    return 1\n")
+    monkeypatch.setattr(serve, "host_features", lambda: {"pydantic_ai": None})
+    report = check.check_directory(str(tmp_path))
+    agents = [f for f in report["findings"] if f["kind"] == "agents"]
+    assert agents and agents[0]["level"] == "warning" and "cereyan[pydantic-ai]" in agents[0]["message"]
+    monkeypatch.setattr(serve, "host_features", lambda: {"pydantic_ai": "2.55.0"})
+    report = check.check_directory(str(tmp_path))
+    assert not [f for f in report["findings"] if f["kind"] == "agents"]

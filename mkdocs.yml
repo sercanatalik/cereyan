@@ -83,7 +83,8 @@ plugins:
   - search
   - redirects:
       redirect_maps:
-        agents.md: guides/agents.md
+        agents.md: guides/ai-assistants.md
+        guides/agents.md: guides/ai-assistants.md
         concepts.md: concepts/app-and-projects.md
         configuration.md: reference/configuration.md
         projects.md: concepts/app-and-projects.md
@@ -159,6 +160,7 @@ nav:
       - Backfills: concepts/backfills.md
       - Dependencies: concepts/dependencies.md
       - Events and rules: concepts/events-and-rules.md
+      - Agents: concepts/agents.md
       - Artifacts: concepts/artifacts.md
       - Variables: concepts/variables.md
       - Engines and the home directory: concepts/engines-and-home.md
@@ -190,7 +192,8 @@ nav:
       - Operating:
           - Secure the server: guides/secure-the-server.md
           - Sign in with your identity provider: guides/sign-in-with-your-identity-provider.md
-          - Use cereyan with an AI agent: guides/agents.md
+          - Define an agent in the UI: guides/define-an-agent.md
+          - Use cereyan from an AI assistant: guides/ai-assistants.md
           - Make a Pydantic AI agent durable: guides/durable-pydantic-ai-agent.md
           - Test a pipeline: guides/test-a-pipeline.md
           - Run the server as a service: guides/run-as-a-service.md

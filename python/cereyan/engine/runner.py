@@ -873,6 +873,7 @@ async def run_async_unit(
     once: bool = False,
     probe=None,
     defer=None,
+    summarize=None,
 ) -> Any:
     """Run ``body()``, a coroutine factory, as one task run on the caller's event loop.
 
@@ -882,6 +883,10 @@ async def run_async_unit(
     checkpoints and retries by the same rules, but awaits the body where it is
     instead of handing it to the run's runner. Not public API: there is no
     `async def` task yet.
+
+    ``summarize(result)`` may return a dict recorded as the task run's
+    ``details.summary``, so the UI can show what a unit did without decoding
+    the integration's own result format.
 
     ``once`` gives the unit `task-effects`' guarantees: its start and outcome are
     reported to the server before the body runs and before the caller continues,
@@ -974,7 +979,15 @@ async def run_async_unit(
                 logger.error("task %s failed: %s", dynamic_key, message)
                 raise
             checkpoint = _write_checkpoint(run, unit, dynamic_key, external_id, input_hash, result, logger) if checkpointing else None
-            backend.transition_task_run(external_id, "Completed", None, None, {"checkpoint": checkpoint} if checkpoint else None)
+            details: dict[str, Any] = {"checkpoint": checkpoint} if checkpoint else {}
+            if summarize is not None:
+                try:
+                    summary = summarize(result)
+                    if summary:
+                        details["summary"] = summary
+                except Exception as exc:  # noqa: BLE001 - a summary is a convenience, never a failure
+                    logger.debug("task %s: no summary: %s", dynamic_key, exc)
+            backend.transition_task_run(external_id, "Completed", None, None, details or None)
             logger.info("task %s completed", dynamic_key)
             return result
     finally:

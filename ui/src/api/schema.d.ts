@@ -5,6 +5,86 @@
  */
 
 export interface paths {
+    "/api/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_agents"];
+        put?: never;
+        post: operations["create_agent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_agent"];
+        put?: never;
+        post?: never;
+        delete: operations["delete_agent"];
+        options?: never;
+        head?: never;
+        patch: operations["patch_agent"];
+        trace?: never;
+    };
+    "/api/agents/{id}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_approvals"];
+        put?: never;
+        post: operations["add_approval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{id}/approvals/{aid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["delete_approval"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["catalogue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/artifacts": {
         parameters: {
             query?: never;
@@ -1394,6 +1474,80 @@ export interface components {
             key?: string | null;
             parameters?: Record<string, never>;
         };
+        /** @description What the UI stores for an agent and the runner builds from. */
+        AgentDefinition: {
+            /** @description A secret Variable's name; never the key itself. */
+            api_key?: string | null;
+            /** Format: int64 */
+            crash_retries?: number;
+            description?: string;
+            enabled?: boolean;
+            group?: string | null;
+            instructions?: string;
+            limits?: components["schemas"]["Limits"];
+            model: string;
+            name: string;
+            output?: components["schemas"]["Output"];
+            policy?: components["schemas"]["Policy"];
+            project?: string;
+            prompt?: string;
+            tools?: components["schemas"]["ToolSpec"][];
+        };
+        /** @description An agent as the API returns it: the row, plus what the runner checks at start. */
+        AgentResponse: components["schemas"]["AgentRow"] & {
+            /** @description Why the allowlist refuses it now, if it does. */
+            allow_error?: string | null;
+            /** Format: double */
+            cost_cap: number;
+            /**
+             * Format: double
+             * @description Estimated cost of today's agent runs and the daily cap (0 is none).
+             */
+            cost_today: number;
+            /** @description The flow's parameter schema derived from the templates. */
+            parameter_schema: Record<string, never>;
+            /** @description This agent's runs, tokens and estimated cost over the past 24 hours. */
+            usage_24h: components["schemas"]["Usage24h"];
+        };
+        /** @description A stored agent definition and where it is registered. */
+        AgentRow: {
+            created_at: components["schemas"]["i64"];
+            /** @description The definition as the UI stores it. */
+            definition: Record<string, never>;
+            enabled: boolean;
+            external_id: components["schemas"]["Id"];
+            /**
+             * Format: int64
+             * @description The flow the agent runs as, once registered.
+             */
+            flow_id?: number | null;
+            /** Format: int64 */
+            id: number;
+            name: string;
+            project: string;
+            /** @description `ui`; `code` is reserved for agents declared in modules. */
+            source: string;
+            updated_at: components["schemas"]["i64"];
+        };
+        ApprovalBody: {
+            args?: Record<string, never>;
+            /** Format: int64 */
+            run_id?: number | null;
+            tool: string;
+        };
+        /** @description A tool call approved with "always allow": matched by tool and argument hash. */
+        ApprovalRow: {
+            /** Format: int64 */
+            agent_id: number;
+            args: Record<string, never>;
+            args_hash: string;
+            created_at: components["schemas"]["i64"];
+            /** Format: int64 */
+            first_run_id?: number | null;
+            /** Format: int64 */
+            id: number;
+            tool: string;
+        };
         ArtifactBody: {
             data: Record<string, never>;
             key?: string | null;
@@ -2110,6 +2264,16 @@ export interface components {
              */
             schedule_id?: number | null;
         };
+        Limits: {
+            /** Format: double */
+            cost_usd?: number | null;
+            /** Format: int64 */
+            requests?: number | null;
+            /** Format: double */
+            timeout_seconds?: number | null;
+            /** Format: int64 */
+            tokens?: number | null;
+        };
         LocalPathBody: {
             /** @description The resolved path of the `LocalTarget`, on the worker. */
             path: string;
@@ -2142,6 +2306,10 @@ export interface components {
             /** Format: int64 */
             interval_secs: number;
             samples: components["schemas"]["Sample"][];
+        };
+        Output: {
+            kind?: string;
+            schema?: Record<string, never>;
         };
         /** @description The global pause: every schedule held at once, with a reason and an end. */
         Pause: {
@@ -2190,6 +2358,10 @@ export interface components {
              * @description When a `disabled` loop resumes on its own, microseconds since the epoch.
              */
             until?: number | null;
+        };
+        Policy: {
+            approvals?: string;
+            once?: string[];
         };
         PrefilterBody: {
             skip: string[];
@@ -2831,6 +3003,8 @@ export interface components {
             engines: unknown[];
             /** @description Bound beyond loopback with no token required. */
             exposed: boolean;
+            /** @description What this host can run beyond flows: `pydantic_ai` is the extra's version, or null. */
+            features: Record<string, never>;
             home: string;
             paused?: null | components["schemas"]["Pause"];
             /** Format: int32 */
@@ -3127,6 +3301,11 @@ export interface components {
             /** @description The run's state type; `null` for a run not started yet. */
             state?: string | null;
         };
+        ToolSpec: {
+            kind: string;
+            name: string;
+            options?: Record<string, never>;
+        };
         TransitionBody: {
             details?: Record<string, never>;
             force?: boolean;
@@ -3192,6 +3371,14 @@ export interface components {
             skipped_at?: number | null;
             /** @description Who skipped it (`ui`, `api`), when `skipped`. */
             skipped_by?: string | null;
+        };
+        Usage24h: {
+            /** Format: double */
+            cost_usd: number;
+            /** Format: int64 */
+            runs: number;
+            /** Format: int64 */
+            tokens: number;
         };
         ValueDiff: {
             changed: boolean;
@@ -3382,6 +3569,247 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_agents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentResponse"][];
+                };
+            };
+        };
+    };
+    create_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentDefinition"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    patch_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentDefinition"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentResponse"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_approvals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalRow"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    add_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalBody"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalRow"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                aid: number;
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    catalogue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What agents on this server may be given */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
     list_artifacts: {
         parameters: {
             query?: {

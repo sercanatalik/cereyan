@@ -51,6 +51,229 @@
         ],
         "type": "object"
       },
+      "AgentDefinition": {
+        "description": "What the UI stores for an agent and the runner builds from.",
+        "properties": {
+          "api_key": {
+            "description": "A secret Variable's name; never the key itself.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "crash_retries": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "group": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/Limits"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "output": {
+            "$ref": "#/components/schemas/Output"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/Policy"
+          },
+          "project": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ToolSpec"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "model"
+        ],
+        "type": "object"
+      },
+      "AgentResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AgentRow"
+          },
+          {
+            "properties": {
+              "allow_error": {
+                "description": "Why the allowlist refuses it now, if it does.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cost_cap": {
+                "format": "double",
+                "type": "number"
+              },
+              "cost_today": {
+                "description": "Estimated cost of today's agent runs and the daily cap (0 is none).",
+                "format": "double",
+                "type": "number"
+              },
+              "parameter_schema": {
+                "description": "The flow's parameter schema derived from the templates.",
+                "type": "object"
+              },
+              "usage_24h": {
+                "$ref": "#/components/schemas/Usage24h",
+                "description": "This agent's runs, tokens and estimated cost over the past 24 hours."
+              }
+            },
+            "required": [
+              "parameter_schema",
+              "cost_today",
+              "cost_cap",
+              "usage_24h"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "An agent as the API returns it: the row, plus what the runner checks at start."
+      },
+      "AgentRow": {
+        "description": "A stored agent definition and where it is registered.",
+        "properties": {
+          "created_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "definition": {
+            "description": "The definition as the UI stores it.",
+            "type": "object"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "external_id": {
+            "$ref": "#/components/schemas/Id"
+          },
+          "flow_id": {
+            "description": "The flow the agent runs as, once registered.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "source": {
+            "description": "`ui`; `code` is reserved for agents declared in modules.",
+            "type": "string"
+          },
+          "updated_at": {
+            "$ref": "#/components/schemas/i64"
+          }
+        },
+        "required": [
+          "id",
+          "external_id",
+          "project",
+          "name",
+          "source",
+          "enabled",
+          "definition",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ApprovalBody": {
+        "properties": {
+          "args": {
+            "type": "object"
+          },
+          "run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool"
+        ],
+        "type": "object"
+      },
+      "ApprovalRow": {
+        "description": "A tool call approved with \"always allow\": matched by tool and argument hash.",
+        "properties": {
+          "agent_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "args": {
+            "type": "object"
+          },
+          "args_hash": {
+            "type": "string"
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/i64"
+          },
+          "first_run_id": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agent_id",
+          "tool",
+          "args_hash",
+          "args",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "ArtifactBody": {
         "properties": {
           "data": {
@@ -2090,6 +2313,39 @@
         ],
         "type": "object"
       },
+      "Limits": {
+        "properties": {
+          "cost_usd": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "requests": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "timeout_seconds": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "tokens": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "LocalPathBody": {
         "properties": {
           "path": {
@@ -2200,6 +2456,17 @@
         ],
         "type": "object"
       },
+      "Output": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "object"
+          }
+        },
+        "type": "object"
+      },
       "Pause": {
         "description": "The global pause: every schedule held at once, with a reason and an end.",
         "properties": {
@@ -2294,6 +2561,20 @@
           "flow",
           "project"
         ],
+        "type": "object"
+      },
+      "Policy": {
+        "properties": {
+          "approvals": {
+            "type": "string"
+          },
+          "once": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
         "type": "object"
       },
       "PrefilterBody": {
@@ -4232,6 +4513,10 @@
             "description": "Bound beyond loopback with no token required.",
             "type": "boolean"
           },
+          "features": {
+            "description": "What this host can run beyond flows: `pydantic_ai` is the extra's version, or null.",
+            "type": "object"
+          },
           "home": {
             "type": "string"
           },
@@ -4301,7 +4586,8 @@
           "queued",
           "stream_seq",
           "auth",
-          "exposed"
+          "exposed",
+          "features"
         ],
         "type": "object"
       },
@@ -5120,6 +5406,24 @@
         ],
         "type": "object"
       },
+      "ToolSpec": {
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
       "TransitionBody": {
         "properties": {
           "details": {
@@ -5278,6 +5582,28 @@
           }
         ],
         "description": "A materialized run in the upcoming list."
+      },
+      "Usage24h": {
+        "properties": {
+          "cost_usd": {
+            "format": "double",
+            "type": "number"
+          },
+          "runs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runs",
+          "tokens",
+          "cost_usd"
+        ],
+        "type": "object"
       },
       "ValueDiff": {
         "properties": {
@@ -5738,6 +6064,299 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/agents": {
+      "get": {
+        "operationId": "list_agents",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AgentResponse"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      },
+      "post": {
+        "operationId": "create_agent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentDefinition"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/catalogue": {
+      "get": {
+        "operationId": "catalogue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "What agents on this server may be given"
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{id}": {
+      "delete": {
+        "operationId": "delete_agent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      },
+      "get": {
+        "operationId": "get_agent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_agent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentDefinition"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          },
+          "422": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{id}/approvals": {
+      "get": {
+        "operationId": "list_approvals",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApprovalRow"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      },
+      "post": {
+        "operationId": "add_approval",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalRow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/agents/{id}/approvals/{aid}": {
+      "delete": {
+        "operationId": "delete_approval",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "aid",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "agents"
+        ]
+      }
+    },
     "/api/artifacts": {
       "get": {
         "operationId": "list_artifacts",

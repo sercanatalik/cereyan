@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { api, unwrap } from "@/api/client";
 import { ScopePicker } from "@/components/scope-sidebar";
+import { useAgents, useAgentsSupported } from "@/lib/agents";
 import { isActive, NAV_GROUPS, type NavItem } from "@/lib/nav";
 import { useProject } from "@/lib/project";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,13 @@ function FlowCount() {
   return <span className="font-mono text-xs text-muted-foreground">{n}</span>;
 }
 
+/** How many agents exist, beside the Agents entry. */
+function AgentCount() {
+  const agents = useAgents();
+  if (!agents.data?.length) return null;
+  return <span className="font-mono text-xs text-muted-foreground">{agents.data.length}</span>;
+}
+
 function Entry({ item, active }: { item: NavItem; active: boolean }) {
   return (
     <Link
@@ -55,6 +63,7 @@ function Entry({ item, active }: { item: NavItem; active: boolean }) {
       <span className="flex-1">{item.label}</span>
       {item.label === "Queue" ? <QueueBadge /> : null}
       {item.label === "Flows" ? <FlowCount /> : null}
+      {item.label === "Agents" ? <AgentCount /> : null}
     </Link>
   );
 }
@@ -66,6 +75,7 @@ function Entry({ item, active }: { item: NavItem; active: boolean }) {
 export function NavSidebar({ scoped }: { scoped: boolean }) {
   const location = useRouterState({ select: (s) => s.location });
   const search = (location.search ?? {}) as Record<string, unknown>;
+  const agents = useAgentsSupported();
   return (
     <aside
       aria-label="Sidebar"
@@ -77,9 +87,11 @@ export function NavSidebar({ scoped }: { scoped: boolean }) {
         {NAV_GROUPS.map((group) => (
           <div key={group.label} className="flex flex-col gap-0.5">
             <div className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">{group.label}</div>
-            {group.items.map((item) => (
-              <Entry key={item.label} item={item} active={isActive(item, location.pathname, search)} />
-            ))}
+            {group.items
+              .filter((item) => item.label !== "Agents" || agents)
+              .map((item) => (
+                <Entry key={item.label} item={item} active={isActive(item, location.pathname, search)} />
+              ))}
           </div>
         ))}
       </nav>

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import inspect
+import json
 from collections.abc import Awaitable, Callable, Mapping
 
 from pydantic_ai.durable_exec import (
     DurableOperationId,
     JournalCallableOperationBackend,
+    ModelRequestId,
     RoleBasedOperationConfig,
     ToolsetCallToolId,
 )
+
+from .. import masking
 
 from .. import context
 from ..effects import NOT_DONE
@@ -40,6 +44,7 @@ class CereyanOperationBackend(JournalCallableOperationBackend[None]):
     def __init__(self, *, agent_name: str, default_model_id: str | None,
                  once_tools: Mapping[str, Callable | None] | None = None) -> None:
         super().__init__(agent_name=agent_name, default_model_id=default_model_id, config=_NO_CONFIG)
+        self.agent_name = agent_name
         self.once_tools = dict(once_tools or {})
 
     async def execute(
@@ -73,8 +78,60 @@ class CereyanOperationBackend(JournalCallableOperationBackend[None]):
             checked,
             input_hash=input_hash(operation_id, name, cache_key),
             serializer="json",
+            summarize=lambda result: summarize(self.agent_name, operation_id, cache_key, result),
             **once,
         )
+
+
+#: How much of a text or a result a summary keeps.
+PREVIEW = 500
+
+
+def _preview(value: object) -> str:
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    text = masking.mask(text) if masking.active() else text
+    return text if len(text) <= PREVIEW else text[:PREVIEW] + "…"
+
+
+def _jsonable(value: object) -> object:
+    try:
+        from pydantic_core import to_jsonable_python
+
+        return to_jsonable_python(value, fallback=repr)
+    except Exception:  # noqa: BLE001
+        return repr(value)
+
+
+def summarize(agent_name: str, operation_id: DurableOperationId, cache_key: tuple[object, ...], result: object) -> dict | None:
+    """What a unit did, in a shape the UI can show: the same on every Pydantic AI version."""
+    if isinstance(operation_id, ModelRequestId):
+        model_id = cache_key[0] if cache_key else None
+        payload = result if isinstance(result, dict) else _jsonable(result)
+        parts = payload.get("parts", []) if isinstance(payload, dict) else []
+        text = "\n".join(str(p.get("content", "")) for p in parts if isinstance(p, dict) and p.get("part_kind") == "text")
+        calls = [{"tool": p.get("tool_name"), "args": _jsonable(p.get("args"))}
+                 for p in parts if isinstance(p, dict) and p.get("part_kind") == "tool-call"]
+        usage = payload.get("usage", {}) if isinstance(payload, dict) else {}
+        return {
+            "kind": "model",
+            "agent": agent_name,
+            "model": str(model_id) if model_id is not None else payload.get("model_name") if isinstance(payload, dict) else None,
+            "usage": {"input": int(usage.get("input_tokens") or 0), "output": int(usage.get("output_tokens") or 0)},
+            "text": _preview(text),
+            "tool_calls": [{"tool": c["tool"], "args": json.loads(_preview(c["args"])) if isinstance(c["args"], dict) and len(json.dumps(c["args"], default=str)) <= PREVIEW else _preview(c["args"])} for c in calls],
+        }
+    if isinstance(operation_id, ToolsetCallToolId):
+        tool_name, args, *_ = cache_key
+        payload = result if isinstance(result, dict) else {}
+        return {
+            "kind": "tool",
+            "agent": agent_name,
+            "tool": str(tool_name),
+            "args": _jsonable(args) if len(json.dumps(_jsonable(args), default=str)) <= PREVIEW else _preview(_jsonable(args)),
+            "result": _preview(payload.get("result", payload)),
+            "result_kind": payload.get("kind"),
+        }
+    return None
 
 
 def _probe(probe: Callable | None, args: dict):

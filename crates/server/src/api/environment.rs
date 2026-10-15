@@ -206,6 +206,19 @@ fn configuration(state: &AppState) -> Vec<ConfigEntry> {
     push("server", "mcp_read_only", json!(c.mcp_read_only), false);
     push("server", "metrics_public", json!(c.metrics_public), false);
     push("server", "public_url", json!(c.public_url), false);
+    push(
+        "agents",
+        "mcp_commands",
+        json!(c.agents.mcp_commands),
+        false,
+    );
+    push("agents", "mcp_urls", json!(c.agents.mcp_urls), false);
+    push(
+        "agents",
+        "cost_per_day",
+        json!(c.agents.cost_per_day),
+        false,
+    );
     push("defaults", "catchup", json!(c.catchup_default), false);
     push(
         "defaults",

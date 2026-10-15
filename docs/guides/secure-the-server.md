@@ -104,4 +104,4 @@ That includes the Settings page's Environment tab, which lists the server's sett
 
 Routes registered with `@app.get` and friends under `/api/` are behind the token like the built-in API; routes outside `/api/` are open unless `auth_scope = "all"`, which needs the authenticator. Put anything that changes state under `/api/`.
 
-Related: [Configuration](../reference/configuration.md), [Use cereyan with an AI agent](agents.md).
+Related: [Configuration](../reference/configuration.md), [Use cereyan with an AI agent](ai-assistants.md).

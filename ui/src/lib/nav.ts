@@ -1,6 +1,7 @@
 import {
   Activity,
   Bell,
+  Bot,
   Boxes,
   GitBranch,
   LayoutDashboard,
@@ -34,6 +35,8 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Build",
     items: [
       { to: "/flows", label: "Flows", icon: GitBranch },
+      // Shown only when a host can run agents or one exists; see `NavSidebar`.
+      { to: "/agents", label: "Agents", icon: Bot },
       { to: "/variables", label: "Variables", icon: Variable },
       { to: "/rules", label: "Rules", icon: Bell },
     ],

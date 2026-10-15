@@ -56,7 +56,10 @@ pub struct WorkerRegistration {
 }
 
 impl Store {
-    fn exec(&self, f: impl FnOnce(&Connection) -> Result<Value> + Send + 'static) -> Result<Value> {
+    pub(crate) fn exec(
+        &self,
+        f: impl FnOnce(&Connection) -> Result<Value> + Send + 'static,
+    ) -> Result<Value> {
         self.write(|reply| WriteCommand::Exec(Box::new(f), reply))
     }
 

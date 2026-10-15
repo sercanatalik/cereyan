@@ -47,6 +47,7 @@ KNOWN_KEYS = {
     "email": {"host", "port", "tls", "username", "password", "from"},
     "ui": {"title"},
     "worker": {"host", "name", "processors", "labels", "shared_paths", "token_file", "status_host", "status_port"},
+    "agents": {"mcp_commands", "mcp_urls", "cost_per_day"},
 }
 
 
@@ -98,6 +99,28 @@ def resource_totals(directory: str) -> dict[str, float]:
 def defaults(directory: str) -> dict:
     """The ``[defaults]`` table (crash_retries)."""
     return dict(load_project_config(directory).get("defaults", {}))
+
+
+def agents_settings(directory: str) -> dict:
+    """The ``[agents]`` table: what a UI-defined agent may start or reach, and the daily cost cap.
+
+    Absent lists allow nothing from the UI; ``cost_per_day`` of 0 means no cap.
+    """
+    table = load_project_config(directory).get("agents", {}) or {}
+    out = {"mcp_commands": [], "mcp_urls": [], "cost_per_day": 0.0}
+    for key in ("mcp_commands", "mcp_urls"):
+        value = table.get(key, [])
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise ConfigError(f"[agents] {key} must be a list of strings")
+        out[key] = list(value)
+    cap = table.get("cost_per_day", 0.0)
+    try:
+        out["cost_per_day"] = float(cap)
+    except (TypeError, ValueError):
+        raise ConfigError("[agents] cost_per_day must be a number") from None
+    if out["cost_per_day"] < 0:
+        raise ConfigError("[agents] cost_per_day must be zero or more")
+    return out
 
 
 def ui_title(directory: str) -> str | None:

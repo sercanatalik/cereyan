@@ -4,6 +4,7 @@ import { CircleAlert, MoreHorizontal, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Run, type TaskRun, unwrap } from "@/api/client";
 import { ArtifactsTab } from "@/components/artifacts";
+import { Conversation, hasConversation } from "@/components/conversation";
 import { JsonView } from "@/components/json-view";
 import { KeyValueList } from "@/components/key-value-list";
 import { PausedBanner } from "@/components/paused-banner";
@@ -454,6 +455,9 @@ function RunDetail() {
             items={[
               { value: "logs", label: label("Logs", logLines.data?.length) },
               { value: "timeline", label: label("Timeline", visibleTasks.length || undefined) },
+              ...(hasConversation(tasks.data ?? [])
+                ? [{ value: "conversation", label: "Conversation" }]
+                : []),
               { value: "artifacts", label: label("Artifacts", artifactCount) },
               { value: "parameters", label: label("Parameters", paramCount || undefined) },
               { value: "details", label: "Details" },
@@ -479,6 +483,9 @@ function RunDetail() {
               ) : (
                 <div className="text-muted-foreground">Loading</div>
               )
+            ) : null}
+            {tab === "conversation" ? (
+              <Conversation run={r} tasks={tasks.data ?? []} onResumed={() => run.refetch()} />
             ) : null}
             {tab === "artifacts" ? <ArtifactsTab runId={id} /> : null}
             {tab === "parameters" ? <JsonView value={r.parameters} /> : null}

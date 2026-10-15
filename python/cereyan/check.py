@@ -138,7 +138,8 @@ def check_directory(directory: str, now: datetime | str | None = None) -> dict[s
     the store or writes to the runtime home.
     """
     from . import engine
-    from .serve import discover_modules, import_modules
+    from .config import load_project_config
+    from .serve import discover_modules, host_features, import_modules
 
     directory = os.path.abspath(directory)
     if not os.path.isdir(directory):
@@ -156,6 +157,16 @@ def check_directory(directory: str, now: datetime | str | None = None) -> dict[s
     failed = {name for name, _ in failures}
     for name, tb in failures:
         findings.append(_finding("error", "import", _last_line(tb), module=name, detail=tb))
+
+    # Agents are defined on the server, not in modules; what the check can see here
+    # is whether this host could run them at all.
+    agents_table = load_project_config(directory).get("agents")
+    if agents_table and not host_features().get("pydantic_ai"):
+        findings.append(_finding(
+            "warning", "agents",
+            "cereyan.toml has an [agents] table but this host lacks the pydantic-ai extra, so agents cannot run here: "
+            'pip install "cereyan[pydantic-ai]"',
+        ))
 
     registered = [a for a in apps.all_apps() if id(a) not in known_apps] or apps.all_apps()
     flows = [f for app in registered for f in app.flows.values()]

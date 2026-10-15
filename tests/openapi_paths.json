@@ -1,4 +1,9 @@
 [
+  "/api/agents",
+  "/api/agents/catalogue",
+  "/api/agents/{id}",
+  "/api/agents/{id}/approvals",
+  "/api/agents/{id}/approvals/{aid}",
   "/api/artifacts",
   "/api/backfills/{id}",
   "/api/backfills/{id}/cancel",

@@ -79,4 +79,4 @@ Each `receive` call in a flow pauses in turn, and a flow can receive, resume, an
 
 Without a server, `receive("input", ...)` reads from the terminal as `wait_for_input` does, and any other topic raises `CereyanError`, so a script under cron fails fast instead of hanging.
 
-Related: [Pause a run for approval](human-approval.md), [Wait without holding an engine](wait-durably.md), [Use cereyan with an AI agent](agents.md).
+Related: [Pause a run for approval](human-approval.md), [Wait without holding an engine](wait-durably.md), [Use cereyan with an AI agent](ai-assistants.md).

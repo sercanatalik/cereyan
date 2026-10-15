@@ -56,7 +56,7 @@ Every page ends with a `Related:` line linking two or three neighbours. Every ha
 
 ## Vocabulary
 
-App, flow, task, run, task run, state, schedule, parameter, target, resource, backfill, artifact, variable, event, rule. State types: Scheduled, Pending, Running, Completed, Failed, Cancelled, Crashed, Paused, Cancelling. Named sub-states: Late, AwaitingRetry, Retrying, TimedOut, Cached, Skipped.
+App, flow, task, run, task run, state, schedule, parameter, target, resource, backfill, artifact, variable, event, rule, agent (a flow defined by a model, instructions, tools and a policy; an AI assistant that operates cereyan over MCP is an "assistant"). State types: Scheduled, Pending, Running, Completed, Failed, Cancelled, Crashed, Paused, Cancelling. Named sub-states: Late, AwaitingRetry, Retrying, TimedOut, Cached, Skipped.
 
 Never write "deployment", "job", "DAG", or "workflow" for a flow. 
 

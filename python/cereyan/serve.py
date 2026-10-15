@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from . import _core, apps, engine
 from .config import defaults as project_defaults
-from .config import email_settings, resource_totals, server_settings, ui_title
+from .config import agents_settings, email_settings, load_project_config, resource_totals, server_settings, ui_title
 from .rules import dispatch as rule_dispatch
 from .rules import register_with_store as register_code_rules
 from .exceptions import CereyanError
@@ -459,7 +459,32 @@ def _file_sources(directory: str, settings: dict, toml_defaults: dict) -> dict[s
         out[f"resources.{key}"] = _source("toml", f"[resources] {key}")
     for key in email_settings(directory) or {}:
         out[f"email.{key}"] = _source("toml", f"[email] {key}")
+    agents_table = load_project_config(directory).get("agents", {}) or {}
+    for key in ("mcp_commands", "mcp_urls", "cost_per_day"):
+        out[f"agents.{key}"] = from_file("agents", key, key in agents_table)
     return out
+
+
+def host_features() -> dict:
+    """What this host can run beyond flows: the Pydantic AI version, or null."""
+    try:
+        import pydantic_ai  # noqa: PLC0415
+
+        import pydantic_ai.durable_exec  # noqa: F401, PLC0415
+
+        return {"pydantic_ai": pydantic_ai.__version__}
+    except Exception:  # noqa: BLE001 - the extra is optional
+        return {"pydantic_ai": None}
+
+
+def _agent_catalogue() -> dict:
+    try:
+        from .pydantic_ai import catalogue  # noqa: PLC0415
+
+        return catalogue.describe()
+    except Exception:  # noqa: BLE001 - without the extra the catalogue is empty
+        return {"installed": False, "version": None, "capabilities": [], "common": [],
+                "mcp": {"ready": False, "needs": ["package:cereyan[pydantic-ai]"]}, "providers": []}
 
 
 def _qualname(fn) -> str:
@@ -645,6 +670,9 @@ def serve(directory: str | None = None, *, host: str | None = None, port: int | 
         "metrics_public": resolved_metrics_public,
         "public_url": resolved_public_url,
         "open_browser": bool(should_open),
+        "agents": agents_settings(directory),
+        "agent_catalogue": _agent_catalogue(),
+        "features": host_features(),
         "sources": sources,
         "python_version": platform.python_version(),
         "platform": f"{platform.system().lower()} {platform.machine()}",

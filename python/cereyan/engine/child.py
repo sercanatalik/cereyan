@@ -33,6 +33,24 @@ def _find_flow(project: str, name: str):
     return None
 
 
+def _agent_flow(client: _core.Client, work: dict) -> tuple[Any, str | None]:
+    """The built-in runner's flow for a UI-defined agent, built from its stored
+    definition, or the reason there is none."""
+    agent_id = (work.get("options") or {}).get("agent_id")
+    status, text = client.get(f"/api/agents/{agent_id}")
+    if status >= 300 or not text:
+        return None, f"agent {agent_id} could not be read ({status}): {text}"
+    try:
+        from ..pydantic_ai.runner import agent_flow
+    except ImportError as exc:
+        return None, f"agents need the pydantic-ai extra on this host: {exc}"
+    data = json.loads(text)
+    try:
+        return agent_flow({**data["definition"], "id": data["id"]}), None
+    except Exception as exc:  # noqa: BLE001 - a bad definition fails the run, not the engine
+        return None, f"agent {agent_id} cannot be built: {type(exc).__name__}: {exc}"
+
+
 class _CancelWatcher(threading.Thread):
     """Interrupts the main thread when the server asks for a cancel."""
 
@@ -115,14 +133,16 @@ def execute_work(client: _core.Client, work: dict, module) -> None:
     run_id = int(work["run_id"])
     backend = ReporterBackend(client, run_id, int(work.get("report_seq") or 0), work.get("checkpoints") or [],
                               work.get("effects") or [], work.get("lineage"), work.get("in_doubt") or [])
-    flow = _find_flow(work["project"], work["flow"])
+    if (work.get("options") or {}).get("agent"):
+        flow, missing = _agent_flow(client, work)
+    else:
+        flow = _find_flow(work["project"], work["flow"])
+        missing = f"flow {work['project']}/{work['flow']} is not defined in module {module.__name__}"
     try:
         if flow is None:
             backend.transition_run("Pending")
             backend.transition_run("Running")
-            backend.transition_run(
-                "Failed", None, f"flow {work['project']}/{work['flow']} is not defined in module {module.__name__}", None
-            )
+            backend.transition_run("Failed", None, missing, None)
             return
         try:
             values = flow.coerce(dict(work.get("parameters") or {}))

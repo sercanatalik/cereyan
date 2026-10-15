@@ -1,6 +1,6 @@
 # MCP tools, resources and prompts
 
-The server implements the [Model Context Protocol](https://modelcontextprotocol.io) (JSON-RPC 2.0) so an agent can operate cereyan. The tool set is curated rather than a mirror of the HTTP API. Definitions live in `crates/server/src/mcp.rs`; this page is generated from a snapshot of what a client actually receives. Setup for Claude Code, Claude Desktop, and HTTP clients is in [Use cereyan with an AI agent](../guides/agents.md).
+The server implements the [Model Context Protocol](https://modelcontextprotocol.io) (JSON-RPC 2.0) so an agent can operate cereyan. The tool set is curated rather than a mirror of the HTTP API. Definitions live in `crates/server/src/mcp.rs`; this page is generated from a snapshot of what a client actually receives. Setup for Claude Code, Claude Desktop, and HTTP clients is in [Use cereyan with an AI agent](../guides/ai-assistants.md).
 
 ## Transports
 

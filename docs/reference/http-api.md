@@ -953,6 +953,99 @@ A run on a worker used a `LocalTarget` outside the worker's shared paths.
 
 ## Other
 
+### `GET /api/agents`
+
+| Status | Body |
+|---|---|
+| 200 | [`AgentResponse`](#agentresponse)[] (application/json) |
+
+### `POST /api/agents`
+
+**Request body** (application/json): [`AgentDefinition`](#agentdefinition)
+
+| Status | Body |
+|---|---|
+| 201 | [`AgentResponse`](#agentresponse) (application/json) |
+| 422 | no body |
+
+### `GET /api/agents/catalogue`
+
+| Status | Body |
+|---|---|
+| 200 | object (application/json) |
+
+### `GET /api/agents/{id}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+| Status | Body |
+|---|---|
+| 200 | [`AgentResponse`](#agentresponse) (application/json) |
+| 404 | no body |
+
+### `PATCH /api/agents/{id}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+**Request body** (application/json): [`AgentDefinition`](#agentdefinition)
+
+| Status | Body |
+|---|---|
+| 200 | [`AgentResponse`](#agentresponse) (application/json) |
+| 404 | no body |
+| 422 | no body |
+
+### `DELETE /api/agents/{id}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+| Status | Body |
+|---|---|
+| 204 | no body |
+| 404 | no body |
+
+### `GET /api/agents/{id}/approvals`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+| Status | Body |
+|---|---|
+| 200 | [`ApprovalRow`](#approvalrow)[] (application/json) |
+| 404 | no body |
+
+### `POST /api/agents/{id}/approvals`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+
+**Request body** (application/json): [`ApprovalBody`](#approvalbody)
+
+| Status | Body |
+|---|---|
+| 201 | [`ApprovalRow`](#approvalrow) (application/json) |
+| 404 | no body |
+
+### `DELETE /api/agents/{id}/approvals/{aid}`
+
+| Parameter | In | Type | Required | Description |
+|---|---|---|---|---|
+| `id` | path | integer (int64) | yes |  |
+| `aid` | path | integer (int64) | yes |  |
+
+| Status | Body |
+|---|---|
+| 204 | no body |
+| 404 | no body |
+
 ### `GET /api/database`
 
 | Status | Body |
@@ -1200,6 +1293,72 @@ calling this.
 | `flows` | array of string | no | Every upstream; empty for rows written before fan-in existed. |
 | `key` | string or null | no | Parameter that identifies a batch: the downstream runs once per value. |
 | `parameters` | object | no |  |
+
+### `AgentDefinition`
+
+What the UI stores for an agent and the runner builds from.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `api_key` | string or null | no | A secret Variable's name; never the key itself. |
+| `crash_retries` | integer (int64) | no |  |
+| `description` | string | no |  |
+| `enabled` | boolean | no |  |
+| `group` | string or null | no |  |
+| `instructions` | string | no |  |
+| `limits` | [`Limits`](#limits) | no |  |
+| `model` | string | yes |  |
+| `name` | string | yes |  |
+| `output` | [`Output`](#output) | no |  |
+| `policy` | [`Policy`](#policy) | no |  |
+| `project` | string | no |  |
+| `prompt` | string | no |  |
+| `tools` | [`ToolSpec`](#toolspec)[] | no |  |
+
+### `AgentResponse`
+
+An agent as the API returns it: the row, plus what the runner checks at start.
+
+Type: any.
+
+### `AgentRow`
+
+A stored agent definition and where it is registered.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `created_at` | [`i64`](#i64) | yes |  |
+| `definition` | object | yes | The definition as the UI stores it. |
+| `enabled` | boolean | yes |  |
+| `external_id` | [`Id`](#id) | yes |  |
+| `flow_id` | integer or null (int64) | no | The flow the agent runs as, once registered. |
+| `id` | integer (int64) | yes |  |
+| `name` | string | yes |  |
+| `project` | string | yes |  |
+| `source` | string | yes | `ui`; `code` is reserved for agents declared in modules. |
+| `updated_at` | [`i64`](#i64) | yes |  |
+
+### `ApprovalBody`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `args` | object | no |  |
+| `run_id` | integer or null (int64) | no |  |
+| `tool` | string | yes |  |
+
+### `ApprovalRow`
+
+A tool call approved with "always allow": matched by tool and argument hash.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `agent_id` | integer (int64) | yes |  |
+| `args` | object | yes |  |
+| `args_hash` | string | yes |  |
+| `created_at` | [`i64`](#i64) | yes |  |
+| `first_run_id` | integer or null (int64) | no |  |
+| `id` | integer (int64) | yes |  |
+| `tool` | string | yes |  |
 
 ### `ArtifactBody`
 
@@ -1759,6 +1918,15 @@ Type: string.
 | `run_name` | string | yes |  |
 | `schedule_id` | integer or null (int64) | no | The schedule that made the run, when one did. |
 
+### `Limits`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cost_usd` | number or null (double) | no |  |
+| `requests` | integer or null (int64) | no |  |
+| `timeout_seconds` | number or null (double) | no |  |
+| `tokens` | integer or null (int64) | no |  |
+
 ### `LocalPathBody`
 
 | Field | Type | Required | Description |
@@ -1798,6 +1966,13 @@ Type: string.
 | `interval_secs` | integer (int64) | yes |  |
 | `samples` | [`Sample`](#sample)[] | yes |  |
 
+### `Output`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | string | no |  |
+| `schema` | object | no |  |
+
 ### `Pause`
 
 The global pause: every schedule held at once, with a reason and an end.
@@ -1828,6 +2003,13 @@ A continuous schedule that is paused: its loop has no run waiting.
 | `reason` | string or null | no | `paused` by a person, or `disabled` by the flow's `disable_after`. |
 | `schedule_id` | integer (int64) | yes |  |
 | `until` | integer or null (int64) | no | When a `disabled` loop resumes on its own, microseconds since the epoch. |
+
+### `Policy`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `approvals` | string | no |  |
+| `once` | array of string | no |  |
 
 ### `PrefilterBody`
 
@@ -2279,6 +2461,7 @@ A stored schedule row: the schedule itself plus policy and bookkeeping.
 | `base_path` | string | yes | URL path every TCP route is served under; empty at the root. |
 | `engines` | array of any | yes |  |
 | `exposed` | boolean | yes | Bound beyond loopback with no token required. |
+| `features` | object | yes | What this host can run beyond flows: `pydantic_ai` is the extra's version, or null. |
 | `home` | string | yes |  |
 | `paused` | null or [`Pause`](#pause) | no |  |
 | `pid` | integer (int32) | yes |  |
@@ -2503,6 +2686,14 @@ One run on a processor lane.
 | `start` | integer or null (int64) | no |  |
 | `state` | string or null | no | The run's state type; `null` for a run not started yet. |
 
+### `ToolSpec`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `kind` | string | yes |  |
+| `name` | string | yes |  |
+| `options` | object | no |  |
+
 ### `TransitionBody`
 
 | Field | Type | Required | Description |
@@ -2545,6 +2736,14 @@ One of: [`UpcomingRun`](#upcomingrun), [`ProjectedFire`](#projectedfire).
 A materialized run in the upcoming list.
 
 Type: any.
+
+### `Usage24h`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cost_usd` | number (double) | yes |  |
+| `runs` | integer (int64) | yes |  |
+| `tokens` | integer (int64) | yes |  |
 
 ### `ValueDiff`
 

@@ -292,6 +292,10 @@ class Worker:
     def register(self) -> None:
         status_url = self.status_server.url if self.status_server is not None else None
         self.meta = host_meta(self.directory, self.host, started_at=self.started_at, status_url=status_url)
+        # What this host can run beyond flows, for the server's catalogue and `runs_on` checks.
+        from .serve import host_features
+
+        self.meta["features"] = host_features()
         body = {
             "name": self.name,
             "version": __version__,
